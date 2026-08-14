@@ -28,7 +28,11 @@ import fitz
 
 # ── medidas, em mm ────────────────────────────────────────────
 BOTAO = 15.0     # lado do botao no Mini MK3 (~1,5 cm, medido no aparelho)
-FOLGA = 0.7      # a etiqueta sai menor que o botao pra nao sobrar aba
+# A etiqueta sai menor que o botao pra nao sobrar aba. Era 0.7 (etiqueta de
+# 14.3 mm) e foi pra 1.7 em 14/08/2026, depois de colar as primeiras: 13.3 mm
+# assenta melhor. O ajuste e AQUI e nao no BOTAO - aquele numero e o aparelho
+# medido, um fato; este e a nossa margem, uma escolha.
+FOLGA = 1.7
 LADO  = BOTAO - FOLGA
 RAIO  = 2.0      # cantos arredondados, como os do botao
 VAO   = 4.5      # branco entre etiquetas, pra ter onde passar a tesoura

@@ -1144,7 +1144,8 @@ precedência de cor, wrap do playhead, lote de SysEx de LED, desenhos, ondinha) 
    que precisa de tamanho certo. Um guarda no script recusa gerar se o desenho
    esticado estourar o A4. Só falta imprimir e conferir a régua de 100 mm.
    A geometria deixou de ser risco: os botões de borda do Mini MK3 são **quadrados
-   de ~15 mm** (medido no aparelho, 13/08) e a etiqueta vai **por cima** deles, não
+   de ~15 mm** (medido no aparelho, 13/08) e a etiqueta sai a **13,3 mm** (folga de
+   1,7 mm, ajustada em 14/08 depois de colar as primeiras) indo **por cima** deles, não
    ao lado — então passo entre botões e distância até a borda não importam mais.
    A primeira versão eram tiras em L com furos redondos, medindo o bezel inteiro a
    partir da spec de 181 mm; virou lixo assim que se soube a forma e a ideia.
