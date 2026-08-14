@@ -4,9 +4,6 @@
 TR-8S_*.pdf
 TR_Editor_*.pdf
 
-# Residuo de uma versao antiga do gerador; o arquivo bom e o adesivo.pdf
-adesivo_atualizado.pdf
-
 __pycache__/
 *.pyc
 .DS_Store
