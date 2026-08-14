@@ -54,6 +54,7 @@ export PYTHONPATH=~/Library/Python/3.9/lib/python/site-packages
 python3 lp_tr8s.py ports    # lista as portas MIDI com indice
 python3 lp_tr8s.py learn    # descobre esquerdo/direito e a rotacao de cada um
 python3 lp_tr8s.py run      # o grid ao vivo
+python3 lp_tr8s.py standby  # so as ondas coloridas; nem precisa da TR-8S ligada
 ```
 
 `python3 criar_app.py` monta um **`TR-8S Grid.app`** no Desktop, com janela e ícone, no
@@ -88,7 +89,7 @@ ocorrência, então os dois Launchpad viram um só. Por isso a enumeração e a 
 | Arquivo | O que é |
 |---|---|
 | `lp_tr8s.py` | O motor e a CLI: launchpads, SysEx, grid ao vivo |
-| `gui.py` | Janela: ON/off, status, grid, pattern, last steps |
+| `gui.py` | Janela: ON/off/standby, status, grid, pattern, last steps |
 | `criar_app.py` | Monta o `.app` do Desktop |
 | `apc_tr8s.py` | Versão anterior, para APC40 mkII — funcionando |
 | `tr8s_sysex.py` | Parser/diff de capturas do MIDI Monitor |

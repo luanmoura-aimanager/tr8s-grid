@@ -2,15 +2,18 @@
 """
 gui.py - janela do TR-8S Grid.
 
-Abre compacta: status das portas, o ON/OFF, e quatro secoes fechadas que voce
+Abre compacta: status das portas, os modos, e quatro secoes fechadas que voce
 abre quando precisa. Rode o criar_app.py pra ter um icone no Desktop em vez de
 digitar isto.
 
-Dois modos, exclusivos entre si:
-    ON    o grid escreve na TR-8S (precisa da porta CTRL)
-    off   LEDs apagados; os pads so fazem ondinha
+Tres modos, exclusivos entre si:
+    ON        o grid escreve na TR-8S (precisa da porta CTRL)
+    off       LEDs apagados; os pads so fazem ondinha
+    standby   ondas coloridas nascendo sozinhas, em dois estilos:
+              'standby' = chuva (variada e rapida)   'ambiente' = lento e fraco
 
-O modo off NAO precisa da TR-8S ligada.
+So o ON precisa da TR-8S ligada. Nos outros dois, HIDE MUTED + ALT juntos nos
+pads (borda esquerda, CC 94 e 93) voltam pro ON.
 
 O motor roda numa thread propria e a janela le o estado dele a 20 fps. Isso e
 necessario, nao enfeite: trocar de variacao bloqueia ate 2 s lendo a maquina, e
@@ -24,7 +27,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import lp_tr8s as L
 
 BG, CARD, INK, MUTED, LINHA = "#141210", "#1e1b18", "#ece8e2", "#9a938a", "#33302c"
-VERDE, VERMELHO, AMARELO = "#4ade80", "#f87171", "#fbbf24"
+VERDE, VERMELHO, AMARELO, ROXO = "#4ade80", "#f87171", "#fbbf24", "#a855f7"
 
 # indice da paleta Novation -> hex, so os que o grid usa de fato
 PALETA = {0: "#1a1a1a", 1: "#3a3a3a", 3: "#ffffff", 5: "#ff3b30", 7: "#5c1512",
@@ -106,13 +109,23 @@ class App:
 
         botoes = tk.Frame(self.raiz, bg=BG)
         botoes.pack(fill="x", padx=12, pady=6)
-        self.b_on = tk.Button(botoes, text="ON", width=9, bd=0, pady=12,
+        self.b_on = tk.Button(botoes, text="ON", width=7, bd=0, pady=12,
                               font=("Helvetica", 15, "bold"),
                               command=lambda: self.trocar_modo(L.MODO_ON))
-        self.b_off = tk.Button(botoes, text="off", width=9, bd=0, pady=12,
+        self.b_off = tk.Button(botoes, text="off", width=7, bd=0, pady=12,
                                font=("Helvetica", 15),
                                command=lambda: self.trocar_modo(L.MODO_OFF))
-        for b in (self.b_on, self.b_off):
+        # os dois estilos de standby sao o MESMO modo com parametros diferentes;
+        # viraram dois botoes pra nao esconder o estilo num seletor
+        self.b_chuva = tk.Button(botoes, text="standby", width=8, bd=0, pady=12,
+                                 font=("Helvetica", 15),
+                                 command=lambda: self.trocar_modo(
+                                     L.MODO_STANDBY, L.ESTILO_CHUVA))
+        self.b_ambiente = tk.Button(botoes, text="ambiente", width=8, bd=0,
+                                    pady=12, font=("Helvetica", 15),
+                                    command=lambda: self.trocar_modo(
+                                        L.MODO_STANDBY, L.ESTILO_AMBIENTE))
+        for b in (self.b_on, self.b_off, self.b_chuva, self.b_ambiente):
             b.pack(side="left", padx=(0, 8))
             b.config(highlightthickness=0, activeforeground=INK)
 
@@ -249,10 +262,10 @@ class App:
                 time.sleep(0.5)
             time.sleep(0.003)
 
-    def trocar_modo(self, modo):
+    def trocar_modo(self, modo, estilo=None):
         if not self._garantir_motor():
             return
-        self.motor.definir_modo(modo)
+        self.motor.definir_modo(modo, estilo)
 
     def recalibrar(self):
         script = os.path.join(os.path.dirname(os.path.abspath(__file__)),
@@ -339,16 +352,19 @@ class App:
 
         self.raiz.after(50, self._laco_ui)
 
-    def _pintar_modos(self, ativo):
-        for modo, b in ((L.MODO_ON, self.b_on), (L.MODO_OFF, self.b_off)):
-            lig = modo == ativo
-            b.config(bg=(VERDE if modo == L.MODO_ON else "#6b7280")
-                     if lig else CARD,
+    def _pintar_modos(self, ativo, estilo=None):
+        for modo, est, cor, b in (
+                (L.MODO_ON,      None,             VERDE,     self.b_on),
+                (L.MODO_OFF,     None,             "#6b7280", self.b_off),
+                (L.MODO_STANDBY, L.ESTILO_CHUVA,   ROXO,      self.b_chuva),
+                (L.MODO_STANDBY, L.ESTILO_AMBIENTE, ROXO,     self.b_ambiente)):
+            lig = modo == ativo and (est is None or est == estilo)
+            b.config(bg=cor if lig else CARD,
                      fg="#0b0b0b" if lig else MUTED,
                      activebackground=LINHA)
 
     def _pintar_ui(self, e):
-        self._pintar_modos(e["modo_geral"])
+        self._pintar_modos(e["modo_geral"], e.get("estilo_standby"))
         if e["modo_geral"] == L.MODO_ON:
             mudos = [n for n, m in zip(L.INSTRUMENTOS, e["mudo"]) if m]
             vt = e.get("variacao_tocando")
@@ -362,6 +378,10 @@ class App:
                      + (("  ·  mute " + " ".join(mudos)
                          + (" (fora do grid)" if e["esconder_mudos"] else ""))
                         if mudos else "")))
+        elif e["modo_geral"] == L.MODO_STANDBY:
+            self.rotulo_estado.config(
+                text=f"standby · {e['estilo_standby']} — as ondas nascem "
+                     "sozinhas; a TR-8S não é tocada")
         else:
             self.rotulo_estado.config(
                 text="os pads só fazem ondinha — a TR-8S não é tocada")
