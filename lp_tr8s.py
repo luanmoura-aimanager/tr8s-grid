@@ -13,6 +13,7 @@ Comandos (nesta ordem, na primeira vez):
     python3 lp_tr8s.py colors    # mostra a paleta de cores nos pads
     python3 lp_tr8s.py dump      # le o pattern atual da TR-8S
     python3 lp_tr8s.py run       # o grid ao vivo
+    python3 lp_tr8s.py standby [ambiente]   # so as ondas; nao precisa da TR-8S
 
 Engenharia reversa do que ainda falta no protocolo:
     python3 lp_tr8s.py sniff             # escuta SysEx na porta CTRL
@@ -278,11 +279,28 @@ COR_FORA = (3, 3, 3)      # step alem do LAST STEP: "esse step nao existe"
 COR_MUDA_FORTE = (28, 34, 46)
 COR_MUDA_FRACA = (11, 14, 19)
 COR_MUDA_BOTAO = (34, 42, 56)   # o botao e o logo, quando ha alguem mutado
-# Ondinha do modo off
+# Ondinha do modo off: o toque no pad usa estes valores fixos, e e o unico
+# comportamento de onda que ja foi exercitado em hardware. Nao mexer sem motivo.
 ONDA_VEL     = 9.0    # celulas por segundo
 ONDA_LARGURA = 2.2    # espessura do anel, em celulas
 ONDA_ALCANCE = 15.0   # celulas ate morrer (a diagonal do 16x8 e ~17)
 ONDA_FPS     = 30
+
+# Modo standby: as mesmas ondas, mas nascendo sozinhas. Cada estilo e so uma
+# tabela de faixas (min, max) sorteadas por onda - acertar o gosto depois e
+# mexer em numero, nao em codigo. O render nao sabe que estilos existem.
+ESTILO_CHUVA, ESTILO_AMBIENTE = "chuva", "ambiente"
+STANDBY_ESTILOS = {
+    # chuva: variacao larga, uma onda a cada meio segundo mais ou menos
+    ESTILO_CHUVA:    {"intervalo": (0.35, 1.10), "vel": (6.0, 13.0),
+                      "larg": (1.4, 3.0), "alc": (9.0, 17.0),
+                      "brilho": 1.00, "fps": 30},
+    # ambiente: grandes, raras, lentas e fracas - respiracao, nao chuva. O fps
+    # menor nao e economia de estilo, e de trafego: metade dos quadros por hora.
+    ESTILO_AMBIENTE: {"intervalo": (2.50, 5.00), "vel": (1.6, 3.2),
+                      "larg": (3.5, 6.0), "alc": (14.0, 20.0),
+                      "brilho": 0.45, "fps": 15},
+}
 
 # MIDI clock: 24 pulsos por seminima -> 6 pulsos por semicolcheia (1 step)
 PULSOS_P_STEP  = 6
@@ -1276,7 +1294,7 @@ def cmd_escutar(argv):
 # de uma funcao bloqueante era impossivel. O cmd_run continua existindo e faz
 # exatamente o que fazia: instancia e chama tick() num laco.
 # ─────────────────────────────────────────────────────────────
-MODO_ON, MODO_OFF = "on", "off"
+MODO_ON, MODO_OFF, MODO_STANDBY = "on", "off", "standby"
 
 
 def carregar_estado():
@@ -1362,6 +1380,9 @@ class Motor:
         self.ondas, self.onda_suja = [], False
         self.ultimo_quadro = 0.0
         self.logo_t = {}
+        self.estilo_standby = ESTILO_CHUVA
+        self.proxima_onda = 0.0     # quando nasce a proxima onda do standby
+        self.quadro_onda = None     # ultimo quadro da ondinha, so pra janela ver
 
     # ── portas ──────────────────────────────────────────────
     def _abrir_tr8s(self):
@@ -1752,7 +1773,10 @@ class Motor:
                       for l in range(8)])
 
     def pintar(self):
-        if self.modo_geral == MODO_OFF:
+        # fora do ON o grid nao tem o que desenhar - e o fundo preto que a
+        # ondinha usa. Isso NAO e cosmetico: no standby a TR-8S pode estar
+        # desligada, e cor_do_step leria um cache vazio.
+        if self.modo_geral != MODO_ON:
             for dev in ("E", "D"):
                 enviar_cores(self.lp_out[dev],
                              [(self.nota_de(dev, l, c), COR_OFF)
@@ -1996,11 +2020,22 @@ class Motor:
                      + "  (so soa nos tones com / no nome - REFERENCIA 5.2)")
 
     # ── modos ───────────────────────────────────────────────
-    def definir_modo(self, modo):
-        """Troca entre ON e off. Devolve False se recusou."""
+    def definir_modo(self, modo, estilo=None):
+        """Troca entre ON, off e standby. Devolve False se recusou.
+
+        O 'estilo' so vale pro standby, e trocar de estilo estando ja em standby
+        precisa passar batido pelo atalho de 'mesmo modo' - senao clicar
+        'ambiente' com a chuva rodando nao faria nada."""
         with self.lock:
-            if modo == self.modo_geral:
+            trocou_estilo = (modo == MODO_STANDBY and estilo is not None
+                             and estilo != self.estilo_standby)
+            if modo == self.modo_geral and not trocou_estilo:
                 return True
+            if modo == MODO_STANDBY:
+                self.estilo_standby = estilo or self.estilo_standby
+                self.ondas, self.onda_suja = [], False
+                self.proxima_onda = 0.0        # a primeira onda nasce ja
+                self.quadro_onda = None
             if modo == MODO_ON:
                 if not self._abrir_tr8s():
                     self.log("(!) porta TR-8S CTRL nao encontrada. A maquina esta "
@@ -2019,11 +2054,13 @@ class Motor:
                 self.armado = None
             self.pintar(); self.pintar_botoes()
             self.log({MODO_ON: "ON - o grid esta escrevendo na TR-8S",
-                      MODO_OFF: "off - LEDs apagados, os pads so fazem ondinha"
+                      MODO_OFF: "off - LEDs apagados, os pads so fazem ondinha",
+                      MODO_STANDBY: f"standby ({self.estilo_standby}) - ondas "
+                                    "nascendo sozinhas; a TR-8S nao e tocada"
                       }[self.modo_geral])
             return True
 
-    # ── ondinha do modo off ─────────────────────────────────
+    # ── ondinha do modo off e do standby ────────────────────
     @staticmethod
     def _cor_aleatoria():
         h = random.random() * 6.0
@@ -2032,33 +2069,72 @@ class Motor:
                    (0, 1-f, 1), (f, 0, 1), (1, 0, 1-f)][i % 6]
         return (r * 127, g * 127, b * 127)
 
+    def _nova_onda(self, lin, col, estilo=None):
+        """Poe uma onda no grid. Cada onda carrega os proprios parametros.
+
+        Sem estilo, sao as constantes ONDA_* de sempre - o toque no modo off
+        continua identico ao que ja rodou em hardware. Com estilo, sorteia nas
+        faixas de STANDBY_ESTILOS, o que faz duas ondas nunca serem iguais."""
+        rgb = self._cor_aleatoria()
+        if estilo is None:
+            vel, larg, alc = ONDA_VEL, ONDA_LARGURA, ONDA_ALCANCE
+        else:
+            e = STANDBY_ESTILOS[estilo]
+            vel  = random.uniform(*e["vel"])
+            larg = random.uniform(*e["larg"])
+            alc  = random.uniform(*e["alc"])
+            rgb  = tuple(c * e["brilho"] for c in rgb)
+        self.ondas.append({"lin": lin, "col": col, "t0": time.time(),
+                           "rgb": rgb, "vel": vel, "larg": larg, "alc": alc})
+
+    def _fps_atual(self):
+        if self.modo_geral == MODO_STANDBY:
+            return STANDBY_ESTILOS[self.estilo_standby]["fps"]
+        return ONDA_FPS
+
+    def _semear(self):
+        """Onda automatica do standby, no ritmo do estilo."""
+        agora = time.time()
+        if agora < self.proxima_onda:
+            return
+        e = STANDBY_ESTILOS[self.estilo_standby]
+        self.proxima_onda = agora + random.uniform(*e["intervalo"])
+        self._nova_onda(random.randrange(8), random.randrange(16),
+                        self.estilo_standby)
+
     def _animar(self):
         agora = time.time()
-        if agora - self.ultimo_quadro < 1.0 / ONDA_FPS:
+        if agora - self.ultimo_quadro < 1.0 / self._fps_atual():
             return
         self.ultimo_quadro = agora
         self.ondas = [o for o in self.ondas
-                      if (agora - o["t0"]) * ONDA_VEL < ONDA_ALCANCE]
+                      if (agora - o["t0"]) * o["vel"] < o["alc"]]
         if not self.ondas:
             if self.onda_suja:            # um ultimo quadro pra apagar tudo
                 self.pintar(); self.onda_suja = False
+                self.quadro_onda = None
             return
         self.onda_suja = True
+        # o quadro e montado inteiro antes de sair: a janela le esta mesma
+        # matriz pra espelhar a animacao sem recalcular nada
+        quadro = [[(0, 0, 0)] * 16 for _ in range(8)]
         for dev, off in (("E", 0), ("D", 8)):
             pares = []
             for l in range(8):
                 for c in range(8):
                     step, r, g, b = off + c, 0.0, 0.0, 0.0
                     for o in self.ondas:
-                        vt = (agora - o["t0"]) * ONDA_VEL
+                        vt = (agora - o["t0"]) * o["vel"]
                         d = math.hypot(l - o["lin"], step - o["col"])
-                        anel = 1.0 - abs(d - vt) / ONDA_LARGURA
+                        anel = 1.0 - abs(d - vt) / o["larg"]
                         if anel <= 0: continue
-                        k = anel * (1.0 - vt / ONDA_ALCANCE)
+                        k = anel * (1.0 - vt / o["alc"])
                         r += o["rgb"][0]*k; g += o["rgb"][1]*k; b += o["rgb"][2]*k
-                    pares.append((self.nota_de(dev, l, c),
-                                  (min(127, r), min(127, g), min(127, b))))
+                    cor = (min(127, r), min(127, g), min(127, b))
+                    quadro[l][step] = cor
+                    pares.append((self.nota_de(dev, l, c), cor))
             enviar_cores(self.lp_out[dev], pares)
+        self.quadro_onda = quadro
 
     # ── laco ────────────────────────────────────────────────
     def _ler_clock(self):
@@ -2089,10 +2165,10 @@ class Motor:
                 self.pintar()
 
     def _escape(self, cc):
-        """No modo off, MUTE + WRITE juntos (os dois vizinhos do meio
-        da borda esquerda) voltam pro ON - senao nao haveria como voltar sem ir
-        ate o Mac. Sao dois porque um so dispararia sem querer no modo off, que
-        e justamente o modo em que se fica cutucando os pads."""
+        """Fora do ON (off e standby), MUTE + WRITE juntos (os dois vizinhos do
+        meio da borda esquerda) voltam pro ON - senao nao haveria como voltar sem
+        ir ate o Mac. Sao dois porque um so dispararia sem querer justamente nos
+        modos em que se fica cutucando os pads."""
         agora = self.logo_t[cc] = time.time()
         outro = ESCAPE_CHORD[1] if cc == ESCAPE_CHORD[0] else ESCAPE_CHORD[0]
         if agora - self.logo_t.get(outro, 0.0) < 0.5:
@@ -2117,13 +2193,15 @@ class Motor:
                 pos = self._decodificar(dev, msg.note)
                 if pos is None: continue
                 linha, col = pos
-                if self.modo_geral == MODO_OFF:
-                    self.ondas.append({"lin": linha, "col": off + col,
-                                       "t0": time.time(),
-                                       "rgb": self._cor_aleatoria()})
-                elif self.modo_geral == MODO_ON:
+                if self.modo_geral == MODO_ON:
                     self.alternar(linha, off + col)
                     self.pintar()
+                else:
+                    # no standby o toque entra no estilo da vez, senao um dedo
+                    # jogaria chuva no meio do ambiente
+                    self._nova_onda(linha, off + col,
+                                    self.estilo_standby
+                                    if self.modo_geral == MODO_STANDBY else None)
 
     def tick(self):
         with self.lock:
@@ -2131,7 +2209,9 @@ class Motor:
                 return
             self._ler_clock()
             self._ler_pads()
-            if self.modo_geral == MODO_OFF:
+            if self.modo_geral != MODO_ON:
+                if self.modo_geral == MODO_STANDBY:
+                    self._semear()
                 self._animar()
             elif (self.carregado and
                   time.time() - self.ultima_leitura > INTERVALO_RELEITURA):
@@ -2229,9 +2309,13 @@ class Motor:
                 "lista_visivel": self.lista_visivel(),
                 "tem_clock": self.clk is not None,
                 "tem_tr8s": self.tr_out is not None,
-                # cores ja resolvidas: a UI so traduz indice/tupla em hex
-                "pads": [[self.cor_do_step(l, s) for s in range(16)]
-                         for l in range(8)] if self.modo_geral == MODO_ON else None,
+                "estilo_standby": self.estilo_standby,
+                # cores ja resolvidas: a UI so traduz indice/tupla em hex. Fora
+                # do ON quem manda no grid e a ondinha, e o quadro dela ja esta
+                # calculado - a janela mostra a mesma animacao dos LEDs.
+                "pads": ([[self.cor_do_step(l, s) for s in range(16)]
+                          for l in range(8)] if self.modo_geral == MODO_ON
+                         else self.quadro_onda),
                 "pattern": {i: [self.ler_vel(i, s) for s in range(16)]
                             for i in self.cache} if self.carregado else {},
                 "subs": {i: [self.ler_sub(i, s) for s in range(16)]
@@ -2287,12 +2371,40 @@ Pronto.  Linhas: {m.visiveis()}{'  + ACC' if m.mostrar_acc else ''}
 
 
 
+def cmd_standby(argv):
+    """So as luzes. Nao abre a TR-8S: da pra rodar com a maquina desligada."""
+    estilo = ESTILO_AMBIENTE if "ambiente" in argv else ESTILO_CHUVA
+    cfg = carregar_layout()
+    _programmer_mode(True)
+    m = Motor(cfg)
+    m.definir_modo(MODO_STANDBY, estilo)
+    print(f"""
+standby ({estilo}) - as ondas nascem sozinhas, a TR-8S nem precisa estar ligada.
+
+  pad                   joga uma onda ali, no estilo da vez
+  MUTE + WRITE juntos   (borda esquerda) volta pro ON - precisa da porta CTRL
+  Ctrl+C                sai
+
+  estilos: 'standby' = chuva (variada e rapida)   'standby ambiente' = lento
+""")
+    try:
+        while True:
+            m.tick()
+            time.sleep(0.003)
+    except KeyboardInterrupt:
+        print("\nsaindo...")
+    finally:
+        m.fechar()
+
+
 if __name__ == "__main__":
     cmd, resto = (sys.argv[1] if len(sys.argv) > 1 else ""), sys.argv[2:]
     simples = {"ports": cmd_ports, "learn": cmd_learn, "probe": cmd_probe,
                "colors": cmd_colors, "dump": cmd_dump, "run": cmd_run}
     if cmd in simples:
         simples[cmd]()
+    elif cmd == "standby":
+        cmd_standby(resto)
     elif cmd == "snap":
         cmd_snap(resto)
     elif cmd == "sniff":

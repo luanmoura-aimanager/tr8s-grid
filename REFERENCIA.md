@@ -544,7 +544,7 @@ quando o Luan ouviu os chimbais sumirem.
 |---|---|
 | `apc_tr8s.py` | **Funcionando e testado** — APC40 mkII |
 | `lp_tr8s.py` | Dois Launchpad Mini MK3. O motor virou `class Motor`; o `run` do terminal só instancia e chama `tick()` num laço |
-| `gui.py` | Janela Tk: ON / off / ♥, status, e quatro seções expansíveis |
+| `gui.py` | Janela Tk: ON / off / standby (chuva e ambiente), status, e quatro seções expansíveis |
 | `criar_app.py` | Monta o `TR-8S Grid.app` no Desktop. Ícone desenhado em Python puro (sem PIL), `sips` + `iconutil` fazem o resto |
 | `tr8s_sysex.py` | Parser/diff de capturas do MIDI Monitor |
 | `layout.html` | Referência visual dos botões — abrir no browser |
@@ -945,20 +945,50 @@ aritmética: instrumento `I` começa no offset `I*128+8`, o que dá `11*128+8 = 
 shuffle. O do track, por ser compartilhado entre A–H, não pode estar em `20 0V`;
 o palpite é `20 00`, que a varredura do `snap` agora lê.
 
-**Dois modos gerais**, exclusivos:
+**Três modos gerais**, exclusivos:
 
 | Modo | LEDs | Pads | Precisa da TR-8S |
 |---|---|---|---|
 | `ON` | o grid | escrevem no pattern | sim |
 | `off` | apagados, ondinha ao toque | só a ondinha | **não** |
+| `standby` | ondas nascendo sozinhas | somam uma onda | **não** |
 
 O `off` **não** é o `launchpad_blackout`: apaga mas continua ouvindo os pads. Para
 soltar os aparelhos de verdade, o botão "Apagar e soltar os pads" ou o alias.
-No modo `off`, **HIDE + WRITE apertados juntos voltam para o ON** — senão não
+Fora do `ON`, **MUTE + WRITE apertados juntos voltam para o ON** — senão não
 haveria como voltar sem ir até o Mac.
 
-Houve um terceiro modo, `coração`, que desenhava `C E`/`C I` e um coração. Era
-brincadeira e foi **removido a pedido em 13/08/2026** — não reintroduzir.
+### O `standby` (14/08/2026)
+
+É a ondinha do `off` sem precisar de dedo: um semeador cria ondas em posição e cor
+aleatórias, no ritmo do estilo escolhido. **Não entra sozinho** — decisão do Luan, para
+que o `ON` nunca caísse em standby no meio de um set. Só o botão da janela ou
+`python3 lp_tr8s.py standby [ambiente]`, que nem abre a porta da TR-8S.
+
+Dois estilos, que são o **mesmo modo com outra tabela de números** (`STANDBY_ESTILOS`):
+
+| | `chuva` | `ambiente` |
+|---|---|---|
+| onda a cada | 0,35–1,1 s | 2,5–5 s |
+| velocidade | 6–13 células/s | 1,6–3,2 |
+| espessura | 1,4–3,0 | 3,5–6,0 |
+| alcance | 9–17 | 14–20 |
+| brilho | cheio | 45% |
+| quadros/s | 30 | 15 |
+
+O que mudou no código para isso caber: **cada onda passou a carregar os próprios
+parâmetros** (`vel`, `larg`, `alc`) no dicionário, em vez de todas lerem as constantes
+`ONDA_*`. O toque no modo `off` continua criando a onda **sem estilo**, isto é, com
+exatamente os valores fixos de antes — o comportamento já exercitado em hardware não
+mudou. O render (`_animar`) não sabe que estilos existem; ele só lê o que a onda traz.
+
+O `_animar` agora também guarda o quadro em `self.quadro_onda`, e o `estado()` devolve
+isso no lugar de `pads` quando está fora do `ON`: a seção "Grid 16×8" da janela mostra a
+mesma animação dos LEDs, de graça, sem recalcular nada.
+
+Isto **não** é o modo `coração` (que desenhava `C E`/`C I` e um coração, e foi removido a
+pedido em 13/08/2026 — não reintroduzir): aquele era figura fixa, este é procedural e não
+desenha nada.
 
 ## 6. Configurações da TR-8S
 
@@ -1085,9 +1115,16 @@ precedência de cor, wrap do playhead, lote de SysEx de LED, desenhos, ondinha) 
    logos, confirmado, **não enviam nada** (ver 5).
 2. ~~Fills, rajadas, RGB, ondinha~~ — **todos exercitados em 13/08/2026** e
    promovidos para "provado" na seção 3.
-3. **O `.app`** — o Dock pode mostrar "Python" em vez do nome do bundle, já que o
+3. **Quadro RGB contínuo por muito tempo** (novo em 14/08/2026, com o `standby`). A
+   ondinha já foi provada, mas em rajadas de segundos, com o dedo mandando. O standby
+   sustenta o mesmo tráfego **indefinidamente**: ~30 quadros/s × 2 mensagens SysEx de
+   ~330 bytes. Nada indica que isso seja demais para um Mini MK3 por USB, mas *nada foi
+   medido* — ninguém deixou rodando uma hora para ver se algum LED trava ou se o
+   aparelho começa a atrasar. O `fps` menor do estilo `ambiente` (15) existe como
+   válvula: se aparecer sintoma, ele é o primeiro lugar a mexer.
+4. **O `.app`** — o Dock pode mostrar "Python" em vez do nome do bundle, já que o
    executável é um shell script que dá `exec`. É cosmético; plano B é `osacompile`.
-4. **O `adesivo.pdf` impresso** — o teste saiu a **93%** (a régua de 100 mm mediu 93),
+5. **O `adesivo.pdf` impresso** — o teste saiu a **93%** (a régua de 100 mm mediu 93),
    e o teste foi feito **na impressora da própria gráfica**, que é o destino final.
    Isso importa: a compensação está calibrada contra a máquina certa, não contra uma
    intermediária. Como não dá pra contar que um balcão mude configuração de
