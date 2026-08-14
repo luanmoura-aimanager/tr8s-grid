@@ -34,7 +34,9 @@ BOTAO = 15.0     # lado do botao no Mini MK3 (~1,5 cm, medido no aparelho)
 # medido, um fato; este e a nossa margem, uma escolha.
 FOLGA = 1.7
 LADO  = BOTAO - FOLGA
-RAIO  = 2.0      # cantos arredondados, como os do botao
+# Cantos VIVOS, sem raio. Tinham 2 mm de arredondamento imitando o botao, mas o
+# que se recorta e um quadrado - o canto redondo so dava trabalho de tesoura e
+# deixava uma sobra branca visivel na quina depois de colado (14/08/2026).
 VAO   = 4.5      # branco entre etiquetas, pra ter onde passar a tesoura
 
 MM = 72 / 25.4
@@ -137,7 +139,7 @@ def etiqueta(x, y, rotulo, cor, nota=None, glifo=None):
     'glifo' = triangulo no lugar da legenda, pra rolagem de instrumento."""
     tinta = tinta_para(cor)
     pg.draw_rect(fitz.Rect(mm(x), mm(y), mm(x+LADO), mm(y+LADO)),
-                 color=None, fill=cor, radius=RAIO / LADO)
+                 color=None, fill=cor)
     linhas = rotulo.split("\n")
     if nota or glifo:                tam, dy = 8.2, 3.0
     elif len(linhas) > 1:            tam, dy = 7.0, 3.2
@@ -176,7 +178,7 @@ def etiqueta_titulo(x, y, texto, direcao):
     """Etiqueta BRANCA pro canto do logo. O logo nao e botao, entao o quadradinho
     ali nao aciona nada - vira cabecalho da fileira/coluna que comeca ao lado."""
     pg.draw_rect(fitz.Rect(mm(x), mm(y), mm(x+LADO), mm(y+LADO)),
-                 color=CORTE, fill=BRANCO, width=0.5, radius=RAIO / LADO)
+                 color=CORTE, fill=BRANCO, width=0.5)
     tam = 6.6 if len(texto) > 4 else 9.5
     _por(x, y + 3.2, LADO, 7.0, texto, tam, TINTA, True, fitz.TEXT_ALIGN_CENTER)
     triangulo(x + LADO/2, y + 10.2, 4.6, direcao, TINTA)
@@ -292,7 +294,7 @@ for ap, (nome, logo_esq) in enumerate((("LEFT · rotated 90° CCW", True),
                 cx, cy = ox + 8 * CEL, y + (k + 1) * CEL
             pg.draw_rect(fitz.Rect(mm(cx+0.4), mm(cy+0.4),
                                    mm(cx+0.4+MINI), mm(cy+0.4+MINI)),
-                         color=None, fill=cor, radius=0.25)
+                         color=None, fill=cor)
         # numero da fileira, encostado na borda que ela ocupa
         if borda == "topo":
             lx, ly = ox + LARG_AP + 1.5, y + 0.6
@@ -304,7 +306,7 @@ for ap, (nome, logo_esq) in enumerate((("LEFT · rotated 90° CCW", True),
     # o canto do logo: nao e botao, leva a etiqueta branca de cabecalho
     lcx = ox if logo_esq else ox + 8 * CEL
     pg.draw_rect(fitz.Rect(mm(lcx+0.4), mm(y+0.4), mm(lcx+0.4+MINI), mm(y+0.4+MINI)),
-                 color=TINTA, fill=BRANCO, width=0.5, radius=0.25)
+                 color=TINTA, fill=BRANCO, width=0.5)
     esq(lcx + 0.6, y + 1.4, MINI, "5", tam=4.5, cor=TINTA, negrito=True, alt=3.5)
 
 y += LARG_AP + 3.0
