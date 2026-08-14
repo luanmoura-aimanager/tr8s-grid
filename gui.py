@@ -403,7 +403,7 @@ class App:
                     elif v == 0:                     cor = "#232323"
                     elif e["mudo"][i]:               cor = "#38445c"
                     elif alt:                        cor = "#ff3450"
-                    elif sub == L.SUB_FLAM:          cor = "#c47cff"
+                    elif sub == L.SUB_FLAM:          cor = "#a43afe"
                     elif sub:                        cor = "#ffe000"
                     else:                            cor = "#ff3b30"
                     self.cv_ptn.itemconfig(self.cel_ptn[i][s], fill=cor)

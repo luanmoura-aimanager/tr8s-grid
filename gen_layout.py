@@ -16,7 +16,7 @@ TEAL_BG, PURPLE_BG, ORANGE_BG = "#0d2b27", "#1c1733", "#2e1a0c"
 # 0-127; aqui em hex, dobrados.
 P_OFF, P_TEMPO = "#3a3633", "#6b6560"
 P_FORTE, P_FRACA = "#e8433f", "#8f2b28"
-P_FLAM, P_FLAM_FRACA = "#c47cfe", "#442894"
+P_FLAM, P_FLAM_FRACA = "#a43afe", "#3c0c6c"
 P_SUB, P_SUB_FRACA = "#ffe000", "#584c00"
 P_ALT, P_ALT_FRACA = "#ff3450", "#5c103a"
 P_PLAY, P_PLAY_HIT = "#1c7a4a", "#35d07f"
@@ -251,7 +251,7 @@ LEGENDA_PAD = "".join(
     f'<div class="lg"><span class="sw" style="background:{c}"></span>{t}</div>'
     for c, t in [(P_FORTE, "nota forte (velocity &gt; 64)"),
                  (P_FRACA, "nota fraca (velocity ≤ 64)"),
-                 (P_FLAM, "<b>flam</b> — lilás, como na TR-8S"),
+                 (P_FLAM, "<b>flam</b> — roxo, como na TR-8S"),
                  (P_FLAM_FRACA, "flam em velocity fraca"),
                  (P_SUB, "<b>sub step</b> 1/2, 1/3, 1/4 — amarelo"),
                  (P_SUB_FRACA, "sub step em velocity fraca"),

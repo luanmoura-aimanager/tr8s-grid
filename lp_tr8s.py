@@ -231,8 +231,13 @@ PROG_OFF = mido.Message('sysex', data=[0x00,0x20,0x29,0x02,0x0D,0x0E,0x00])
 COR_OFF        = 0    # apagado
 COR_FORTE      = 5    # vermelho
 COR_FRACA      = 7    # vermelho escuro
-COR_FLAM       = (98, 62, 127)   # lilas
-COR_FLAM_FRACA = (34, 20, 46)
+# O lilas nasceu em (98, 62, 127) e ficou lavado: aquilo e quase o #C77DFF, o tom
+# mais claro e leitoso de um roxo. O que faz parecer roxo de verdade e o verde
+# BAIXO contra o azul - na paleta de referencia a razao verde/azul fica entre
+# 0.15 e 0.35, e ali estava em 0.49. Estes sao o #7B2CBF e o #3C096C levados ao
+# brilho maximo do LED.
+COR_FLAM       = (82, 29, 127)   # roxo
+COR_FLAM_FRACA = (30, 6, 54)
 COR_SUB        = (127, 112, 0)   # amarelo
 COR_SUB_FRACA  = (44, 38, 0)
 COR_ALT_FORTE  = (127, 26, 80)   # rosa
@@ -2147,6 +2152,16 @@ class Motor:
         step e latencia de medicao, nao erro - corrigi-la faria o playhead
         tremer pra frente e pra tras sem parar."""
         if not (self.tocando and TOLERANCIA_SYNC is not None):
+            return
+        # So faz sentido quando o grid esta NA variacao que toca. Divergindo, o
+        # alvo vem do comprimento da variacao da maquina e o lim daqui vem do
+        # comprimento da variacao aberta no grid: comparar os dois e comparar
+        # modulos diferentes, e a "correcao" empurra passo_abs para um valor sem
+        # significado. Nao aparecia na tela porque o playhead esta escondido
+        # justamente nesse caso - o que tornava o erro silencioso, nao inofensivo.
+        # Quem realinha ao voltar e o executar("variacao"), que chama isto de novo
+        # ja com as duas coincidindo.
+        if not self.playhead_visivel():
             return
         alvo = self.passo_maquina
         if alvo is None:

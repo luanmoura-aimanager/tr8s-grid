@@ -155,6 +155,19 @@ para B enquanto a máquina tocava A, afirmando que aquele padrão soava. Desde 1
 coluna verde **só aparece quando o grid está na variação que a máquina toca**; ela some
 nos outros casos, e o contador continua andando por baixo para reaparecer em fase.
 
+**Os Fill In não aparecem nesta máscara** — testado em 14/08/2026: com a máquina tocando e
+o `[MANUAL TRIG]` disparado várias vezes, a máscara **não se mexeu** em 30 s de
+amostragem a cada 50 ms. Ela continua marcando a variação base durante o fill. Duas
+consequências, ambas benignas:
+
+- Durante um fill, o grid segue mostrando o playhead da variação base. O verde "mente" por
+  um compasso, e essa é a leitura menos surpreendente das disponíveis
+- **Editar um Fill In no grid nunca mostra playhead**, porque as variações `09`/`0A` nunca
+  coincidem com uma máscara que só reporta A–H. É a mesma regra aplicada — o fill não está
+  tocando — mas custa a referência de tempo enquanto se edita
+
+Onde os fills guardam esse estado continua desconhecido, como o last step deles (2.3.1).
+
 **Os dois LAST STEP moram na mesma tabela de 20 bytes**, offsets 67 a 86:
 
 ```
@@ -861,7 +874,7 @@ mental de quem opera os dois.
 | conteúdo | na TR-8S | no grid |
 |---|---|---|
 | nota | vermelho | vermelho |
-| **flam** | **lilás** | lilás |
+| **flam** | **lilás** | roxo |
 | **sub step** 1/2, 1/3, 1/4 | **amarelo** | amarelo |
 | **ALT** | **rosa** | rosa |
 | ACCENT | — | azul vívido |
