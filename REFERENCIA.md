@@ -162,9 +162,16 @@ consequências, ambas benignas:
 
 - Durante um fill, o grid segue mostrando o playhead da variação base. O verde "mente" por
   um compasso, e essa é a leitura menos surpreendente das disponíveis
-- **Editar um Fill In no grid nunca mostra playhead**, porque as variações `09`/`0A` nunca
-  coincidem com uma máscara que só reporta A–H. É a mesma regra aplicada — o fill não está
-  tocando — mas custa a referência de tempo enquanto se edita
+- **Editar um Fill In no grid mostra o playhead**, por decisão de 14/08. As variações
+  `09`/`0A` nunca coincidem com uma máscara que só reporta A–H, então sobre elas não há
+  informação nenhuma — e a regra da casa quando falta informação é mostrar, não apagar.
+  Esconder ali custaria a referência de tempo por um detalhe de protocolo
+
+  Isso obrigou a separar duas condições que pareciam uma só: `playhead_visivel()` decide
+  se o verde é **desenhado** (frouxa, inclui os fills) e `em_fase_com_a_maquina()` decide
+  se a fase pode ser **corrigida** pelo step da máquina (estrita). Num fill o passo lido
+  se refere à variação base, de outro comprimento — corrigir por ele traria de volta a
+  comparação de módulos diferentes que a 3.2 já custou caro para descobrir
 
 Onde os fills guardam esse estado continua desconhecido, como o last step deles (2.3.1).
 

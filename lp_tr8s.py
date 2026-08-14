@@ -1684,18 +1684,36 @@ class Motor:
         base = self.passo if TRACK_REINICIA_NA_VARIACAO else self.passo_abs
         return base % lim
 
+    def em_fase_com_a_maquina(self):
+        """O grid esta na MESMA variacao que a maquina toca?
+
+        Condicao estrita, usada para decidir se vale comparar o passo daqui com
+        o passo de la. Fora dela os dois contam em modulos diferentes - cada
+        variacao tem seu proprio last step - e a comparacao nao significa nada.
+
+        None = nao conseguimos ler qual toca; aceita, porque era o comportamento
+        de antes da leitura existir."""
+        return (self.variacao_tocando is None
+                or self.variacao == self.variacao_tocando)
+
+    def eh_fill(self):
+        return self.variacao > 8            # 09 = Fill 1, 0A = Fill 2
+
     def playhead_visivel(self):
-        """O verde so aparece quando o grid esta na variacao que a maquina toca.
+        """O verde so aparece quando faz sentido ele estar ali.
 
         Editar uma variacao enquanto outra soa e o recurso mais valioso do
         projeto - e era justamente ali que o playhead mentia, correndo sobre um
         pattern que ninguem estava ouvindo.
 
-        None = nao conseguimos ler a variacao que toca. Nesse caso o playhead
-        volta a aparecer sempre, como antes: falha de leitura nao pode virar
-        grid apagado."""
-        return (self.variacao_tocando is None
-                or self.variacao == self.variacao_tocando)
+        Os FILLS sao exceção: a mascara da variacao tocando so reporta A-H
+        (REFERENCIA 2.3.2), entao sobre eles nao ha informacao nenhuma - e a
+        regra da casa quando falta informacao e mostrar, nao apagar. Sem isso,
+        editar um fill perdia a referencia de tempo por um detalhe de protocolo.
+
+        Isto e mais frouxo que em_fase_com_a_maquina() de propósito: dá pra
+        DESENHAR o playhead num fill, mas não dá pra CORRIGIR a fase por ele."""
+        return self.em_fase_com_a_maquina() or self.eh_fill()
 
     def polirritmia(self):
         """Alguma linha visivel e mais curta que a variacao?"""
@@ -2161,7 +2179,13 @@ class Motor:
         # justamente nesse caso - o que tornava o erro silencioso, nao inofensivo.
         # Quem realinha ao voltar e o executar("variacao"), que chama isto de novo
         # ja com as duas coincidindo.
-        if not self.playhead_visivel():
+        #
+        # Repare que a condicao aqui e a ESTRITA, nao playhead_visivel(): num
+        # fill o playhead e desenhado, mas o passo da maquina se refere a
+        # variacao base, com outro comprimento. Corrigir por ele traria de volta
+        # exatamente a comparacao de modulos diferentes que este guarda existe
+        # para impedir.
+        if not self.em_fase_com_a_maquina():
             return
         alvo = self.passo_maquina
         if alvo is None:
