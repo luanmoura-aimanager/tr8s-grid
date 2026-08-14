@@ -12,8 +12,8 @@ Tres modos, exclusivos entre si:
     standby   ondas coloridas nascendo sozinhas, em dois estilos:
               'standby' = chuva (variada e rapida)   'ambiente' = lento e fraco
 
-So o ON precisa da TR-8S ligada. Nos outros dois, MUTE + WRITE juntos nos pads
-voltam pro ON.
+So o ON precisa da TR-8S ligada. Nos outros dois, HIDE MUTED + ALT juntos nos
+pads (borda esquerda, CC 94 e 93) voltam pro ON.
 
 O motor roda numa thread propria e a janela le o estado dele a 20 fps. Isso e
 necessario, nao enfeite: trocar de variacao bloqueia ate 2 s lendo a maquina, e

@@ -394,7 +394,7 @@ del _i, _cc, _acao
 # um tempo, o que os deixava inalcancaveis. Foram pras setas do aparelho esquerdo,
 # que eram a unica funcao DUPLICADA do mapa (as do direito fazem o mesmo). O logo
 # esquerdo continua util como indicador passivo de "tem alguem mutado".
-ESCAPE_CHORD = (94, 93)   # no modo off, esses dois juntos voltam pro ON
+ESCAPE_CHORD = (94, 93)   # HIDE MUTED + ALT: fora do ON, os dois juntos voltam
 
 
 # ─────────────────────────────────────────────────────────────
@@ -2031,11 +2031,15 @@ class Motor:
                              and estilo != self.estilo_standby)
             if modo == self.modo_geral and not trocou_estilo:
                 return True
+            # o espelho da janela zera em TODA troca: saindo do standby o
+            # _animar nao roda mais (ondas vazias, nada sujo), entao ninguem
+            # limparia o ultimo quadro e a janela ficaria com uma onda congelada
+            # enquanto os LEDs ja estao pretos
+            self.quadro_onda = None
             if modo == MODO_STANDBY:
                 self.estilo_standby = estilo or self.estilo_standby
                 self.ondas, self.onda_suja = [], False
                 self.proxima_onda = 0.0        # a primeira onda nasce ja
-                self.quadro_onda = None
             if modo == MODO_ON:
                 if not self._abrir_tr8s():
                     self.log("(!) porta TR-8S CTRL nao encontrada. A maquina esta "
@@ -2165,10 +2169,10 @@ class Motor:
                 self.pintar()
 
     def _escape(self, cc):
-        """Fora do ON (off e standby), MUTE + WRITE juntos (os dois vizinhos do
-        meio da borda esquerda) voltam pro ON - senao nao haveria como voltar sem
-        ir ate o Mac. Sao dois porque um so dispararia sem querer justamente nos
-        modos em que se fica cutucando os pads."""
+        """Fora do ON (off e standby), HIDE MUTED + ALT juntos (os dois vizinhos
+        do meio da borda esquerda, CC 94 e 93) voltam pro ON - senao nao haveria
+        como voltar sem ir ate o Mac. Sao dois porque um so dispararia sem querer
+        justamente nos modos em que se fica cutucando os pads."""
         agora = self.logo_t[cc] = time.time()
         outro = ESCAPE_CHORD[1] if cc == ESCAPE_CHORD[0] else ESCAPE_CHORD[0]
         if agora - self.logo_t.get(outro, 0.0) < 0.5:
@@ -2381,9 +2385,10 @@ def cmd_standby(argv):
     print(f"""
 standby ({estilo}) - as ondas nascem sozinhas, a TR-8S nem precisa estar ligada.
 
-  pad                   joga uma onda ali, no estilo da vez
-  MUTE + WRITE juntos   (borda esquerda) volta pro ON - precisa da porta CTRL
-  Ctrl+C                sai
+  pad                      joga uma onda ali, no estilo da vez
+  HIDE MUTED + ALT juntos  (borda esquerda, CC 94 e 93) volta pro ON -
+                           precisa da porta CTRL
+  Ctrl+C                   sai
 
   estilos: 'standby' = chuva (variada e rapida)   'standby ambiente' = lento
 """)

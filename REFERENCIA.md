@@ -955,8 +955,10 @@ o palpite é `20 00`, que a varredura do `snap` agora lê.
 
 O `off` **não** é o `launchpad_blackout`: apaga mas continua ouvindo os pads. Para
 soltar os aparelhos de verdade, o botão "Apagar e soltar os pads" ou o alias.
-Fora do `ON`, **MUTE + WRITE apertados juntos voltam para o ON** — senão não
-haveria como voltar sem ir até o Mac.
+Fora do `ON`, **HIDE MUTED + ALT apertados juntos voltam para o ON** (`ESCAPE_CHORD`,
+CC 94 e 93 da borda esquerda) — senão não haveria como voltar sem ir até o Mac. É o que
+o adesivo já imprime; a linha antiga desta seção dizia "HIDE + WRITE", nome que ficou
+para trás quando o CC 93 virou ALT.
 
 ### O `standby` (14/08/2026)
 
