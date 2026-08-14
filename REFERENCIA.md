@@ -96,7 +96,7 @@ def addr_soma(addr, offset):
 | `20 0V 0B 08` | **TRG** — confirmado pela aritmética, ver abaixo |
 | `20 0V 0C` … `20 0V 18` | desconhecido |
 | `20 0V 19 08` | 1664 bytes — provavelmente motion/automation |
-| `20 00 00 00` | **nível de pattern**, 128 bytes — nome em ASCII, **LAST STEP do track**, e mais |
+| `20 00 00 00` | **nível de pattern**, 128 bytes — nome, **variação tocando** (2.3.2), **LAST STEP** |
 | `01 00 00 00` | **sistema/performance** — offsets 12–15 = **MUTE de track** (ver 2.7) |
 | `00 00`, `00 01`, `00 02`, `00 03`, `30 00`, `40 00` | outras regiões que respondem, conteúdo não decodificado |
 
@@ -125,6 +125,35 @@ A variação `0x00` não existe (A é `0x01`), e esse endereço guarda o que é 
 | **`75`–`86`** | **LAST STEP de cada track**, um byte, **0-based** |
 | `90` | provavelmente o instrumento selecionado no painel — muda sozinho e suja diffs |
 | `95`–`109` | sequência `01 02 … 0F` |
+
+### 2.3.2 A variação que está tocando — offsets 63–66, decodificada em 14/08/2026
+
+```
+20 00 00 00, offsets 63–66    máscara de 16 bits em 4 nibbles
+bit 0 = A  …  bit 7 = H
+```
+
+**Terceiro campo da máquina no mesmo formato do ACCENT** (2.5) e do MUTE (2.7) — vale
+tratar 4 nibbles como o idioma padrão dela para conjuntos, e desconfiar de qualquer
+candidato a "número" que se mexa em dois bytes.
+
+Confirmada em três estados: A → `0x0001`, B → `0x0002`, E → `0x0010`. Foi o E que
+denunciou o formato: se fosse um número simples, o offset 66 marcaria `05`; em vez disso
+o 65 virou `01` e o 66 zerou, que é exatamente o nibble transbordando.
+
+Ela mora **imediatamente antes da tabela de last steps** (67–86), o que fecha a leitura
+daquele bloco: 63–66 dizem qual variação toca, 67–74 o tamanho de cada uma, 75–86 o dos
+tracks. E cai **de graça** no RQ1 que o `ler_last_steps()` já faz a cada 1,5 s.
+
+**Trocar de variação não emite Program Change** — escutados 14 s na porta comum durante a
+troca, só clock. A implementation chart marca PC como transmitido, mas é para pattern, não
+para variação. Ler o endereço é o único caminho.
+
+**Para que serve:** o grid escreve numa variação independente da que toca — o recurso mais
+valioso do projeto (2.6). Mas o playhead não sabia disso e continuava correndo ao trocar
+para B enquanto a máquina tocava A, afirmando que aquele padrão soava. Desde 14/08 a
+coluna verde **só aparece quando o grid está na variação que a máquina toca**; ela some
+nos outros casos, e o contador continua andando por baixo para reaparecer em fase.
 
 **Os dois LAST STEP moram na mesma tabela de 20 bytes**, offsets 67 a 86:
 
@@ -364,6 +393,7 @@ acertou e 3 passou do ponto.
   do BD, não é espelho
 - **MUTE de track** (2.7) e **step atual do sequenciador** (2.8) — lidos e escritos,
   com o mute confirmado de ouvido
+- **Variação que está tocando** (2.3.2) — confirmada em três variações
 - **Byte 4 do step = ALTERNATE** (2.4) — confirmado de ouvido em 14/08/2026
 
 **Observado uma vez, não confirmado:**

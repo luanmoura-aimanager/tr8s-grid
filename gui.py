@@ -351,13 +351,17 @@ class App:
         self._pintar_modos(e["modo_geral"])
         if e["modo_geral"] == L.MODO_ON:
             mudos = [n for n, m in zip(L.INSTRUMENTOS, e["mudo"]) if m]
+            vt = e.get("variacao_tocando")
+            fora = (vt is not None and vt != e["variacao"])
             self.rotulo_estado.config(
-                text=f"Variação {e['variacao_nome']} · vel {e['velocidade']} · "
+                text=(f"Variação {e['variacao_nome']}"
+                      + (f" (tocando a {L.VARIACOES[vt-1]})" if fora else "")
+                      + f" · vel {e['velocidade']} · "
                      f"{e['modo']} · {e['visiveis']}"
                      + (f"  ·  last {e['last_var']}" if e["last_var"] < 16 else "")
                      + (("  ·  mute " + " ".join(mudos)
                          + (" (fora do grid)" if e["esconder_mudos"] else ""))
-                        if mudos else ""))
+                        if mudos else "")))
         else:
             self.rotulo_estado.config(
                 text="os pads só fazem ondinha — a TR-8S não é tocada")

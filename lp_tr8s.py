@@ -129,8 +129,21 @@ def addr_kit_param(inst):         return (0x10, 0x00, 0x20 + inst, 0x00)
 # e 16 steps. As variacoes A-H tem slot; os dois Fill In nao - onde eles guardam
 # o comprimento continua desconhecido.
 ADDR_PATTERN   = (0x20, 0x00, 0x00, 0x00)
+OFF_VAR_TOCANDO = 63   # 63-66: mascara de 4 nibbles, bit i = variacao i+1
 OFF_LAST_VAR   = 67    # +0 = A ... +7 = H
 OFF_LAST_TRACK = 75    # +0 = BD ... +10 = RC, +11 = TRG
+
+# VARIACAO QUE ESTA TOCANDO - decodificada em 14/08/2026 (REFERENCIA 2.3.2).
+#
+# Mascara de 16 bits em 4 nibbles, o MESMO formato do ACCENT (2.5) e do MUTE
+# (2.7) - terceiro campo da maquina nesse padrao. Bit 0 = A ... bit 7 = H.
+#
+# Mora imediatamente ANTES da tabela de last steps das variacoes (67-74), o que
+# fecha a leitura daquele bloco: 63-66 dizem qual toca, 67-74 dizem o tamanho de
+# cada uma.
+#
+# Trocar de variacao NAO emite Program Change - escutado por 14 s na porta comum,
+# so clock. Ler este endereco e o unico caminho.
 
 def addr_last_var(var):     return addr_soma(ADDR_PATTERN, OFF_LAST_VAR + var - 1)
 def addr_last_track(inst):  return addr_soma(ADDR_PATTERN, OFF_LAST_TRACK + inst)
@@ -1332,6 +1345,7 @@ class Motor:
         self.alt = False               # flag do ALTERNATE, nao um dos 5 modos
         self.mudo = [False]*len(INSTRUMENTOS)   # lido da maquina, nunca inventado
         self.passo_maquina = None               # step que a TR-8S diz estar tocando
+        self.variacao_tocando = None            # qual variacao a maquina toca
         self.carregado = False
 
         e = carregar_estado()
@@ -1411,12 +1425,18 @@ class Motor:
             if not quieto:
                 self.log("(!) nao consegui ler os last steps; usando o espelho.")
             return False
-        antes = (dict(self.ultimo_var), list(self.ultimo_track))
+        antes = (dict(self.ultimo_var), list(self.ultimo_track),
+                 self.variacao_tocando)
         for v in range(1, 9):                       # A-H; fills nao tem slot
             self.ultimo_var[v] = d[OFF_LAST_VAR + v - 1] + 1
         for i in range(len(INSTRUMENTOS)):
             self.ultimo_track[i] = d[OFF_LAST_TRACK + i] + 1
-        mudou = antes != (dict(self.ultimo_var), list(self.ultimo_track))
+        # a variacao que toca vem no mesmo bloco, de graca (ver OFF_VAR_TOCANDO)
+        m = nibbles_para_mascara(d[OFF_VAR_TOCANDO:OFF_VAR_TOCANDO + 4])
+        self.variacao_tocando = next((v for v in range(1, 9) if m >> (v-1) & 1),
+                                     None)
+        mudou = antes != (dict(self.ultimo_var), list(self.ultimo_track),
+                          self.variacao_tocando)
         if mudou:
             self._persistir()      # so grava quando muda: o tick chama isto sempre
         return mudou
@@ -1659,6 +1679,19 @@ class Motor:
         base = self.passo if TRACK_REINICIA_NA_VARIACAO else self.passo_abs
         return base % lim
 
+    def playhead_visivel(self):
+        """O verde so aparece quando o grid esta na variacao que a maquina toca.
+
+        Editar uma variacao enquanto outra soa e o recurso mais valioso do
+        projeto - e era justamente ali que o playhead mentia, correndo sobre um
+        pattern que ninguem estava ouvindo.
+
+        None = nao conseguimos ler a variacao que toca. Nesse caso o playhead
+        volta a aparecer sempre, como antes: falha de leitura nao pode virar
+        grid apagado."""
+        return (self.variacao_tocando is None
+                or self.variacao == self.variacao_tocando)
+
     def polirritmia(self):
         """Alguma linha visivel e mais curta que a variacao?"""
         return any(self.ultimo_efetivo(i) < self.last_var()
@@ -1670,6 +1703,8 @@ class Motor:
             # o step que nao existe vence o playhead: nada acontece ali.
             if base == COR_FORA:
                 return COR_FORA
+            if not self.playhead_visivel():
+                return base
             # linha muda nao tem playhead NENHUM - nem o verde forte nem o fraco.
             # O verde diz "esta soando agora", e ali nada esta soando; deixa-lo
             # passar seria a unica cor da linha mentindo sobre o som.
@@ -1758,6 +1793,11 @@ class Motor:
         if novo == self.passo:
             return
         antigo, self.passo = self.passo, novo
+        # o passo continua avancando mesmo invisivel: e isso que faz o verde
+        # reaparecer no lugar certo quando voce volta pra variacao que toca,
+        # em vez de ressuscitar onde parou
+        if not self.playhead_visivel():
+            return
         if self.polirritmia():
             # cada linha esta numa coluna diferente: repintar duas colunas nao
             # basta. Sai caro? Nao: o quadro inteiro vai em 2 SysEx em lote.
@@ -1867,8 +1907,18 @@ class Motor:
     def executar(self, tipo, arg):
         if tipo == "variacao":
             self.variacao, self.armado = arg, None
-            self.recarregar(); self.pintar(); self.pintar_botoes()
-            self.log(f"variacao {VARIACOES[self.variacao-1]}")
+            self.recarregar()
+            # o passo global nao parou de contar, mas o last step da variacao
+            # nova pode ser outro - sem isto o verde reapareceria fora do lugar
+            # ate o proximo ciclo de releitura
+            self._ressincronizar()
+            self.pintar(); self.pintar_botoes()
+            tocando = (self.variacao_tocando is not None
+                       and self.variacao != self.variacao_tocando)
+            self.log(f"variacao {VARIACOES[self.variacao-1]}"
+                     + (f"  (a TR-8S esta tocando a "
+                        f"{VARIACOES[self.variacao_tocando-1]} - sem playhead aqui)"
+                        if tocando else ""))
         elif tipo == "velocidade":
             self.vel_idx = arg; self.pintar_botoes()
             self.log(f"velocity {VELOCIDADES[self.vel_idx]}")
@@ -2062,10 +2112,18 @@ class Motor:
                 self._animar()
             elif (self.carregado and
                   time.time() - self.ultima_leitura > INTERVALO_RELEITURA):
+                antes_toc = self.variacao_tocando
                 if self.ler_last_steps(quieto=True):
                     self.pintar()
-                    self.log(f"last steps mudaram no painel  |  "
-                             f"variacao {self.last_var()}")
+                    if self.variacao_tocando != antes_toc:
+                        nome = (VARIACOES[self.variacao_tocando-1]
+                                if self.variacao_tocando else "?")
+                        self.log(f"a TR-8S passou a tocar a variacao {nome}"
+                                 + ("" if self.playhead_visivel() else
+                                    "  - o grid esta noutra, playhead escondido"))
+                    else:
+                        self.log(f"last steps mudaram no painel  |  "
+                                 f"variacao {self.last_var()}")
                 # mesma releitura periodica dos last steps, mesmo motivo: sem ela
                 # o [MUTE] do painel nunca chegaria ao grid. Custa um RQ1, ~20 ms.
                 if self.ler_mudos(quieto=True):
@@ -2127,6 +2185,8 @@ class Motor:
                 "last_track": list(self.ultimo_track),
                 "armado": self.armado,
                 "esconder_mudos": self.esconder_mudos,
+                "variacao_tocando": self.variacao_tocando,
+                "playhead_visivel": self.playhead_visivel(),
                 "lista_visivel": self.lista_visivel(),
                 "tem_clock": self.clk is not None,
                 "tem_tr8s": self.tr_out is not None,
