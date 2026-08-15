@@ -88,8 +88,13 @@ ocorrência, então os dois Launchpad viram um só. Por isso a enumeração e a 
 
 | Arquivo | O que é |
 |---|---|
-| `lp_tr8s.py` | O motor e a CLI: launchpads, SysEx, grid ao vivo |
-| `gui.py` | Janela: ON/off/standby, status, grid, pattern, last steps |
+| `lp_tr8s.py` | O motor e a CLI: launchpads, SysEx, grid ao vivo, sessões de hardware (`prob_watch`, `pattern`, `pc`, `var_mask`) |
+| `web/` | A interface: HTML/CSS/módulos ES sem build nem dependência. Aba **Pattern** com o grid 12×16 editável (espelho do TR-EDITOR, com probability que o hardware não exibe), barra de estado com displays e LEDs, Mixer & FX, Instrumento, Biblioteca, Chain, Estocástica, Avançado |
+| `servidor.py` + `pagina.html` | A tela: servidor local (só stdlib, 127.0.0.1, com token/Origin/CSP) + página no navegador, com o que o grid físico não tem — Mixer & FX (sends/knobs/LFO por captura guiada + probability), Instrumento (troca de tone), Biblioteca, Chain, Estocástica, Avançado. Log em `~/Library/Logs/TR8S-Grid-app.log`. Saiu do Tkinter porque o Tk 8.5.9 do Python do CLT trava no macOS atual (medições na REFERENCIA §4) |
+| `efeitos.py` | Mapa dos parâmetros de kit/FX decodificados por observação (captura no app + sniff do TR-EDITOR) |
+| `biblioteca.py` | 20 patterns clássicos em 14 estilos musicais, com kit sugerido — `python3 biblioteca.py` valida e mostra previews |
+| `gen_tones.py` → `tones.py` | Preset Tone List da Roland como dados, para a aba Instrumento (trocar o tone de cada track) |
+| `ferramentas.py` | Chain de patterns e ferramenta estocástica (probabilidade, densidade, humanize, ghosts) |
 | `criar_app.py` | Monta o `.app` do Desktop |
 | `apc_tr8s.py` | Versão anterior, para APC40 mkII — funcionando |
 | `tr8s_sysex.py` | Parser/diff de capturas do MIDI Monitor |

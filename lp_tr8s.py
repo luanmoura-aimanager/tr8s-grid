@@ -44,9 +44,12 @@ PORTAS POR INDICE, NAO POR NOME
     mido apenas para montar/parsear mensagens. Verificado em 13/08/2026: as 4
     entradas abrem simultaneamente.
 """
-import sys, time, json, os, math, random, threading
+import sys, time, json, os, math, random, threading, queue
 import mido
 import rtmidi
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import efeitos
 
 APC_TIMEOUT = 2.0
 LAYOUT_FILE = os.path.expanduser("~/.lp_tr8s_layout.json")
@@ -80,6 +83,18 @@ SUB_BYTE     = 5
 SUB_FLAM     = 1      # byte 5: 1 = flam; 2, 3, 4 = sub step 1/2, 1/3, 1/4
 VEL_HI, VEL_LO = 6, 7
 
+# PROBABILITY do step = byte 3 (REFERENCIA 2.4). Decodificada por leitura em tres
+# pontos: 50% -> 05, 90% -> 01, 20% -> 08. A formula linear abaixo cobre os tres;
+# se o painel tiver valores fora da escala de 10, a sessao de calibracao
+# (cmd_prob_watch) transforma isto numa tabela. 100% = 0x00.
+PROB_BYTE = 3
+
+def prob_para_byte(pct):
+    return max(0, min(9, (100 - int(pct)) // 10))
+
+def byte_para_prob(b):
+    return 100 - 10 * max(0, min(9, b))
+
 # ALTERNATE: o valor e 0x08, nao 0x01 (REFERENCIA 2.4). Por que o bit 3, ninguem
 # sabe - provavelmente ha outras flags no mesmo byte. Guardado como VALOR, nao
 # como numero de bit, pra nao fingir que entendemos o resto do byte.
@@ -104,7 +119,7 @@ MODOS = [("NORMAL", 0x00), ("FLAM", 0x01), ("SUB 1/2", 0x02),
 INSTRUMENTOS = ["BD","SD","LT","MT","HT","RS","HC","CH","OH","CC","RC"]
 
 # 0x01..0x08 = A..H, 0x09 = Fill 1, 0x0A = Fill 2 (REFERENCIA 2.3).
-# Fills sao DEDUZIDOS pela regra linear - nunca foram exercitados ate agora.
+# Fills confirmados em hardware em 13/08/2026 (escrita ouvida na caixa).
 VARIACOES = ["A", "B", "C", "D", "E", "F", "G", "H", "Fill 1", "Fill 2"]
 
 VARIACAO = 0x01
@@ -123,6 +138,8 @@ def addr_bloco(inst, var=None):   return (0x20, var or VARIACAO, inst, 0x08)
 def addr_step(inst, s, var=None): return addr_soma(addr_bloco(inst, var),
                                                    s * BYTES_P_STEP)
 def addr_accent(var=None):        return (0x20, var or VARIACAO, 0x00, 0x00)
+def addr_kit_nome():              return (0x10, 0x00, 0x00, 0x00)
+def addr_kit_tone(inst):          return (0x10, 0x00, 0x10 + inst, 0x00)
 def addr_kit_param(inst):         return (0x10, 0x00, 0x20 + inst, 0x00)
 
 # Nivel de PATTERN, decodificado em 13/08/2026 com snap/snapdiff (REFERENCIA 2.3.1).
@@ -178,7 +195,51 @@ OFF_MUTE  = 12        # 12,13,14,15 = os 4 nibbles
 # playhead ate parar e tocar de novo. Este byte responde a pergunta direto.
 OFF_STEP_ATUAL = 7
 
+# TROCA REMOTA DE KIT E PATTERN - do mapa oficial da Roland embutido no site
+# ARIA (TR-8S-SysEx/js/Tr8s/Tr8sData.js, base64) e visto em capturas reais:
+#   offset 0 = kit atual, 1 = pattern atual, 2 = proximo pattern (1 byte,
+#   0-127 = banco A-H x 16, 0-based). DT1 de 1 byte em endereco valido.
+# NUNCA exercitado na NOSSA maquina - so usar via cmd_pattern ate a sessao de
+# hardware provar (e registrar o resultado na REFERENCIA).
+OFF_KIT_ATUAL     = 0
+OFF_PATTERN_ATUAL = 1
+OFF_PATTERN_PROX  = 2
+
 def addr_mute():            return addr_soma(ADDR_PERF, OFF_MUTE)
+
+# BLOCO UTILITY (50 00 00 xx) - do mesmo mapa oficial do ARIA. Semantica
+# diferente de tudo que o projeto conhecia: a PERGUNTA e a RESPOSTA sao ambas
+# DT1 no mesmo endereco (nao e RQ1/DT1). Visto no fio nas capturas; NUNCA
+# exercitado na nossa maquina - toda chamada avisa isso no log.
+UTIL_WRITE_PATTERN = 0x01   # data = [id >> 7, id & 0x7F]; grava na memoria
+UTIL_WRITE_KIT     = 0x02
+UTIL_PLAYING       = 0x10   # resposta: 1 byte, 0 = parada
+UTIL_DISPLAY       = 0x12   # data = 32 chars ASCII; escreve no visor
+UTIL_VERSION       = 0x13   # resposta: 8 chars ("1.13"...)
+UTIL_UID           = 0x14
+
+def addr_util(sub):         return (0x50, 0x00, 0x00, sub)
+
+def ler_util(tr_in, tr_out, sub, data=(0,), timeout=1.0):
+    """Consulta utility: manda DT1 e espera o DT1 de volta no mesmo endereco.
+
+    Nao e RQ1 em endereco desconhecido - e endereco da tabela oficial e o
+    veneno da 3.1 e especificamente RQ1 invalido. Ainda assim, primeira vez
+    em hardware proprio: observar a maquina."""
+    alvo = addr_util(sub)
+    tr_out.send(dt1(alvo, list(data)))
+    limite = time.time() + timeout
+    while time.time() < limite:
+        for msg in tr_in.iter_pending():
+            if msg.type != 'sysex':
+                continue
+            d = list(msg.data)
+            if len(d) < 12 or d[:6] != HDR or d[6] != DT1:
+                continue
+            if tuple(d[7:11]) == alvo:
+                return d[11:-1]
+        time.sleep(0.005)
+    return None
 
 # CCs de LEVEL por instrumento, da implementation chart. Guardados como
 # documentacao, NAO em uso.
@@ -279,6 +340,82 @@ COR_FORA = (3, 3, 3)      # step alem do LAST STEP: "esse step nao existe"
 COR_MUDA_FORTE = (28, 34, 46)
 COR_MUDA_FRACA = (11, 14, 19)
 COR_MUDA_BOTAO = (34, 42, 56)   # o botao e o logo, quando ha alguem mutado
+
+# ─────────────────────────────────────────────────────────────
+# Traducao das cores para hex, para a TELA (pagina web).
+#
+# Mora aqui, e nao na tela, de proposito: a cor de um step no navegador e a cor
+# do LED do Launchpad tem que sair da MESMA fonte, senao as duas versoes do
+# grid divergem com o tempo - foi o que comecou a acontecer quando a janela Tk
+# tinha a propria copia da paleta.
+#
+# Cor int = indice da paleta Novation (o caminho barato, via note_on);
+# cor tupla = (r,g,b) de 0-127, o SysEx de LED. So os indices que o grid usa.
+# ─────────────────────────────────────────────────────────────
+PALETA_HEX = {0: "#1a1a1a", 1: "#3a3a3a", 3: "#ffffff", 5: "#ff3b30",
+              7: "#5c1512", 9: "#ff9500", 11: "#5c3a0f", 13: "#ffe600",
+              21: "#33d17a", 23: "#14532d", 45: "#3b82f6", 49: "#a855f7"}
+
+
+def cor_hex(cor):
+    """Cor do motor (indice da paleta ou tupla RGB 0-127) -> hex do CSS."""
+    if isinstance(cor, tuple):
+        r, g, b = (min(255, int(c * 2)) for c in cor)
+        return f"#{r:02x}{g:02x}{b:02x}"
+    return PALETA_HEX.get(cor, "#1a1a1a")
+
+
+def paleta_da_tela():
+    """As cores do pattern, com os nomes que o CSS usa (--c-nota etc.).
+
+    A precedencia que a tela precisa respeitar e a de cor_do_step():
+    mudo > ALT > flam/sub > nota, com VEL_LIMIAR separando forte de fraca."""
+    return {
+        "nota": cor_hex(COR_FORTE), "nota_fraca": cor_hex(COR_FRACA),
+        "flam": cor_hex(COR_FLAM), "flam_fraca": cor_hex(COR_FLAM_FRACA),
+        "sub": cor_hex(COR_SUB), "sub_fraca": cor_hex(COR_SUB_FRACA),
+        "alt": cor_hex(COR_ALT_FORTE), "alt_fraca": cor_hex(COR_ALT_FRACA),
+        "acc": cor_hex(COR_ACC),
+        "muda": cor_hex(COR_MUDA_FORTE), "muda_fraca": cor_hex(COR_MUDA_FRACA),
+        "play": cor_hex(COR_PLAY_HIT), "play_vazio": cor_hex(COR_PLAY),
+        "tempo": cor_hex(COR_TEMPO), "fora": cor_hex(COR_FORA),
+        "vazio": "#26221e",
+    }
+
+# ─────────────────────────────────────────────────────────────
+# LUZ DA BORDA - pedido do Luan em 14/08/2026: o adesivo colado nos botoes de
+# borda fica ilegivel com o LED aceso embaixo. Toda cor de borda passa por
+# cor_borda() e sai escurecida por um fator unico; 0.0 apaga tudo. Estados
+# ativos/armados usam um piso um pouco maior para continuarem distinguiveis de
+# perto sem ofuscar o adesivo.
+#
+# A paleta indexada nao escurece, entao a borda vai SEMPRE pelo SysEx RGB - por
+# isso o mapa abaixo traduz cada indice usado na borda para um RGB de brilho
+# cheio antes de aplicar o fator. Indices repetidos (SETA/VEL_OFF = 1,
+# ARMADO/FORTE = 5, CLEAR/FRACA = 7) dividem a mesma entrada de proposito.
+# ─────────────────────────────────────────────────────────────
+BRILHO_BORDA       = 0.10   # botoes em repouso; calibrar no olho com o adesivo
+BRILHO_BORDA_ATIVO = 0.25   # estado ativo/armado (variacao atual, CLEAR armado)
+
+RGB_BORDA = {
+    COR_OFF:     (0, 0, 0),
+    COR_ATIVO:   (127, 127, 127),   # branco
+    COR_VAR:     (0, 40, 127),      # azul
+    COR_FILL:    (90, 0, 127),      # roxo
+    COR_CLEAR:   (70, 0, 0),        # vermelho escuro
+    COR_ARMADO:  (127, 0, 0),       # vermelho
+    COR_COPIA:   (127, 60, 0),      # laranja
+    COR_SETA:    (70, 70, 70),      # cinza
+    COR_ALT:     (127, 110, 0),     # amarelo
+}
+
+def cor_borda(cor, ativo=False):
+    """Escurece uma cor de botao de borda. Aceita indice de paleta ou (r,g,b)."""
+    rgb = cor if isinstance(cor, tuple) else RGB_BORDA.get(cor, (70, 70, 70))
+    f = BRILHO_BORDA_ATIVO if ativo else BRILHO_BORDA
+    if f <= 0:
+        return (0, 0, 0)
+    return tuple(max(0, min(127, int(round(c * f)))) for c in rgb)
 # Ondinha do modo off: o toque no pad usa estes valores fixos, e e o unico
 # comportamento de onda que ja foi exercitado em hardware. Nao mexer sem motivo.
 ONDA_VEL     = 9.0    # celulas por segundo
@@ -1359,16 +1496,34 @@ class Motor:
 
         self.variacao = VARIACAO
         self.cache, self.acc, self.kit_params = {}, 0, {}
+        # blocos cuja leitura falhou: escrever neles mandaria lixo pros bytes
+        # 0-3 (probability inclusive) - escrever_step se recusa ate reler
+        self.cache_invalido = set()
+        # comandos vindos da janela: rodam dentro do tick(), com o lock, na
+        # thread do motor - a UI nunca mais mexe no Motor da thread do Tk
+        self.fila_cmd = queue.Queue()
         self.base_inst, self.modo, self.vel_idx = 0, 0, VEL_PADRAO
         self.mostrar_acc = MOSTRAR_ACC
         self.passo, self.tocando, self.pulsos = -1, False, 0
         self.passo_abs = 0        # contagem absoluta, pros tracks curtos
         self.ultima_leitura = 0.0
         self.copia, self.armado, self.armado_t = None, None, 0.0
+        self.desfazer = None      # snapshot do escrever_pattern (biblioteca)
+        self.chain = None         # ferramentas.Chain, quando armado
         self.alt = False               # flag do ALTERNATE, nao um dos 5 modos
         self.mudo = [False]*len(INSTRUMENTOS)   # lido da maquina, nunca inventado
         self.passo_maquina = None               # step que a TR-8S diz estar tocando
         self.variacao_tocando = None            # qual variacao a maquina toca
+        self.kit_atual = None                   # offsets 0-2 do perf (mapa ARIA)
+        self.pattern_atual = None
+        self.kit_nome = None                    # lidos por ler_kit(), sob demanda
+        self.tone_ids = [None] * len(INSTRUMENTOS)
+        # mixer/FX: blocos de kit vigiados, mapa de parametros decodificados e
+        # o estado da captura guiada (ver efeitos.py e REFERENCIA 7.2)
+        self.fx_blocos = {}                     # "kit" | indice_inst -> bytes
+        self.mapa_fx = efeitos.carregar()
+        self.captura_fx = None
+        self.fx_kit_grande = None               # o no do kit responde a 128 B?
         self.carregado = False
 
         e = carregar_estado()
@@ -1427,11 +1582,48 @@ class Motor:
                     return linha, col
         return None
 
+    # ── fila de comandos da janela ──────────────────────────
+    def enfileirar(self, fn, *args, **kw):
+        """Thread-safe. fn roda dentro do tick(), com o lock, na thread do
+        motor. E o UNICO caminho pela qual a janela dispara acoes - chamar
+        metodos do Motor direto da thread do Tk congelava a janela nas rajadas
+        e corria contra o tick."""
+        self.fila_cmd.put((fn, args, kw))
+
+    def _drenar_fila(self):
+        # poucos por tick: um comando longo (rajada) ja segura o lock o
+        # suficiente - a janela pula quadros, que e o contrato dela
+        for _ in range(4):
+            try:
+                fn, args, kw = self.fila_cmd.get_nowait()
+            except queue.Empty:
+                return
+            try:
+                fn(*args, **kw)
+            except Exception as exc:
+                self.log(f"(!) comando da janela falhou: {exc}")
+
     # ── leitura do pattern ──────────────────────────────────
     def recarregar(self):
         for i in range(len(INSTRUMENTOS)):
-            self.cache[i] = ler_bloco(self.tr_in, self.tr_out,
-                                      addr_bloco(i, self.variacao)) or [0]*128
+            d = None
+            for _ in range(2):                     # a maquina engasga as vezes
+                d = ler_bloco(self.tr_in, self.tr_out,
+                              addr_bloco(i, self.variacao))
+                if d: break
+            if d:
+                self.cache[i] = d
+                self.cache_invalido.discard(i)
+            else:
+                # O placeholder de zeros e SO pra tela: a escrita fica
+                # bloqueada pelo guarda do escrever_step ate uma releitura
+                # funcionar. Antes o placeholder era o cache de verdade, e a
+                # primeira escrita mandava zeros nos bytes 0-3 - apagando a
+                # probability do step na maquina.
+                self.cache_invalido.add(i)
+                self.cache[i] = [0]*128
+                self.log(f"(!) leitura do {INSTRUMENTOS[i]} falhou - "
+                         "escrita nessa linha bloqueada ate reler")
         cab = ler_bloco(self.tr_in, self.tr_out,
                         addr_accent(self.variacao), 8) or [0]*8
         self.acc = nibbles_para_mascara(cab[:4])
@@ -1476,6 +1668,10 @@ class Motor:
 
     def ler_alt(self, i, s):
         return self.cache[i][s*BYTES_P_STEP + ALT_BYTE] == ALT_LIGADO
+
+    def ler_prob(self, i, s):
+        """Probability do step em %, pela formula linear (ver PROB_BYTE)."""
+        return byte_para_prob(self.cache[i][s*BYTES_P_STEP + PROB_BYTE])
 
     # ── last step ───────────────────────────────────────────
     def last_var(self):
@@ -1530,6 +1726,11 @@ class Motor:
         # o step atual vem no mesmo bloco, de graca - guarda para o tick
         # ressincronizar o playhead sem gastar um RQ1 a mais
         self.passo_maquina = d[OFF_STEP_ATUAL] if len(d) > OFF_STEP_ATUAL else None
+        # kit e pattern atuais tambem moram aqui (offsets 0-2, mapa do ARIA) -
+        # de graca na mesma leitura, nenhum RQ1 novo
+        self.kit_atual = d[OFF_KIT_ATUAL] if len(d) > OFF_KIT_ATUAL else None
+        self.pattern_atual = (d[OFF_PATTERN_ATUAL]
+                              if len(d) > OFF_PATTERN_ATUAL else None)
         m = nibbles_para_mascara(d[OFF_MUTE:OFF_MUTE + 4])
         novo = [bool(m >> i & 1) for i in range(len(INSTRUMENTOS))]
         mudou = novo != self.mudo
@@ -1801,40 +2002,55 @@ class Motor:
                 for cc in FUNC_CCS + CENA_CCS + [LOGO_CC]:
                     self._luz(out, cc, COR_OFF)
             return
+        # Toda cor daqui pra baixo passa por cor_borda(): o adesivo colado nos
+        # botoes fica ilegivel com o LED forte embaixo (ver BRILHO_BORDA).
         # TOPO ESQUERDO (coluna de cena girada): variacoes A-H
         for i, c in enumerate(CENA_CCS):
-            self._luz(e, c, COR_VAR if self.variacao == i + 1 else COR_OFF)
+            self._luz(e, c, cor_borda(COR_VAR, True) if self.variacao == i + 1
+                      else cor_borda(COR_OFF))
         # BORDA ESQUERDA (fileira de funcao girada), de cima pra baixo
-        self._luz(e, 98, COR_FILL if self.variacao == 0x09 else COR_OFF)
-        self._luz(e, 97, COR_FILL if self.variacao == 0x0A else COR_OFF)
-        self._luz(e, 96, COR_ARMADO if self.armado == "inst" else COR_CLEAR)
-        self._luz(e, 95, COR_ARMADO if self.armado == "var" else COR_CLEAR)
-        self._luz(e, 94, COR_ATIVO if self.esconder_mudos      # ESCONDER MUTADOS
-                  else (COR_MUDA_BOTAO if any(self.mudo) else COR_OFF))
-        self._luz(e, 93, COR_ALT if self.alt else COR_OFF)             # ALT
-        self._luz(e, 92, COR_COPIA)
-        self._luz(e, 91, COR_COPIA if self.copia else COR_OFF)
+        self._luz(e, 98, cor_borda(COR_FILL, True) if self.variacao == 0x09
+                  else cor_borda(COR_OFF))
+        self._luz(e, 97, cor_borda(COR_FILL, True) if self.variacao == 0x0A
+                  else cor_borda(COR_OFF))
+        self._luz(e, 96, cor_borda(COR_ARMADO, True) if self.armado == "inst"
+                  else cor_borda(COR_CLEAR))
+        self._luz(e, 95, cor_borda(COR_ARMADO, True) if self.armado == "var"
+                  else cor_borda(COR_CLEAR))
+        self._luz(e, 94, cor_borda(COR_ATIVO, True) if self.esconder_mudos
+                  else (cor_borda(COR_MUDA_BOTAO) if any(self.mudo)
+                        else cor_borda(COR_OFF)))                  # ESCONDER
+        self._luz(e, 93, cor_borda(COR_ALT, True) if self.alt
+                  else cor_borda(COR_OFF))                         # ALT
+        self._luz(e, 92, cor_borda(COR_COPIA))
+        self._luz(e, 91, cor_borda(COR_COPIA, True) if self.copia
+                  else cor_borda(COR_OFF))
         # TOPO DIREITO (fileira de funcao), da esquerda pra direita
-        self._luz(d, 91, COR_SETA if self.base_inst > 0 else COR_OFF)
-        self._luz(d, 92, COR_SETA if self.base_inst < self.base_max() else COR_OFF)
+        self._luz(d, 91, cor_borda(COR_SETA) if self.base_inst > 0
+                  else cor_borda(COR_OFF))
+        self._luz(d, 92, cor_borda(COR_SETA) if self.base_inst < self.base_max()
+                  else cor_borda(COR_OFF))
         for k in range(5):
-            self._luz(d, 93 + k, COR_ATIVO if self.modo == k else COR_OFF)
-        self._luz(d, 98, COR_ACC if self.mostrar_acc else COR_OFF)
+            self._luz(d, 93 + k, cor_borda(COR_ATIVO, True) if self.modo == k
+                      else cor_borda(COR_OFF))
+        self._luz(d, 98, cor_borda(COR_ACC, True) if self.mostrar_acc
+                  else cor_borda(COR_OFF))
         # BORDA DIREITA (coluna de cena): seletor de velocity. O 80 e o 50
         # vestem a mesma cor que a nota deles vai ter no grid, porque sao os
         # dois valores que a propria maquina usa - o resto fica cinza.
         for i, c in enumerate(CENA_CCS):
             v = VELOCIDADES[i]
-            if i == self.vel_idx:   cor = COR_ATIVO
-            elif v == VEL_FORTE:    cor = COR_FORTE
-            elif v == VEL_FRACA:    cor = COR_FRACA
-            else:                   cor = COR_VEL_OFF
+            if i == self.vel_idx:   cor = cor_borda(COR_ATIVO, True)
+            elif v == VEL_FORTE:    cor = cor_borda(COR_FORTE)
+            elif v == VEL_FRACA:    cor = cor_borda(COR_FRACA)
+            else:                   cor = cor_borda(COR_VEL_OFF)
             self._luz(d, c, cor)
         # LOGOS: nao sao botoes, so LED - servem de indicador passivo.
         # O da esquerda acende quando ha alguem mutado na maquina, o que importa
         # justamente quando esconder_mudos esta ligado e a linha nem aparece.
-        self._luz(e, LOGO_CC, COR_MUDA_BOTAO if any(self.mudo) else COR_OFF)
-        self._luz(d, LOGO_CC, COR_OFF)
+        self._luz(e, LOGO_CC, cor_borda(COR_MUDA_BOTAO, True) if any(self.mudo)
+                  else cor_borda(COR_OFF))
+        self._luz(d, LOGO_CC, cor_borda(COR_OFF))
 
     def mover_playhead(self, novo):
         if novo == self.passo:
@@ -1854,14 +2070,31 @@ class Motor:
             self.pintar_coluna(novo)
 
     # ── escrita na TR-8S ────────────────────────────────────
-    def escrever_step(self, i, step, vel, sub, alt=False):
+    def escrever_step(self, i, step, vel, sub, alt=False, prob=None):
+        """Escreve um step. prob=None PRESERVA o byte 3 do cache (probability);
+        um numero (10-100, em %) escreve. Devolve False se abortou.
+
+        O step de 8 bytes vai inteiro pra maquina, entao os bytes que este
+        metodo nao entende (0-2) saem do cache - dai o guarda: cache que nao
+        reflete a maquina nao pode ser escrito de volta."""
+        if i in self.cache_invalido:
+            d = ler_bloco(self.tr_in, self.tr_out, addr_bloco(i, self.variacao))
+            if not d:
+                self.log(f"(!) {INSTRUMENTOS[i]}: cache invalido e releitura "
+                         "falhou - escrita abortada")
+                return False
+            self.cache[i] = d
+            self.cache_invalido.discard(i)
         b = step * BYTES_P_STEP
         self.cache[i][b+VEL_HI]   = (vel >> 4) & 0x0F
         self.cache[i][b+VEL_LO]   = vel & 0x0F
         self.cache[i][b+SUB_BYTE] = sub if vel else 0
         self.cache[i][b+ALT_BYTE] = (ALT_LIGADO if alt else 0) if vel else 0
+        if prob is not None and vel:
+            self.cache[i][b+PROB_BYTE] = prob_para_byte(prob)
         self.tr_out.send(dt1(addr_step(i, step, self.variacao),
                              self.cache[i][b:b+BYTES_P_STEP]))
+        return True
 
     def limpar_instrumento(self, i):
         if i >= len(INSTRUMENTOS):
@@ -1901,6 +2134,64 @@ class Motor:
         self.tr_out.send(dt1(addr_accent(self.variacao),
                              mascara_para_nibbles(mascara)))
         self.log(f"PASTE: {origem} -> {VARIACOES[self.variacao-1]}")
+
+    def escrever_pattern(self, dados, accent=0, last_var=None, nome=""):
+        """Escreve um pattern inteiro na variacao aberta (biblioteca/estocastica).
+
+        dados = {indice_inst: [(vel, sub, prob, alt)] * 16} - o formato do
+        biblioteca.expandir(). Rajada DT1 identica a colar_variacao (provada em
+        hardware); passa por escrever_step, entao respeita o guarda do cache e
+        preserva os bytes 0-2 de cada step.
+
+        Antes de tocar em qualquer coisa tira um snapshot para desfazer_escrita
+        - o mesmo formato do buffer de COPY, que ja provou o caminho de volta."""
+        if self.modo_geral != MODO_ON or not self.carregado:
+            self.log("(!) escrever pattern so no modo ON")
+            return False
+        self.desfazer = (VARIACOES[self.variacao-1], self.variacao,
+                         {i: list(d) for i, d in self.cache.items()}, self.acc)
+        for i in range(len(INSTRUMENTOS)):
+            for s in range(16):
+                vel, sub, prob, alt = dados.get(i, [(0, 0, 100, False)]*16)[s]
+                if not self.escrever_step(i, s, vel, sub, alt,
+                                          prob=prob if vel else None):
+                    self.log("(!) escrita interrompida no "
+                             f"{INSTRUMENTOS[i]} - desfazer_escrita volta o resto")
+                    return False
+                time.sleep(0.002)          # rajada: nao afogar a maquina
+        self.acc = accent & 0xFFFF
+        self.tr_out.send(dt1(addr_accent(self.variacao),
+                             mascara_para_nibbles(self.acc)))
+        if last_var is not None:
+            self.definir_last_var(last_var)
+        self.pintar()
+        self.log(f"pattern '{nome or '?'}' escrito na variacao "
+                 f"{VARIACOES[self.variacao-1]}")
+        return True
+
+    def desfazer_escrita(self):
+        """Volta o que escrever_pattern sobrescreveu (mesma rajada do PASTE)."""
+        if not getattr(self, "desfazer", None):
+            self.log("(!) nada para desfazer")
+            return
+        origem, var, blocos, mascara = self.desfazer
+        if var != self.variacao:
+            self.log(f"(!) o snapshot e da variacao {origem} - va ate ela "
+                     "para desfazer")
+            return
+        for i, dados_i in blocos.items():
+            for s in range(16):
+                b = s * BYTES_P_STEP
+                self.cache[i][b:b+BYTES_P_STEP] = dados_i[b:b+BYTES_P_STEP]
+                self.tr_out.send(dt1(addr_step(i, s, self.variacao),
+                                     dados_i[b:b+BYTES_P_STEP]))
+                time.sleep(0.002)
+        self.acc = mascara
+        self.tr_out.send(dt1(addr_accent(self.variacao),
+                             mascara_para_nibbles(mascara)))
+        self.desfazer = None
+        self.pintar()
+        self.log(f"desfeito: variacao {origem} de volta ao que era")
 
     def alternar(self, linha, step):
         # a linha mutada continua editavel: ela some do grid so quando voce pede,
@@ -1943,6 +2234,422 @@ class Motor:
                f"vel {vel_alvo}" + ("" if sub_alvo == 0 else f" + {MODOS[self.modo][0]}") \
                + (" + ALT" if alt_alvo else "")
         self.log(f"{INSTRUMENTOS[i]:3} step {step+1:2} -> {desc}")
+
+    def alternar_editor(self, i, step, fraco=False):
+        """Toggle de step vindo da JANELA: mesmo criterio do alternar() dos
+        pads, mas com o indice do instrumento direto (sem a geometria do
+        launchpad). i == len(INSTRUMENTOS) e a linha do ACCENT. Roda via
+        enfileirar(), na thread do motor."""
+        if self.modo_geral != MODO_ON or not self.carregado:
+            self.log("(!) o editor so escreve no modo ON")
+            return
+        if i == len(INSTRUMENTOS):
+            self.acc ^= (1 << step)
+            self.tr_out.send(dt1(addr_accent(self.variacao),
+                                 mascara_para_nibbles(self.acc)))
+            self.log(f"ACC step {step+1:2} -> "
+                     f"{'ON ' if self.acc & (1 << step) else 'OFF'}"
+                     f"  (0x{self.acc:04X})")
+            self.pintar()
+            return
+        vel_alvo = VEL_FRACA if fraco else VELOCIDADES[self.vel_idx]
+        sub_alvo, alt_alvo = MODOS[self.modo][1], self.alt
+        if (self.ler_vel(i, step) == vel_alvo
+                and self.ler_sub(i, step) == sub_alvo
+                and self.ler_alt(i, step) == alt_alvo):
+            vel_alvo, sub_alvo, alt_alvo = 0, 0, False
+        if not self.escrever_step(i, step, vel_alvo, sub_alvo, alt_alvo):
+            return
+        self.pintar()                      # o launchpad espelha na hora
+        desc = "OFF" if vel_alvo == 0 else \
+            f"vel {vel_alvo}" + ("" if sub_alvo == 0
+                                 else f" + {MODOS[self.modo][0]}") \
+            + (" + ALT" if alt_alvo else "")
+        self.log(f"{INSTRUMENTOS[i]:3} step {step+1:2} -> {desc}  (janela)")
+
+    def definir_step(self, i, step, vel, sub=0, alt=False, prob=None):
+        """Escreve um step inteiro de uma vez - e o que o menu de step da
+        janela usa. Sem isto, mudar velocity de um step pela tela exigiria
+        imitar o gesto do pad (escolher velocity global, escolher modo,
+        clicar), que e justamente o que o TR-EDITOR nao faz."""
+        if self.modo_geral != MODO_ON or not self.carregado:
+            self.log("(!) editar step so no modo ON")
+            return
+        if not 0 <= i < len(INSTRUMENTOS) or not 0 <= step < 16:
+            self.log(f"(!) step fora de faixa: inst {i}, step {step}")
+            return
+        if self.escrever_step(i, step, vel, sub, alt, prob=prob):
+            self.pintar()
+            self.log(f"{INSTRUMENTOS[i]:3} step {step+1:2} -> "
+                     + ("OFF" if not vel else
+                        f"vel {vel}"
+                        + (f" + {MODOS[sub][0]}" if sub else "")
+                        + (" + ALT" if alt else "")
+                        + (f" + prob {prob}%" if prob is not None else "")))
+
+    def esquecer_fx(self, nome):
+        """Tira um parametro do mapa - para recapturar do zero."""
+        if efeitos.apagar(nome):
+            self.mapa_fx = efeitos.carregar()
+            self.log(f"'{nome}' esquecido; pode capturar de novo")
+        else:
+            self.log(f"(!) '{nome}' nao estava no mapa capturado")
+
+    def definir_prob(self, i, step, pct):
+        """Escreve a PROBABILITY de um step ligado (byte 3, ver PROB_BYTE)."""
+        if self.modo_geral != MODO_ON or not self.carregado:
+            self.log("(!) probability so no modo ON")
+            return
+        if self.ler_vel(i, step) == 0:
+            self.log(f"(!) {INSTRUMENTOS[i]} step {step+1} esta desligado - "
+                     "probability so em step ligado")
+            return
+        if self.escrever_step(i, step, self.ler_vel(i, step),
+                              self.ler_sub(i, step), self.ler_alt(i, step),
+                              prob=pct):
+            self.log(f"{INSTRUMENTOS[i]:3} step {step+1:2} -> prob {pct}%"
+                     "  (nao testado em hardware ainda: confira de ouvido)")
+
+    # ── kit: nome e tones (enderecos ja provados pelo snap) ─
+    def ler_kit(self):
+        """Nome do kit + toneId dos 11 instrumentos.
+
+        Enderecos que o snap ja leu em hardware (10 00 00/1I 00). O toneId e
+        uint16 em 4 nibbles no comeco do bloco - formato do mapa do ARIA. O
+        NOME que corresponde a cada id e a hipotese do tones.py (posicao na
+        Preset Tone List); a sessao de tone confirma."""
+        if self.modo_geral != MODO_ON or not self.tr_out:
+            self.log("(!) ler kit so no modo ON")
+            return
+        d = ler_bloco(self.tr_in, self.tr_out, addr_kit_nome(), 16,
+                      timeout=SNAP_TIMEOUT)
+        self.kit_nome = ("".join(chr(b) for b in d if 32 <= b < 127).strip()
+                         if d else None)
+        for i in range(len(INSTRUMENTOS)):
+            t = ler_bloco(self.tr_in, self.tr_out, addr_kit_tone(i), 16,
+                          timeout=SNAP_TIMEOUT)
+            self.tone_ids[i] = nibbles_para_mascara(t[:4]) if t else None
+        self.log(f"kit '{self.kit_nome or '?'}' lido; toneIds: "
+                 + " ".join("?" if t is None else str(t)
+                            for t in self.tone_ids))
+
+    def definir_tone(self, i, tone_id):
+        """Troca o tone do instrumento i - o gesto INST do TR-EDITOR.
+
+        Escrita NUNCA testada em hardware (a leitura sim, via snap). DT1 em
+        endereco valido, entao sem risco de porta - o risco e semantico: se a
+        hipotese de id do tones.py estiver deslocada, entra o tone errado.
+        Round-trip nao prova som: OUVIR e conferir o nome no visor."""
+        if self.modo_geral != MODO_ON or not self.tr_out:
+            self.log("(!) trocar tone so no modo ON")
+            return
+        self.tr_out.send(dt1(addr_kit_tone(i), mascara_para_nibbles(tone_id)))
+        time.sleep(0.05)
+        t = ler_bloco(self.tr_in, self.tr_out, addr_kit_tone(i), 16,
+                      timeout=SNAP_TIMEOUT)
+        lido = nibbles_para_mascara(t[:4]) if t else None
+        self.tone_ids[i] = lido
+        self.log(f"{INSTRUMENTOS[i]}: toneId {tone_id} escrito, relido "
+                 f"{lido if lido is not None else '?'} - toque o pad e confira "
+                 "o som E o nome no visor da TR-8S (id->nome e hipotese)")
+
+    # ── mixer/FX: decodificacao por observacao (efeitos.py) ─
+    def _fx_tam_kit(self):
+        return 128 if self.fx_kit_grande else 16
+
+    def ler_fx(self):
+        """Rele os blocos que o mixer vigia: no do kit + 11 blocos de params.
+
+        Os 11 blocos 10 00 2I 00 sao leitura provada (snap). O no do kit so
+        foi lido a 16 B; a primeira chamada tenta 128 (endereco valido - o no
+        de pattern analogo ja foi lido a 128) e, sem resposta, cai para 16 e
+        o kit-level fica para o sniff do TR-EDITOR (sessao M2)."""
+        if self.modo_geral != MODO_ON or not self.tr_out:
+            self.log("(!) ler FX so no modo ON")
+            return
+        if self.fx_kit_grande is None:
+            d = ler_bloco(self.tr_in, self.tr_out, addr_kit_nome(), 128,
+                          timeout=SNAP_TIMEOUT)
+            self.fx_kit_grande = d is not None
+            if not self.fx_kit_grande:
+                self.log("no do kit nao respondeu a 128 bytes - kit-level "
+                         "fica para o sniff do TR-EDITOR (registrar na "
+                         "REFERENCIA 2.9)")
+        d = ler_bloco(self.tr_in, self.tr_out, addr_kit_nome(),
+                      self._fx_tam_kit(), timeout=SNAP_TIMEOUT)
+        if d:
+            self.fx_blocos["kit"] = list(d)
+        for i in range(len(INSTRUMENTOS)):
+            d = ler_bloco(self.tr_in, self.tr_out, addr_kit_param(i), 128,
+                          timeout=SNAP_TIMEOUT)
+            if d:
+                self.fx_blocos[i] = list(d)
+
+    def _fx_alvo(self, ent, inst=None):
+        """(chave do bloco, endereco base, tamanho) do parametro."""
+        if ent["tipo"] == "kit":
+            return "kit", addr_kit_nome(), self._fx_tam_kit()
+        return inst, addr_kit_param(inst), 128
+
+    @staticmethod
+    def _fx_ler_valor(bloco, ent):
+        """Valor de um parametro no bloco. Parametros de faixa 0-255 ocupam
+        DOIS bytes em nibbles, do mesmo jeito que a velocity (REFERENCIA 2.4):
+        valor = (hi << 4) | lo."""
+        off, n = ent["off"], ent.get("bytes", 1)
+        if not bloco or off + n > len(bloco):
+            return None
+        if n == 2:
+            return (bloco[off] << 4) | (bloco[off + 1] & 0x0F)
+        return bloco[off]
+
+    @staticmethod
+    def _fx_bytes(valor, ent):
+        if ent.get("bytes", 1) == 2:
+            return [(valor >> 4) & 0x0F, valor & 0x0F]
+        return [valor & 0x7F]
+
+    def iniciar_captura_fx(self, nome):
+        """Captura guiada: retrata os blocos e espera o controle mexer.
+
+        O Luan mexe SO no controle que quer mapear, no painel; o tick relê e
+        compara; o byte que mudou vira a entrada do mapa (efeitos.registrar).
+        Leitura passiva em enderecos validos - zero RQ1 novo no desconhecido.
+
+        Parametro de 2 bytes (faixa 0-255) so e registrado quando os DOIS
+        offsets vizinhos ja tiverem sido vistos mudando - por isso a instrucao
+        de girar o knob de ponta a ponta."""
+        nome = (nome or "").strip().lower()
+        if not nome:
+            self.log("(!) de um nome ao parametro antes de capturar")
+            return
+        if self.modo_geral != MODO_ON or not self.tr_out:
+            self.log("(!) captura so no modo ON")
+            return
+        self.ler_fx()
+        if not self.fx_blocos:
+            self.log("(!) nao consegui ler os blocos do kit - captura abortada")
+            return
+        cat = efeitos.POR_NOME.get(nome, {})
+        esperado = cat.get("bytes", 1)
+        self.captura_fx = {"nome": nome, "t": 0.0, "bytes": esperado,
+                           "vistos": {}, "chave": None,
+                           "antes": {k: list(v)
+                                     for k, v in self.fx_blocos.items()}}
+        dica = cat.get("dica")
+        self.log(f"capturando '{nome}': mexa SO nesse controle no painel"
+                 + (f" ({dica})" if dica else "")
+                 + ("  - gire de ponta a ponta, e um parametro de 2 bytes"
+                    if esperado == 2 else ""))
+
+    def cancelar_captura_fx(self):
+        self.captura_fx = None
+        self.log("captura cancelada")
+
+    def _fx_fechar_captura(self, c, chave, off, nbytes):
+        tipo = "kit" if chave == "kit" else "inst"
+        self.mapa_fx[c["nome"]] = efeitos.registrar(c["nome"], tipo, off,
+                                                    nbytes)
+        onde = ("no do kit" if tipo == "kit"
+                else f"params por instrumento (visto no {INSTRUMENTOS[chave]})")
+        self.log(f"CAPTURADO '{c['nome']}': {onde}, offset {off}"
+                 + (f" (2 bytes: {off} e {off+1})" if nbytes == 2 else "")
+                 + ". Mexa o controle novo na janela e OUCA para confirmar.")
+        self.captura_fx = None
+
+    def _tick_captura_fx(self):
+        c = self.captura_fx
+        if not c or time.time() - c["t"] < 0.35:
+            return
+        c["t"] = time.time()
+        alvos = [("kit", addr_kit_nome(), self._fx_tam_kit())] + \
+                [(i, addr_kit_param(i), 128)
+                 for i in range(len(INSTRUMENTOS))]
+        for chave, addr, tam in alvos:
+            d = ler_bloco(self.tr_in, self.tr_out, addr, tam,
+                          timeout=SNAP_TIMEOUT)
+            if not d:
+                continue
+            antes = c["antes"].get(chave)
+            self.fx_blocos[chave] = list(d)
+            if antes is None or list(d) == antes:
+                continue
+            difs = [off for off, (a, b) in enumerate(zip(antes, d)) if a != b]
+            c["antes"][chave] = list(d)
+            if len(difs) > 4:
+                # trocou de kit/tone, nao girou um knob: retrato renovado
+                self.log(f"(!) {len(difs)} bytes mudaram de uma vez - isso "
+                         "nao foi um knob; retrato renovado, tente de novo")
+                return
+            if c["chave"] is not None and c["chave"] != chave:
+                continue                       # ruido noutro bloco: ignora
+            c["chave"] = chave
+            for off in difs:
+                c["vistos"][off] = c["vistos"].get(off, 0) + 1
+            if c["bytes"] == 1:
+                self._fx_fechar_captura(c, chave, difs[0], 1)
+                return
+            # 2 bytes: preciso do par vizinho (hi e lo)
+            offs = sorted(c["vistos"])
+            par = next(((o, o + 1) for o in offs if o + 1 in c["vistos"]),
+                       None)
+            if par:
+                self._fx_fechar_captura(c, chave, par[0], 2)
+            else:
+                self.log(f"vi o offset {offs[0]} mexer; gire ate o OUTRO "
+                         "extremo para eu confirmar o par de bytes")
+            return
+
+    def anotar_opcao(self, nome, rotulo, inst=None):
+        """Le o valor ATUAL e associa ao rotulo que esta no visor da maquina.
+
+        E assim que os codigos dos enums (waveform do LFO, destino, tipo de
+        FX) sao descobertos: o Luan poe a opcao no visor e diz qual e."""
+        ent = self.mapa_fx.get(nome)
+        if not ent:
+            self.log(f"(!) '{nome}' ainda nao foi capturado")
+            return
+        rotulo = (rotulo or "").strip()
+        if not rotulo:
+            self.log("(!) escolha o rotulo da opcao que esta no visor")
+            return
+        chave, base, tam = self._fx_alvo(ent, inst)
+        if ent["tipo"] == "inst" and inst is None:
+            self.log(f"(!) '{nome}' e por instrumento - falta qual")
+            return
+        d = ler_bloco(self.tr_in, self.tr_out, base, tam, timeout=SNAP_TIMEOUT)
+        if not d:
+            self.log("(!) nao consegui reler o bloco")
+            return
+        self.fx_blocos[chave] = list(d)
+        valor = self._fx_ler_valor(d, ent)
+        opcoes = efeitos.registrar_opcao(nome, valor, rotulo)
+        if opcoes is not None:
+            ent["opcoes"] = opcoes
+        self.log(f"'{nome}': codigo {valor} = {rotulo}"
+                 f"  ({len(ent.get('opcoes', {}))} opcoes conhecidas)")
+
+    def definir_fx(self, nome, valor, inst=None):
+        """Escreve um parametro mapeado: DT1 de 1 ou 2 bytes (escrita de byte
+        em offset arbitrario e provada - REFERENCIA 3) e releitura do bloco
+        para conferir."""
+        ent = self.mapa_fx.get(nome)
+        if not ent:
+            self.log(f"(!) parametro '{nome}' nao mapeado")
+            return
+        if self.modo_geral != MODO_ON or not self.tr_out:
+            self.log("(!) FX so no modo ON")
+            return
+        if ent["tipo"] == "inst" and inst is None:
+            self.log(f"(!) '{nome}' e por instrumento - falta qual")
+            return
+        valor = max(ent.get("min", 0), min(ent.get("max", 127), int(valor)))
+        chave, base, tam = self._fx_alvo(ent, inst)
+        self.tr_out.send(dt1(addr_soma(base, ent["off"]),
+                             self._fx_bytes(valor, ent)))
+        d = ler_bloco(self.tr_in, self.tr_out, base, tam, timeout=SNAP_TIMEOUT)
+        lido = None
+        if d:
+            self.fx_blocos[chave] = list(d)
+            lido = self._fx_ler_valor(d, ent)
+        alvo = nome if inst is None else f"{nome} do {INSTRUMENTOS[inst]}"
+        self.log(f"{alvo} -> {efeitos.rotulo_valor(ent, valor)}"
+                 + (f" (relido {lido})" if lido is not None else "")
+                 + "  - o ouvido confirma, nao o round-trip")
+
+    def _fx_valores(self):
+        out = {}
+        for nome, ent in self.mapa_fx.items():
+            if ent["tipo"] == "kit":
+                out[nome] = self._fx_ler_valor(self.fx_blocos.get("kit"), ent)
+            else:
+                out[nome] = [self._fx_ler_valor(self.fx_blocos.get(i), ent)
+                             for i in range(len(INSTRUMENTOS))]
+        return out
+
+    # ── probability por instrumento (fileira PROB do mixer) ─
+    def _prob_inst(self, i):
+        """Prob comum aos steps ativos do instrumento, ou None se misto/vazio."""
+        ps = {self.ler_prob(i, s) for s in range(16) if self.ler_vel(i, s)}
+        return ps.pop() if len(ps) == 1 else None
+
+    def definir_prob_inst(self, i, pct):
+        """Escreve a probability em TODOS os steps ativos do instrumento."""
+        if self.modo_geral != MODO_ON or not self.carregado:
+            self.log("(!) probability so no modo ON")
+            return
+        n = 0
+        for s in range(16):
+            if self.ler_vel(i, s):
+                if not self.escrever_step(i, s, self.ler_vel(i, s),
+                                          self.ler_sub(i, s),
+                                          self.ler_alt(i, s), prob=pct):
+                    return
+                time.sleep(0.002)
+                n += 1
+        self.log(f"{INSTRUMENTOS[i]:3}: prob {pct}% em {n} steps ativos "
+                 "(nao testada em hardware - confira de ouvido)")
+
+    # ── utility (bloco 50 00 00 xx, NAO testado em hardware) ─
+    def _util_pronto(self):
+        if self.modo_geral != MODO_ON or not (self.tr_in and self.tr_out):
+            self.log("(!) utility so no modo ON (porta CTRL)")
+            return False
+        return True
+
+    def util_esta_tocando(self):
+        if not self._util_pronto():
+            return None
+        r = ler_util(self.tr_in, self.tr_out, UTIL_PLAYING)
+        if r is None:
+            self.log("utility playing: sem resposta (registrar na REFERENCIA)")
+            return None
+        toca = bool(r and r[0])
+        self.log(f"a maquina respondeu: {'TOCANDO' if toca else 'parada'} "
+                 f"(bytes {r}) - confira com os olhos e registre")
+        return toca
+
+    def util_versao(self):
+        if not self._util_pronto():
+            return None
+        r = ler_util(self.tr_in, self.tr_out, UTIL_VERSION)
+        if r is None:
+            self.log("utility version: sem resposta (registrar na REFERENCIA)")
+            return None
+        texto = "".join(chr(b) for b in r if 32 <= b < 127)
+        self.log(f"firmware: '{texto}' (bytes {r})")
+        return texto
+
+    def util_escrever_visor(self, texto):
+        """32 chars ASCII no visor da TR-8S. O ARIA usa isto DEPOIS de travar
+        a maquina (lock) - pode ser que sem lock o firmware sobrescreva no
+        refresh seguinte. E exatamente o que a observacao vai dizer."""
+        if not self._util_pronto():
+            return
+        dados = [ord(c) & 0x7F for c in texto.ljust(32)[:32]]
+        self.tr_out.send(dt1(addr_util(UTIL_DISPLAY), dados))
+        self.log(f"visor: '{texto[:32]}' enviado - apareceu na maquina? "
+                 "por quanto tempo? (registrar)")
+
+    def util_write_pattern(self):
+        """WRITE por SysEx: pede a maquina gravar o pattern ATUAL na memoria.
+
+        Nas capturas ele so aparece como commit de bulk transfer; que ele
+        tambem grave o buffer editado por DT1 e a hipotese da sessao - o
+        teste de verdade e religar a maquina e ver se o que o grid escreveu
+        sobreviveu."""
+        if not self._util_pronto():
+            return
+        if self.pattern_atual is None:
+            self.log("(!) nao sei o numero do pattern atual ainda "
+                     "(a proxima releitura pega)")
+            return
+        n = self.pattern_atual
+        self.tr_out.send(dt1(addr_util(UTIL_WRITE_PATTERN),
+                             [(n >> 7) & 0x7F, n & 0x7F]))
+        banco, dentro = "ABCDEFGH"[n // 16], n % 16 + 1
+        self.log(f"WRITE do pattern {banco}{dentro} enviado - o visor reagiu? "
+                 "religue a maquina depois e veja se a edicao sobreviveu")
 
     def visiveis(self):
         vis = self.lista_visivel()[self.base_inst:
@@ -2051,6 +2758,8 @@ class Motor:
                     self.recarregar()
                     self.log(f"Variacao {VARIACOES[self.variacao-1]} carregada. "
                              f"ACCENT = 0x{self.acc:04X}")
+                    self.ler_kit()
+                    self.ler_fx()
                 self.adotar_transporte()
             else:
                 self.modo_geral = modo
@@ -2211,6 +2920,7 @@ class Motor:
         with self.lock:
             if not self.lp_in:
                 return
+            self._drenar_fila()
             self._ler_clock()
             self._ler_pads()
             if self.modo_geral != MODO_ON:
@@ -2241,6 +2951,14 @@ class Motor:
                              + (" ".join(mutados) if mutados else "ninguem")
                              + f"  |  linhas: {self.visiveis()}")
                 self._ressincronizar()
+            if self.modo_geral == MODO_ON and self.chain:
+                try:
+                    self.chain.tick(self)
+                except Exception as exc:
+                    self.log(f"(!) chain quebrou e foi desarmado: {exc}")
+                    self.chain = None
+            if self.modo_geral == MODO_ON and self.captura_fx:
+                self._tick_captura_fx()
 
     def _ressincronizar(self):
         """Puxa o playhead de volta pro step que a MAQUINA diz estar tocando.
@@ -2326,6 +3044,30 @@ class Motor:
                          for i in self.cache} if self.carregado else {},
                 "alts": {i: [self.ler_alt(i, s) for s in range(16)]
                          for i in self.cache} if self.carregado else {},
+                "probs": {i: [self.ler_prob(i, s) for s in range(16)]
+                          for i in self.cache} if self.carregado else {},
+                "cache_invalido": set(self.cache_invalido),
+                "chain": self.chain.resumo() if self.chain else None,
+                "kit_atual": self.kit_atual,
+                "pattern_atual": self.pattern_atual,
+                "kit_nome": self.kit_nome,
+                "tone_ids": list(self.tone_ids),
+                # indices (nao so os nomes): a tela precisa marcar qual chip
+                # esta ativo, e o ALT era invisivel para ela
+                "alt": self.alt,
+                "vel_idx": self.vel_idx,
+                "modo_idx": self.modo,
+                "copia_cheia": self.copia is not None,
+                "desfazer_disponivel": bool(self.desfazer),
+                "polirritmia": self.polirritmia(),
+                "fx": self._fx_valores(),
+                "mapa_fx": {n: dict(e) for n, e in self.mapa_fx.items()},
+                "captura_fx": (self.captura_fx["nome"]
+                               if self.captura_fx else None),
+                "probs_inst": ([self._prob_inst(i)
+                                for i in range(len(INSTRUMENTOS))]
+                               if self.carregado else
+                               [None] * len(INSTRUMENTOS)),
             }
         finally:
             self.lock.release()
@@ -2402,10 +3144,178 @@ standby ({estilo}) - as ondas nascem sozinhas, a TR-8S nem precisa estar ligada.
         m.fechar()
 
 
+# ─────────────────────────────────────────────────────────────
+# Sessoes de hardware guiadas (rodar com o .app FECHADO - porta CTRL unica)
+# ─────────────────────────────────────────────────────────────
+def cmd_prob_watch():
+    """Sessao A: calibrar a tabela de PROBABILITY (REFERENCIA 2.4).
+
+    Le em loop os 8 bytes do step 1 do BD e imprime quando mudam. Leitura em
+    endereco PROVADO - zero risco de envenenar a CTRL (3.1).
+
+    Roteiro pro Luan:
+      1. maquina ligada e parada, variacao A aberta;
+      2. ligar o step 1 do BD no painel (o watch mostra a velocity);
+      3. long-press no pad do step + VALUE, percorrer CADA valor de probability
+         que o painel oferece, um por vez, esperando o watch imprimir;
+      4. ditar o valor do painel a cada linha nova; ao final, voltar pra 100%.
+    """
+    tin, tout = _portas_tr8s()
+    if not (tin and tout):
+        print("Porta TR-8S CTRL nao encontrada."); return
+    print("Observando o step 1 do BD (variacao A). Ctrl+C sai.\n"
+          "byte3 e a PROBABILITY; anote o valor do painel a cada mudanca.\n")
+    with EntradaMIDI(*tin) as tin, SaidaMIDI(*tout) as tout:
+        antes = None
+        try:
+            while True:
+                d = ler_bloco(tin, tout, addr_bloco(0, 0x01), 8)
+                if d and d[:BYTES_P_STEP] != antes:
+                    antes = d[:BYTES_P_STEP]
+                    vel = (d[VEL_HI] << 4) | d[VEL_LO]
+                    print(f"bytes={' '.join(f'{b:02X}' for b in antes)}   "
+                          f"byte3=0x{d[PROB_BYTE]:02X} "
+                          f"(formula linear diria {byte_para_prob(d[PROB_BYTE])}%)"
+                          f"   vel={vel}")
+                time.sleep(0.5)
+        except KeyboardInterrupt:
+            print("\nfim.")
+
+
+def cmd_kit_watch(argv):
+    """Sessao K: decodificar o bloco de params do instrumento (10 00 2I 00).
+
+    uso: kit_watch <BD|SD|...|RC>
+
+    E onde devem morar CTRL SELECT, INST FX e os knobs do kit - o TR-EDITOR
+    edita tudo isso e o endereco responde 128 bytes (lido pelo snap), mas
+    nenhum offset tem nome ainda. Leitura em endereco provado: zero risco.
+
+    Roteiro pro Luan (um gesto por vez, esperando o print entre um e outro):
+      1. maquina ligada, o instrumento escolhido selecionado no painel;
+      2. girar o knob CTRL um clique -> anotar o offset que mudou;
+      3. trocar o CTRL SELECT (SHIFT+INST, ou pelo TR-EDITOR) -> anotar;
+      4. trocar o INST FX -> anotar; mexer no knob do FX -> anotar;
+      5. ditar o que fez a cada linha nova do watch.
+    """
+    if not argv or argv[0].upper() not in INSTRUMENTOS:
+        print("uso: kit_watch <BD|SD|LT|MT|HT|RS|HC|CH|OH|CC|RC>"); return
+    i = INSTRUMENTOS.index(argv[0].upper())
+    tin, tout = _portas_tr8s()
+    if not (tin and tout):
+        print("Porta TR-8S CTRL nao encontrada."); return
+    print(f"Observando os 128 bytes de params do {INSTRUMENTOS[i]} "
+          f"(10 00 {0x20+i:02X} 00). Ctrl+C sai.\n"
+          "Mexa em UMA coisa por vez no painel/TR-EDITOR e anote o offset.\n")
+    with EntradaMIDI(*tin) as tin, SaidaMIDI(*tout) as tout:
+        antes = None
+        try:
+            while True:
+                d = ler_bloco(tin, tout, addr_kit_param(i), 128,
+                              timeout=SNAP_TIMEOUT)
+                if d and antes and d != antes:
+                    for off, (a, b) in enumerate(zip(antes, d)):
+                        if a != b:
+                            print(f"offset {off:3} (0x{off:02X}): "
+                                  f"{a:02X} -> {b:02X}")
+                    print()
+                if d:
+                    antes = d
+                time.sleep(0.4)
+        except KeyboardInterrupt:
+            print("\nfim.")
+
+
+def _num_pattern(arg):
+    """'A12' -> 11, '27' -> 27. 0-based no fio (banco A-H x 16)."""
+    a = arg.strip().upper()
+    if a and a[0] in "ABCDEFGH":
+        return (ord(a[0]) - ord("A")) * 16 + int(a[1:]) - 1
+    return int(a)
+
+
+def cmd_pattern(argv):
+    """Sessao B: troca remota de pattern via DT1 (mapa oficial do ARIA).
+
+    uso: pattern <A1..H16 | 0-127> [now]
+      sem 'now' -> escreve o PROXIMO pattern (01 00 00 02): a hipotese e que a
+                   maquina enfileira a troca pra virada, como no painel;
+      com 'now' -> escreve o pattern ATUAL (01 00 00 01): troca imediata?
+
+    NUNCA exercitado na nossa maquina. E DT1 em endereco da tabela oficial
+    (visto no fio nas capturas do ARIA) - nao e RQ1, nao envenena a CTRL.
+    Observar: trocou? na hora ou na virada? o visor mudou? Registrar na
+    REFERENCIA o resultado, positivo OU negativo."""
+    if not argv:
+        print("uso: pattern <A1..H16 | 0-127> [now]"); return
+    n = _num_pattern(argv[0])
+    if not 0 <= n <= 127:
+        print("pattern fora de 0-127"); return
+    off = OFF_PATTERN_ATUAL if "now" in argv[1:] else OFF_PATTERN_PROX
+    tin, tout = _portas_tr8s()
+    if not (tin and tout):
+        print("Porta TR-8S CTRL nao encontrada."); return
+    with SaidaMIDI(*tout) as out:
+        out.send(dt1(addr_soma(ADDR_PERF, off), [n]))
+    banco, dentro = "ABCDEFGH"[n // 16], n % 16 + 1
+    print(f"DT1 enviado: {'pattern ATUAL' if off == OFF_PATTERN_ATUAL else 'PROXIMO pattern'}"
+          f" = {banco}{dentro} (0x{n:02X}).\n"
+          "Observe a maquina: trocou? na hora ou na virada? o visor mudou?")
+
+
+def cmd_pc(argv):
+    """Sessao B, plano B: Program Change na porta comum, canal 10.
+
+    uso: pc <A1..H16 | 0-127>
+    A implementation chart diz que PC e transmitido para pattern; se ela
+    tambem RECONHECE e o que este teste decide. A chart ja errou 2x."""
+    if not argv:
+        print("uso: pc <A1..H16 | 0-127>"); return
+    n = _num_pattern(argv[0])
+    if not 0 <= n <= 127:
+        print("pattern fora de 0-127"); return
+    p = _porta_comum(entradas=False)
+    if not p:
+        print("Porta TR-8S comum (nao-CTRL) nao encontrada."); return
+    with SaidaMIDI(*p) as out:
+        out.send(mido.Message('program_change', channel=CANAL_TR8S, program=n))
+    print(f"Program Change {n} enviado na porta comum, canal 10.\n"
+          "Observe a maquina: trocou de pattern?")
+
+
+def cmd_var_mask(argv):
+    """Sessao C: a mascara de variacao (offsets 63-66) ACEITA escrita?
+
+    uso: var_mask <A-H>
+    Leitura provada (REFERENCIA 2.3.2); escrita nunca tentada. DT1 em endereco
+    valido e seguro. Round-trip nao prova obediencia (Metodo, regra 9): o que
+    decide e o OUVIDO - a maquina passou a tocar a variacao pedida?"""
+    if not argv or argv[0].strip().upper() not in "ABCDEFGH" or len(argv[0].strip()) != 1:
+        print("uso: var_mask <A-H>"); return
+    v = ord(argv[0].strip().upper()) - ord("A") + 1
+    tin, tout = _portas_tr8s()
+    if not (tin and tout):
+        print("Porta TR-8S CTRL nao encontrada."); return
+    with EntradaMIDI(*tin) as tin, SaidaMIDI(*tout) as tout:
+        alvo = addr_soma(ADDR_PATTERN, OFF_VAR_TOCANDO)
+        tout.send(dt1(alvo, mascara_para_nibbles(1 << (v - 1))))
+        time.sleep(0.1)
+        d = ler_bloco(tin, tout, ADDR_PATTERN, 128, timeout=SNAP_TIMEOUT)
+        if d:
+            m = nibbles_para_mascara(d[OFF_VAR_TOCANDO:OFF_VAR_TOCANDO + 4])
+            print(f"mascara relida: 0x{m:04X} "
+                  f"({'bate' if m == 1 << (v - 1) else 'NAO bate'} com o pedido)")
+        else:
+            print("(!) releitura falhou")
+    print(f"Pedida a variacao {argv[0].strip().upper()}. O que vale e o OUVIDO: "
+          "a maquina trocou? na hora ou na virada?")
+
+
 if __name__ == "__main__":
     cmd, resto = (sys.argv[1] if len(sys.argv) > 1 else ""), sys.argv[2:]
     simples = {"ports": cmd_ports, "learn": cmd_learn, "probe": cmd_probe,
-               "colors": cmd_colors, "dump": cmd_dump, "run": cmd_run}
+               "colors": cmd_colors, "dump": cmd_dump, "run": cmd_run,
+               "prob_watch": cmd_prob_watch}
     if cmd in simples:
         simples[cmd]()
     elif cmd == "standby":
@@ -2420,5 +3330,13 @@ if __name__ == "__main__":
         cmd_varrer(resto)
     elif cmd == "snapdiff" and len(resto) >= 2:
         cmd_snapdiff(resto[0], resto[1])
+    elif cmd == "pattern":
+        cmd_pattern(resto)
+    elif cmd == "pc":
+        cmd_pc(resto)
+    elif cmd == "var_mask":
+        cmd_var_mask(resto)
+    elif cmd == "kit_watch":
+        cmd_kit_watch(resto)
     else:
         print(__doc__)

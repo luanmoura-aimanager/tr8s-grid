@@ -1,0 +1,207 @@
+// grade-steps.mjs - a grade 13x16, espelho da aba PATTERN do TR-EDITOR.
+//
+// PINTURA SEM RECRIAR DOM: as 208 celulas nascem uma vez. A cada quadro
+// calcula-se um inteiro que empacota tudo que afeta a pintura (tipo, prob,
+// pendente) e compara com um Int32Array de cache. Igual -> nao toca no DOM.
+// Parado, o custo por quadro sao 208 comparacoes de inteiro.
+//
+// PLAYHEAD: um unico elemento movido por transform. Repintar 176 celulas a
+// cada step (4x por segundo a 120 bpm) derruba qualquer navegador.
+//
+// A REGRA DE COR e a de Motor.cor_do_step()/cor_base() em lp_tr8s.py:
+//     mudo > ALT > flam > sub > nota,  VEL_LIMIAR=64,  fora do last step.
+// As cores vem do Python (--c-*), da mesma tabela que pinta os LEDs.
+import { h, attr, prop, texto } from "../nucleo/dom.mjs";
+
+const LIMIAR = 64; // VEL_LIMIAR do lp_tr8s.py
+const SUB_FLAM = 1;
+
+// tipo -> nome da classe usada no CSS
+const TIPOS = [
+  "vazio",
+  "nota",
+  "nota-f",
+  "flam",
+  "flam-f",
+  "sub",
+  "sub-f",
+  "alt",
+  "alt-f",
+  "acc",
+  "mudo",
+  "mudo-f",
+  "fora",
+  "invalido",
+];
+
+function tipoDaCelula({ vel, sub, alt, mudo, fora, invalido, acc, ehAcc }) {
+  if (invalido) return 13;
+  if (fora) return 12;
+  if (ehAcc) return acc ? 9 : 0;
+  if (!vel) return 0;
+  const forte = vel > LIMIAR;
+  if (mudo) return forte ? 10 : 11;
+  if (alt) return forte ? 7 : 8;
+  if (sub === SUB_FLAM) return forte ? 3 : 4;
+  if (sub) return forte ? 5 : 6;
+  return forte ? 1 : 2;
+}
+
+export function gradeSteps({
+  instrumentos,
+  aoClicarCelula,
+  aoClicarRotulo,
+  aoMenuCelula,
+}) {
+  const LINHAS = instrumentos.length + 1; // + ACC
+  const raiz = h("div.grade", { role: "grid", "aria-label": "pattern" });
+  const celulas = new Array(LINHAS * 16);
+  const rotulos = new Array(LINHAS);
+  const cache = new Int32Array(LINHAS * 16).fill(-1);
+
+  // regua de numeros
+  raiz.append(h("div"));
+  for (let s = 0; s < 16; s++) {
+    raiz.append(h("div.num", { "data-tempo": s % 4 === 0 ? "" : null }, s + 1));
+  }
+
+  // ACC primeiro (como no TR-EDITOR), depois os instrumentos
+  const nomes = ["ACC", ...instrumentos];
+  nomes.forEach((nome, l) => {
+    const rot = h(
+      "button.rot",
+      { type: "button", "data-l": l, title: l === 0 ? "accent" : nome },
+      h("span", {}, nome),
+      h("small", {}, ""),
+    );
+    rot.addEventListener("click", () => aoClicarRotulo && aoClicarRotulo(l));
+    rotulos[l] = rot;
+    raiz.append(rot);
+    for (let s = 0; s < 16; s++) {
+      const c = h("button.cel", {
+        type: "button",
+        "data-l": l,
+        "data-s": s,
+        "data-tempo": s % 4 === 0 ? "" : null,
+        "aria-label": `${nome} step ${s + 1}`,
+      });
+      celulas[l * 16 + s] = c;
+      raiz.append(c);
+    }
+  });
+
+  const playhead = h("div.playhead", { hidden: true });
+  raiz.append(playhead);
+
+  // ── um unico listener para as 208 celulas ──
+  let pintandoArrasto = null; // {ligar:bool} decidido pela primeira celula
+  raiz.addEventListener("pointerdown", (e) => {
+    const c = e.target.closest(".cel");
+    if (!c) return;
+    const l = +c.dataset.l,
+      s = +c.dataset.s;
+    if (e.altKey || e.button === 2) {
+      aoMenuCelula && aoMenuCelula(l, s, c);
+      return;
+    }
+    pintandoArrasto = { feitas: new Set([`${l},${s}`]) };
+    aoClicarCelula && aoClicarCelula(l, s, { fraco: e.shiftKey });
+  });
+  raiz.addEventListener("pointerover", (e) => {
+    if (!pintandoArrasto) return;
+    const c = e.target.closest(".cel");
+    if (!c) return;
+    const k = `${c.dataset.l},${c.dataset.s}`;
+    if (pintandoArrasto.feitas.has(k)) return; // uma acao por celula
+    pintandoArrasto.feitas.add(k);
+    aoClicarCelula &&
+      aoClicarCelula(+c.dataset.l, +c.dataset.s, { fraco: e.shiftKey });
+  });
+  const soltar = () => {
+    pintandoArrasto = null;
+  };
+  window.addEventListener("pointerup", soltar);
+  window.addEventListener("pointercancel", soltar);
+  raiz.addEventListener("contextmenu", (e) => {
+    const c = e.target.closest(".cel");
+    if (c) {
+      e.preventDefault();
+      aoMenuCelula && aoMenuCelula(+c.dataset.l, +c.dataset.s, c);
+    }
+  });
+
+  return {
+    raiz,
+    /** e[chave] cru do /estado; pendentes = Set("l,s") aguardando a maquina */
+    pintar(e, pendentes = new Set()) {
+      const ptn = e.pattern || {},
+        subs = e.subs || {},
+        alts = e.alts || {};
+      const probs = e.probs || {},
+        mudo = e.mudo || [];
+      const invalidos = new Set(e.cache_invalido || []);
+      const lastVar = e.last_var || 16,
+        lastTrack = e.last_track || [];
+      const carregado = !!e.carregado;
+
+      for (let l = 0; l < LINHAS; l++) {
+        const ehAcc = l === 0;
+        const i = l - 1;
+        const lim = ehAcc ? lastVar : Math.min(lastVar, lastTrack[i] || 16);
+        const vels = ehAcc ? null : ptn[i] || [];
+        const sub = ehAcc ? null : subs[i] || [];
+        const alt = ehAcc ? null : alts[i] || [];
+        const pr = ehAcc ? null : probs[i] || [];
+        const invalido = !ehAcc && invalidos.has(i);
+        const mudoAqui = !ehAcc && !!mudo[i];
+
+        // rotulo: mudo riscado, linha com leitura falhada em vermelho
+        const rot = rotulos[l];
+        attr(rot, "data-mudo", mudoAqui ? "" : null);
+        attr(rot, "data-invalido", invalido ? "" : null);
+        texto(
+          rot.lastChild,
+          !ehAcc && lastTrack[i] && lastTrack[i] < 16
+            ? String(lastTrack[i])
+            : "",
+        );
+
+        for (let s = 0; s < 16; s++) {
+          const idx = l * 16 + s;
+          const t = !carregado
+            ? 0
+            : tipoDaCelula({
+                vel: vels ? vels[s] : 0,
+                sub: sub ? sub[s] : 0,
+                alt: alt ? alt[s] : 0,
+                mudo: mudoAqui,
+                fora: s >= lim,
+                invalido,
+                acc: ehAcc && e.acc & (1 << s),
+                ehAcc,
+              });
+          const p = !ehAcc && pr && vels && vels[s] && pr[s] < 100 ? pr[s] : 0;
+          const pend = pendentes.has(`${l},${s}`) ? 1 : 0;
+          const codigo = (t << 9) | (p << 1) | pend;
+          if (cache[idx] === codigo) continue; // nada mudou: nao toca
+          cache[idx] = codigo;
+          const c = celulas[idx];
+          attr(c, "data-c", TIPOS[t]);
+          if (p) {
+            attr(c, "data-prob", "");
+            prop(c, "--prob", p / 100);
+          } else attr(c, "data-prob", null);
+          attr(c, "data-pendente", pend ? "" : null);
+        }
+      }
+
+      // playhead: so quando a maquina toca E o grid esta na variacao que soa
+      const mostra = e.tocando && e.playhead_visivel && e.passo >= 0;
+      playhead.hidden = !mostra;
+      if (mostra) prop(playhead, "--p", e.passo);
+    },
+    marcarLinha(l) {
+      rotulos.forEach((r, k) => attr(r, "data-sel", k === l ? "" : null));
+    },
+  };
+}

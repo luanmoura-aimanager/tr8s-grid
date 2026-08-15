@@ -1,0 +1,169 @@
+/* componentes.css - knob, fader, LED, 7-seg, chips, toast, abas, tooltip.
+ * Tudo em CSS/SVG puro: nenhuma dependencia, nenhum build. */
+
+/* ── LED ──────────────────────────────────────────────────
+ * Estado tambem pela FORMA (anel vazado = desligado), nao so pela cor:
+ * quem nao distingue vermelho de verde continua lendo a tela. */
+.led{
+  width:10px; height:10px; border-radius:50%;
+  border:2px solid currentColor; background:transparent;
+  color:var(--erro); transition:color var(--media), box-shadow var(--media);
+  flex:none;
+}
+.led[data-estado="on"]{ background:currentColor; color:var(--ok);
+                        box-shadow:var(--glow) }
+.led[data-estado="alerta"]{ background:currentColor; color:var(--aviso);
+                            box-shadow:var(--glow) }
+.led-rot{ display:flex; align-items:center; gap:var(--e1);
+          font-size:var(--t-min); color:var(--fraco) }
+.led[data-pulsa="1"]{ animation:pulsar 1s ease-in-out infinite }
+@keyframes pulsar{ 50%{ opacity:.45 } }
+
+/* ── display 7 segmentos ──────────────────────────────── */
+.seg{
+  display:inline-flex; align-items:baseline; gap:var(--e1);
+  background:#0c0a09; border:1px solid var(--linha);
+  border-radius:var(--r1); padding:var(--e1) var(--e2);
+  font-family:var(--f-mono); font-variant-numeric:tabular-nums;
+  color:#ffb454; text-shadow:0 0 8px #ffb45455; letter-spacing:.06em;
+}
+.seg-rot{ font-size:var(--t-micro); color:var(--fraco); text-shadow:none;
+          letter-spacing:var(--esp-rot); text-transform:uppercase }
+.seg-val{ font-size:var(--t-med); font-weight:600 }
+.seg[data-vazio="1"] .seg-val{ color:var(--linha2); text-shadow:none }
+
+/* ── chips ────────────────────────────────────────────── */
+.chip{
+  display:inline-flex; align-items:center; gap:var(--e1);
+  background:var(--painel); border:1px solid var(--linha);
+  border-radius:var(--r-pill); padding:2px var(--e2);
+  font-size:var(--t-min); color:var(--fraco); white-space:nowrap;
+}
+.chip[data-on="1"]{ color:var(--tinta); border-color:var(--linha2) }
+.chip-mudo{ color:var(--info); border-color:#1e3a5f; background:#101a26 }
+
+/* ── knob ─────────────────────────────────────────────────
+ * O arco usa pathLength="100": o dasharray vira porcentagem direta e nao
+ * precisa de conta com raio. Varredura de 270 graus (-135 a +135). */
+.knob{
+  display:inline-flex; flex-direction:column; align-items:center; gap:2px;
+  width:60px; cursor:ns-resize; user-select:none; touch-action:none;
+  --pct:0; --ini:0; --tam:0;
+}
+.knob svg{ width:44px; height:44px; overflow:visible }
+.knob .trilho{ fill:none; stroke:var(--linha); stroke-width:4;
+               stroke-linecap:round; stroke-dasharray:75 100;
+               transform:rotate(135deg); transform-origin:center }
+.knob .arco{ fill:none; stroke:var(--info); stroke-width:4;
+             stroke-linecap:round; transform:rotate(135deg);
+             transform-origin:center;
+             stroke-dasharray:calc(var(--pct) * 75) 100;
+             transition:stroke-dasharray var(--rapida) linear }
+.knob .ponteiro{ stroke:var(--tinta); stroke-width:2; stroke-linecap:round;
+                 transform-origin:22px 22px;
+                 transform:rotate(calc(-135deg + var(--pct) * 270deg));
+                 transition:transform var(--rapida) linear }
+.knob .knob-rot{ font-size:var(--t-micro); color:var(--fraco);
+                 text-transform:uppercase; letter-spacing:.04em;
+                 text-align:center; line-height:1.2 }
+.knob .knob-val{ font-family:var(--f-mono); font-size:var(--t-min);
+                 font-variant-numeric:tabular-nums; color:var(--tinta2) }
+/* bipolar: o arco nasce no centro e cresce para os dois lados */
+.knob[data-bipolar] .arco{
+  stroke-dasharray:calc(var(--tam) * 75) 100;
+  stroke-dashoffset:calc(var(--ini) * -75);
+  stroke:var(--roxo);
+}
+/* fantasma: existe na maquina, offset ainda nao descoberto */
+.knob[data-fantasma]{ cursor:help }
+.knob[data-fantasma] .arco{ stroke:var(--linha2); stroke-dasharray:2 4;
+                            transform:rotate(135deg) }
+.knob[data-fantasma] .ponteiro{ stroke:var(--linha2); transform:rotate(-135deg) }
+.knob[data-fantasma] .knob-val{ color:var(--linha2) }
+.knob[data-fantasma]:hover .knob-rot,
+.knob[data-fantasma]:focus-visible .knob-rot{ color:var(--aviso) }
+.knob[data-acendendo]{ animation:acender var(--lenta) var(--saida) }
+@keyframes acender{ from{ filter:brightness(2.5) } to{ filter:none } }
+
+/* ── fader ────────────────────────────────────────────────
+ * O input e horizontal e o INVOLUCRO gira: writing-mode vertical so existe
+ * em navegador recente e quebrava o layout nos antigos. Assim o teclado e o
+ * leitor de tela continuam funcionando de graca. */
+.fader{ display:flex; flex-direction:column; align-items:center; gap:2px;
+        width:38px }
+.fader-cx{ position:relative; width:26px; height:92px; overflow:hidden }
+.fader-cx input[type=range]{
+  position:absolute; top:0; left:0; width:92px; height:26px; margin:0;
+  transform:rotate(-90deg) translate(-100%); transform-origin:top left;
+  accent-color:var(--ok); background:transparent; cursor:pointer;
+}
+.fader-cx::before{      /* escala: um traco a cada 25% */
+  content:""; position:absolute; inset:0; pointer-events:none;
+  background:repeating-linear-gradient(to top, var(--linha) 0 1px,
+             transparent 1px 25%);
+  opacity:.6;
+}
+.fader-val{ font-family:var(--f-mono); font-size:var(--t-min);
+            font-variant-numeric:tabular-nums; color:var(--tinta2) }
+.fader-rot{ font-family:var(--f-mono); font-size:var(--t-micro);
+            color:var(--fraco) }
+.fader[data-off] .fader-val{ color:var(--linha2) }
+.fader input:disabled{ opacity:.3; cursor:not-allowed }
+/* valor que a maquina ainda nao confirmou */
+.fader[data-pendente] .fader-val,.knob[data-pendente] .knob-val{
+  color:var(--aviso) }
+.fader[data-recusado] .fader-val,.knob[data-recusado] .knob-val{
+  animation:recusa var(--lenta) 2 }
+@keyframes recusa{ 50%{ color:var(--erro) } }
+
+/* ── abas ─────────────────────────────────────────────── */
+.abas{ display:flex; gap:2px; position:relative; padding:0 var(--e4);
+       border-bottom:1px solid var(--linha) }
+.abas [role=tab]{
+  background:none; border:0; border-radius:var(--r2) var(--r2) 0 0;
+  padding:var(--e2) var(--e3); color:var(--fraco); cursor:pointer;
+  font-size:var(--t-base); transition:color var(--rapida);
+}
+.abas [role=tab]:hover{ color:var(--tinta2) }
+.abas [role=tab][aria-selected=true]{ color:var(--tinta); font-weight:600 }
+.abas::after{        /* o realce desliza por transform, sem tocar no layout */
+  content:""; position:absolute; bottom:-1px; left:0; height:2px;
+  width:var(--aba-w,0); background:var(--info); border-radius:2px;
+  transform:translateX(var(--aba-x,0));
+  transition:transform var(--media) var(--saida), width var(--media) var(--saida);
+}
+
+/* ── toast ────────────────────────────────────────────── */
+#toasts{ position:fixed; right:var(--e4); bottom:44px; z-index:50;
+         display:flex; flex-direction:column; gap:var(--e2);
+         pointer-events:none; max-width:min(420px,90vw) }
+.toast{
+  background:var(--painel2); border:1px solid var(--linha2);
+  border-left:3px solid var(--info); border-radius:var(--r2);
+  padding:var(--e2) var(--e3); box-shadow:var(--sombra2);
+  font-size:var(--t-peq); color:var(--tinta);
+  animation:entrar var(--media) var(--saida);
+}
+.toast[data-tipo=erro]{ border-left-color:var(--erro) }
+.toast[data-tipo=ok]{ border-left-color:var(--ok) }
+.toast[data-tipo=aviso]{ border-left-color:var(--aviso) }
+.toast .vezes{ color:var(--fraco); font-family:var(--f-mono) }
+.toast[data-saindo]{ animation:sair var(--media) var(--saida) forwards }
+@keyframes entrar{ from{ opacity:0; transform:translateY(8px) } }
+@keyframes sair{ to{ opacity:0; transform:translateY(8px) } }
+
+/* ── tooltip ──────────────────────────────────────────── */
+#dica{
+  position:fixed; z-index:60; max-width:320px; pointer-events:none;
+  background:var(--painel2); border:1px solid var(--linha2);
+  border-radius:var(--r1); padding:var(--e1) var(--e2);
+  font-size:var(--t-peq); color:var(--tinta); box-shadow:var(--sombra2);
+  opacity:0; transition:opacity var(--rapida);
+}
+#dica[data-on]{ opacity:1 }
+
+/* ── barra de progresso fina (mapeamento de FX) ───────── */
+.barra{ height:3px; background:var(--linha); border-radius:2px;
+        overflow:hidden; width:120px }
+.barra > i{ display:block; height:100%; background:var(--ok);
+            width:calc(var(--p,0) * 100%); transition:width var(--media) }

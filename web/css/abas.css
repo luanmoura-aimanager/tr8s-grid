@@ -1,0 +1,93 @@
+/* abas.css - o chrome (topo, rodape, fita) e o layout de cada aba. */
+
+#topo{
+  display:flex; align-items:center; gap:var(--e4); flex-wrap:wrap;
+  padding:var(--e3) var(--e4) var(--e2);
+}
+#topo .displays{ display:flex; gap:var(--e2) }
+#topo .leds{ display:flex; gap:var(--e3) }
+#topo .modos{ display:flex; gap:var(--e1); margin-left:auto }
+#topo .modos .bt{ min-width:88px; text-align:center; font-weight:600 }
+#topo .modos .bt[aria-pressed="true"]{ color:#0b0b0b; border-color:transparent }
+#topo .modos .bt[data-cor="on"][aria-pressed="true"]{ background:var(--ok) }
+#topo .modos .bt[data-cor="off"][aria-pressed="true"]{ background:#8b95a3;
+  color:#0b0b0b }
+#topo .modos .bt[data-cor="sb"][aria-pressed="true"]{ background:var(--roxo) }
+#topo .acoes-topo{ display:flex; gap:var(--e1) }
+
+.chips-estado{ display:flex; gap:var(--e1); flex-wrap:wrap;
+               padding:0 var(--e4) var(--e2); min-height:22px }
+
+/* fita de alerta (sem contato com o servidor, quadro velho, motor desligado) */
+.fita{
+  margin:0 var(--e4) var(--e2); padding:var(--e2) var(--e3);
+  border-radius:var(--r2); font-size:var(--t-peq);
+  background:#2a1d10; border:1px solid #5a3d16; color:var(--aviso);
+}
+.fita[data-tipo=erro]{ background:#2a1414; border-color:#5a1e1e;
+                       color:#fca5a5 }
+
+main{ padding:var(--e4); padding-bottom:56px }
+.aba[hidden]{ display:none }
+
+#rodape{
+  position:fixed; left:0; right:0; bottom:0; z-index:40;
+  display:flex; align-items:center; gap:var(--e3);
+  padding:var(--e1) var(--e4); background:#0f0d0c;
+  border-top:1px solid var(--linha); font-size:var(--t-min); color:var(--fraco);
+}
+#rodape .msg{ flex:1; overflow:hidden; text-overflow:ellipsis;
+              white-space:nowrap }
+
+/* aviso de "precisa do motor" dentro de uma aba */
+.precisa-motor{
+  border:1px dashed var(--linha2); border-radius:var(--r3);
+  padding:var(--e4); text-align:center; color:var(--fraco);
+  font-size:var(--t-peq);
+}
+
+/* ── layout comum das abas ────────────────────────────── */
+.secao{ margin-bottom:var(--e5) }
+.secao > h3{ margin-bottom:var(--e2) }
+.cartao{ background:var(--painel); border:1px solid var(--linha);
+         border-radius:var(--r3); padding:var(--e3) }
+.duas{ display:grid; grid-template-columns:minmax(280px,340px) 1fr;
+       gap:var(--e4); align-items:start }
+.knobs{ display:flex; flex-wrap:wrap; gap:var(--e3) }
+.fila-inst{ display:flex; align-items:flex-end; gap:var(--e1) }
+.fila-inst .rot-fila{ width:110px; font-weight:600; font-size:var(--t-peq);
+                      padding-bottom:20px }
+
+/* fileira de botoes BD-RC, como as abas de instrumento do TR-EDITOR */
+.inst-tabs{ display:flex; gap:var(--e1); flex-wrap:wrap }
+.inst-tabs .bt{ min-width:44px; text-align:center; font-family:var(--f-mono) }
+.inst-tabs .bt[aria-pressed="true"]{ background:var(--painel2);
+  border-color:var(--info); color:var(--tinta) }
+
+/* listas (tones, biblioteca, chain) */
+.lista{ border:1px solid var(--linha); border-radius:var(--r2);
+        overflow:auto; max-height:340px }
+.lista table{ border-collapse:collapse; width:100% }
+.lista th{ position:sticky; top:0; background:var(--painel2); z-index:1;
+           font-size:var(--t-micro); text-transform:uppercase;
+           letter-spacing:var(--esp-rot); color:var(--fraco);
+           text-align:left; padding:var(--e1) var(--e2) }
+.lista td{ padding:var(--e1) var(--e2); border-bottom:1px solid var(--linha);
+           font-size:var(--t-peq) }
+.lista tbody tr{ cursor:pointer }
+.lista tbody tr:hover td{ background:var(--painel) }
+.lista tbody tr[aria-selected=true] td{ background:var(--painel2);
+                                        color:var(--tinta) }
+.lista tr.grupo td{ background:var(--fundo); color:var(--fraco);
+                    font-size:var(--t-micro); text-transform:uppercase;
+                    letter-spacing:var(--esp-rot); cursor:default }
+.vazio{ padding:var(--e4); text-align:center; color:var(--fraco);
+        font-size:var(--t-peq) }
+
+/* preview de pattern da biblioteca */
+.prev{ display:flex; flex-direction:column; gap:2px }
+.prev .l{ display:flex; align-items:center; gap:var(--e1) }
+.prev .n{ width:30px; font-family:var(--f-mono); font-size:var(--t-micro);
+          color:var(--fraco) }
+.prev .g{ display:grid; grid-template-columns:repeat(16,14px); gap:2px }
+.prev .g i{ height:12px; border-radius:2px; background:var(--c-vazio,#26221e) }

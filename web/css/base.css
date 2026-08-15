@@ -1,0 +1,80 @@
+/* base.css - reset curto, tipografia, foco e utilitarios. */
+*,*::before,*::after{ box-sizing:border-box }
+/* [hidden] tem que vencer: qualquer display: em classe (ex. .knobs{flex})
+   anula o display:none que o navegador da ao atributo, e o elemento
+   "escondido" aparece assim mesmo - foi o que empilhou os blocos de todos os
+   tipos de INST FX de uma vez */
+[hidden]{ display:none !important }
+html,body{ height:100% }
+body{
+  margin:0; background:var(--fundo); color:var(--tinta);
+  font:var(--t-base)/1.45 var(--f-ui);
+  -webkit-font-smoothing:antialiased;
+  overflow-x:hidden;              /* nada de scroll lateral por fileira larga */
+}
+h1,h2,h3,h4{ margin:0; font-weight:var(--peso-rot) }
+h1{ font-size:var(--t-med) }
+h2{ font-size:var(--t-base) }
+h3{ font-size:var(--t-min); letter-spacing:var(--esp-rot);
+    text-transform:uppercase; color:var(--fraco) }
+p{ margin:0 }
+button,input,select,textarea{ font:inherit; color:inherit }
+
+/* foco visivel de verdade - o anel padrao some no fundo escuro */
+:focus-visible{ outline:2px solid var(--foco); outline-offset:2px;
+                border-radius:var(--r1) }
+:focus:not(:focus-visible){ outline:none }
+
+/* ── botao padrao ─────────────────────────────────────── */
+.bt{
+  background:var(--painel); color:var(--tinta2);
+  border:1px solid var(--linha); border-radius:var(--r2);
+  padding:var(--e2) var(--e3); cursor:pointer;
+  transition:background var(--rapida), border-color var(--rapida),
+             color var(--rapida), transform var(--rapida);
+}
+.bt:hover{ border-color:var(--linha2); color:var(--tinta) }
+.bt:active{ transform:translateY(1px) }
+.bt[aria-pressed="true"],.bt.ativo{
+  background:var(--painel2); border-color:var(--info); color:var(--tinta) }
+.bt[disabled],.bt[aria-disabled="true"]{
+  opacity:.4; cursor:not-allowed; transform:none }
+.bt-perigo{ border-color:#7f1d1d; color:#fca5a5 }
+.bt-perigo:hover{ border-color:var(--erro); color:var(--erro) }
+.bt-peq{ padding:var(--e1) var(--e2); font-size:var(--t-peq) }
+
+/* botao com confirmacao: a barra escorrendo mostra o tempo que resta */
+.bt[data-armado]{ border-color:var(--aviso); color:var(--aviso);
+                  position:relative; overflow:hidden }
+.bt[data-armado]::after{
+  content:""; position:absolute; left:0; bottom:0; height:2px;
+  background:var(--aviso); width:100%;
+  animation:escoar var(--ms,2500ms) linear forwards;
+}
+@keyframes escoar{ from{ width:100% } to{ width:0 } }
+
+/* ── campos ───────────────────────────────────────────── */
+select,input[type=text],input[type=number],input[type=search]{
+  background:var(--painel); border:1px solid var(--linha);
+  border-radius:var(--r1); padding:var(--e1) var(--e2);
+  font-size:var(--t-peq);
+}
+label{ font-size:var(--t-peq); color:var(--fraco) }
+
+/* ── utilitarios ──────────────────────────────────────── */
+.linha{ display:flex; align-items:center; gap:var(--e2); flex-wrap:wrap }
+.col{ display:flex; flex-direction:column; gap:var(--e2) }
+.dica{ color:var(--fraco); font-size:var(--t-peq); line-height:1.5 }
+.aviso{ color:var(--aviso); font-size:var(--t-peq); line-height:1.5 }
+.mono{ font-family:var(--f-mono); font-variant-numeric:tabular-nums }
+.sr{ position:absolute; width:1px; height:1px; overflow:hidden;
+     clip:rect(0 0 0 0); white-space:nowrap }
+.painel{ background:var(--painel); border:1px solid var(--linha);
+         border-radius:var(--r3); padding:var(--e3) }
+.sep{ height:1px; background:var(--linha); margin:var(--e3) 0 }
+
+/* rolagem discreta, no tom do tema */
+::-webkit-scrollbar{ width:10px; height:10px }
+::-webkit-scrollbar-thumb{ background:var(--linha2); border-radius:var(--r-pill);
+                           border:3px solid var(--fundo) }
+::-webkit-scrollbar-track{ background:transparent }

@@ -373,6 +373,107 @@ acende alguns ms depois do comando sair, e o som sai da TR-8S por outro caminho.
 `AJUSTE_PLAYHEAD`, em pulsos, **calibrado no olho**: a 120 bpm, 0 ficou atrasado, 2
 acertou e 3 passou do ponto.
 
+### 2.9 O mapa OFICIAL da Roland — achado em 14/08/2026, nada testado aqui ainda
+
+O repo vizinho `TR-8S-SysEx/` (compuphonic) guarda o código-fonte do site **ARIA
+Sound Library** da Roland, e dentro dele, em `js/Tr8s/Tr8sData.js`, está **a tabela
+de endereços oficial da máquina**, em base64 (`TR8S_DATA`, decodificada por
+`eval(atob(...))`). As 4 capturas `.mmon` do mesmo repo mostram esses comandos em
+tráfego real (o `tr8s_sysex.py` agora lê `.mmon` direto). Não é engenharia reversa:
+é a Roland falando com a própria máquina.
+
+**Estatuto epistêmico: entre "deduzido" e "provado".** Veio de tabela oficial E foi
+visto no fio — mas contra OUTRA máquina, em outro contexto (o ARIA trava a máquina
+com `lock` antes de várias operações). Nada disso rodou na nossa TR-8S. Cada item
+entra em uso só depois da sua mini-sessão, e o resultado (positivo OU negativo) volta
+para cá.
+
+**Troca remota de kit e pattern** — o bloco `01 00 00 00` (o mesmo do MUTE, 2.7):
+
+| offset | conteúdo | como usar |
+|---|---|---|
+| `0` | **kit atual** (0-based) | DT1 de 1 byte troca o kit |
+| `1` | **pattern atual** (0–127 = banco A–H × 16) | DT1 troca na hora (?) |
+| `2` | **próximo pattern** | DT1 agenda a troca (na virada?) — candidato a chain |
+| `27` (`0x1B`) | patternSelect, máscara `1 << (ptn % 16)` em 4 nibbles | feedback dos pads? |
+
+Exemplo real da captura: `F0 41 10 00 00 00 45 12 01 00 00 01 7F 7F F7` = pattern
+atual → 127. O `cmd_pattern` do `lp_tr8s.py` manda exatamente isso (sessão B).
+
+**Bloco utility `50 00 00 xx`** — uma TERCEIRA semântica de mensagem: pergunta e
+resposta são **ambas DT1 no mesmo endereço** (não é RQ1/DT1):
+
+| sub | comando | observado na captura |
+|---|---|---|
+| `01`/`02`/`03` | **WRITE** de pattern/kit/tone, data = `[id>>7, id&0x7F]` | `12 50 00 00 02 00 7E 30` grava o kit 127 |
+| `10` | **está tocando?** | resposta 1 byte, 0 = parada — mata a armadilha do clock (2.8) |
+| `11` | lock/unlock (trava a máquina) | o ARIA trava antes de bulk; **nós não queremos** |
+| `12` | **escrever 32 chars ASCII no visor** | `"Optimizing..."` na captura |
+| `13`/`14` | versão do firmware / UID | `"1.13"` + serial |
+| `20`–`24` | optimize / freeArea / freeTone / deleteTone | gestão de samples |
+| `30`–`75` | get/send em bulk: pattern **24504 B**, kit **1312 B**, system 752 B | chunks de até 1024 B com packing 7-bit e progresso |
+
+Ressalva do WRITE: nas capturas ele só aparece como *commit de bulk transfer*. Que
+ele também grave o buffer editado por DT1 (o que o `[WRITE]` do painel faz) é
+hipótese — o teste é editar um step, mandar WRITE, **religar a máquina** e ver se
+sobreviveu.
+
+**Confirmações de coisas que estavam em aberto no 2.3:**
+- `10 00 10` … `10 00 1A` = **toneIds** dos 11 instrumentos (uint16 nibbled).
+  Em cima disso a aba **Instrumento** da janela troca o tone (o gesto INST do
+  TR-EDITOR): leitura pelos endereços que o snap já provou, escrita por DT1
+  nunca testada. **A ponte id→nome é HIPÓTESE**: a Preset Tone List (PDF, 514
+  tones, extraída para `tones.py` por `gen_tones.py`) não numera; assumimos
+  id = posição na lista (base 0) porque o ARIA reserva 624–1023 aos tones de
+  usuário. Sessão de confirmação: ler o toneId de um kit conhecido (ex.
+  BD do kit TR-808 deveria ser um dos "808 Bass") e conferir 2–3 pontos; se
+  houver deslocamento, corrigir só o `BASE_ID` do `tones.py`.
+- `10 00 20` … `10 00 2A` (params por instrumento, 128 B cada) é onde devem
+  morar **TUNE, DECAY, LEVEL, GAIN, PAN, sends de reverb/delay, INST FX,
+  destino e depth do LFO** — é o bloco que a aba INST do TR-EDITOR edita;
+  nenhum offset tem nome ainda.
+
+  **Dois bytes por parâmetro.** O manual (p. 29–33) dá faixas de **0–255**
+  (Decay, Level, sends, LFO Rate) e **−128…+127** (Tune, Pan, Gain, LFO
+  Depth) — nenhuma cabe num byte MIDI de 7 bits. A máquina deve usar o mesmo
+  truque do velocity (2.4): **dois bytes em nibbles, valor = (hi<<4)|lo**.
+  Por isso a captura de um parâmetro de faixa larga só fecha quando vê os
+  **dois offsets vizinhos** mexerem — daí a instrução "gire de ponta a ponta".
+  O manual também entrega que **o centro dos bipolares é 128** ("If the
+  setting of the parameter to be modified is 128 (the center value)", p. 33),
+  então −128…+127 é 0–255 deslocado. Isto é leitura de manual, não protocolo
+  provado: confirma-se comparando o número da janela com o do visor.
+
+  **LFO** (Reference p. 29 e 33), o que a janela cobre:
+  | parâmetro | escopo | valores | gesto no painel |
+  |---|---|---|---|
+  | Waveform | kit | SIN, TRI, SAW, SQR, S&H | SHIFT+[KIT] → LFO → Waveform |
+  | Tempo Sync | kit | OFF, ON | SHIFT+[KIT] → LFO → Tempo Sync |
+  | Rate | kit | 0–255, ou 64.00–0.25 step com sync | SHIFT+[KIT] → LFO → Rate |
+  | destino | instrumento | Tune, Decay, Level, Pan, ReverbSend, DelaySend, InstFX + params do tone | SHIFT+[INST] → LFO |
+  | Depth | instrumento | −128…+127 | SHIFT+[INST] → LFO Depth |
+
+  Os **códigos** das listas (qual número é S&H) não estão em lugar nenhum:
+  descobrem-se um a um pelo botão "Anotar opção" — põe a opção no visor,
+  escolhe o rótulo, e o app associa o valor lido ao nome.
+  Três caminhos de decodificação, todos passivos: a sessão K
+  (`python3 lp_tr8s.py kit_watch BD`), a **captura guiada da aba Mixer & FX**
+  (M1: nomear o parâmetro, Capturar, mexer só naquele knob — o app registra o
+  offset em `~/.lp_tr8s_fx.json` e o fader nasce) e o **sniff do TR-EDITOR**
+  (M2: MIDI Monitor + `.mmon`, cobre o que o painel não alcança; o resultado
+  vira entrada estática em `efeitos.py`). Parâmetros de kit-level (reverb,
+  delay, master FX) são procurados no nó do kit lido a 128 B — primeira
+  leitura nesse tamanho; se não responder, ficam só com o M2.
+- `20 00 00 14` = **kitReference** do pattern (uint16 nibbled) — vizinho dos bytes
+  17–19 "não identificados" do 2.3.1; vale re-olhar aquele trecho com esta lente
+- `30 00 00 00` = nome/categoria/tipo de **tone**; `40 00 00 00` = endereço/tamanho
+  do **sample** na flash; `00 01 00 n0` = 32 nomes de categoria de usuário
+- Os endereços do keep-alive continuam sem explicação — o ARIA não os usa; são
+  exclusivos do TR-EDITOR
+
+O firmware update (`50 00 00 74/75`) fica **registrado e intocado**: o risco é
+tijolar a máquina.
+
 ### 2.6 Comportamento da escrita
 
 - Escreve no **buffer ativo**, não na memória permanente. Para persistir, **aperta-se
@@ -419,13 +520,26 @@ acertou e 3 passou do ponto.
 **Observado uma vez, não confirmado:**
 - (nada no momento)
 
+**Documentado pela Roland (mapa do ARIA, 2.9), nunca exercitado NA NOSSA máquina:**
+- Troca remota de kit/pattern (`01 00 00 00/01/02`) — sessão B
+- Bloco utility inteiro: playing, visor, versão/UID, WRITE, bulk (2.9)
+- Que o WRITE utility grave o buffer editado por DT1 (só foi visto como commit de
+  bulk)
+
 **Deduzido, nunca exercitado:**
 - Que o bloco `20 0V 0B 08` seja mesmo o **TRIGGER OUT**. Ele existe, é distinto e
   tem formato de step; que seja o TRG vem do diagrama da p. 8, não de teste.
+- A **fórmula linear da probability** (`byte3 = (100 - pct) // 10`): três pontos
+  provados por leitura (2.4), o resto é interpolação. A sessão A (`prob_watch`)
+  fecha a tabela. A ESCRITA do byte 3 nunca foi tentada — o `definir_prob` da
+  janela avisa isso no log.
+- A **escrita da máscara de variação** (offsets 63–66): leitura provada (2.3.2),
+  escrita é a sessão C — round-trip não prova obediência.
 
 **Desconhecido:**
 - Bytes 0, 1 e 2 de cada step — os três últimos sem nome, agora que o 4 fechou
-- Comando WRITE
+- ~~Comando WRITE~~ — candidato forte no utility (`50 00 00 01`, ver 2.9), falta a
+  sessão
 - SCALE, SHUFFLE — com suspeitos em 2.3.1 (os bytes 17-19 do nó de pattern)
 - O last step dos dois **Fill In**
 - ~~Onde mora o mute de track~~ — **resolvido em 14/08/2026**, ver 2.7. Os CCs de
@@ -543,10 +657,18 @@ quando o Luan ouviu os chimbais sumirem.
 | Arquivo | Estado |
 |---|---|
 | `apc_tr8s.py` | **Funcionando e testado** — APC40 mkII |
-| `lp_tr8s.py` | Dois Launchpad Mini MK3. O motor virou `class Motor`; o `run` do terminal só instancia e chama `tick()` num laço |
-| `gui.py` | Janela Tk: ON / off / standby (chuva e ambiente), status, e quatro seções expansíveis |
+| `lp_tr8s.py` | Dois Launchpad Mini MK3. O motor virou `class Motor`; o `run` do terminal só instancia e chama `tick()` num laço. Desde 14/08/2026: fila de comandos da janela (`enfileirar`), probability (`PROB_BYTE`/`ler_prob`/`escrever_step(prob=)`), guarda do cache inválido, `escrever_pattern`+`desfazer_escrita`, luz da borda escurecida (`BRILHO_BORDA`), comandos utility (2.9) e as CLIs de sessão `prob_watch`/`pattern`/`pc`/`var_mask` |
+| `web/` | **A interface, desde 15/08/2026.** `index.html` + `css/` (tokens, base, componentes, grade, abas) + `js/` (nucleo: rede/store/dom/paleta/formato · comp: knob, fader, LED, grade-steps, toast, tooltip · abas: pattern, mixer, instrumento, biblioteca, chain, estocastica, avancado). Módulos ES nativos, zero build, zero dependência. Cada aba monta uma vez e só a visível é atualizada |
+| `servidor.py` + `pagina.html` | **A tela, desde 15/08/2026.** (`pagina.html` virou fallback: o servidor prefere `web/index.html`) Servidor HTTP local (só stdlib, 127.0.0.1) + página. O `.app` sobe o servidor e abre o navegador. Motor, SysEx e Launchpads inalterados: a página fala com o Motor pelas mesmas chamadas (`enfileirar`) que a janela Tk fazia. Segunda instância só reabre a página em vez de brigar pela porta CTRL |
+| ~~`gui.py`~~ | **Obsoleto** — a janela Tk. Não é mais empacotada; ver a nota sobre o Tk 8.5.9 abaixo |
+| `gui.py` (histórico) | **Reescrita em 14/08/2026** (a anterior quebrava no Tk 8.5.9 Aqua, que ignora cores de `tk.Button`/`tk.Checkbutton`). Janela fixa, botões de modo em Canvas com indicação do ativo, log em `~/Library/Logs/TR8S-Grid.log`. **Sem grid**: o físico já mostra steps; as abas são o que o físico não tem — Mixer & FX (captura guiada + fileira PROB), Instrumento (troca de tone), Biblioteca, Chain, Estocástica (com régua de probability por step), Avançado. A UI só fala com o Motor via `enfileirar` + `estado()`. Nada de Toplevel: o Tk 8.5.9 Aqua trava ao atualizar um recém-criado |
+| `efeitos.py` | Duas metades: o **catálogo** (o que a máquina tem — LFO, sends, INST, reverb/delay/master — com faixa, opções e o gesto que chega nele no painel, tirado do manual p. 24–33) e o **mapa decodificado** (offsets capturados em `~/.lp_tr8s_fx.json` + fixos do sniff M2). Nenhum offset vem de chute; parâmetro de 2 bytes e código de opção de lista são tratados explicitamente |
+| `biblioteca.py` | Puro-dados: 20 patterns clássicos em 14 estilos, com kit sugerido e preview. `python3 biblioteca.py` valida e imprime ASCII |
+| `tones.py` | Puro-dados: a Preset Tone List (514 tones, 19 categorias) para a aba Instrumento. **Não editar na mão** — regerar com `gen_tones.py`. O `BASE_ID` carrega a hipótese de id (2.9) |
+| `gen_tones.py` | Extrai a Preset Tone List do PDF da Roland e gera o `tones.py` (trata as 3 linhas quebradas do extrator de texto) |
+| `ferramentas.py` | `Chain` (reescrita perseguindo o playhead — provada em mesa; modos pattern/variação/PC aguardam as sessões B/C) e `Estocastica` (densidade/humanize/retrig/ghosts com seed reprodutível) |
 | `criar_app.py` | Monta o `TR-8S Grid.app` no Desktop. Ícone desenhado em Python puro (sem PIL), `sips` + `iconutil` fazem o resto |
-| `tr8s_sysex.py` | Parser/diff de capturas do MIDI Monitor |
+| `tr8s_sysex.py` | Parser/diff de capturas do MIDI Monitor — texto colado E `.mmon` (binary plist) |
 | `layout.html` | Referência visual dos botões — abrir no browser |
 | `gen_layout.py` | Gera o `layout.html`. Editar aqui, não no HTML |
 | `adesivo.pdf` | 34 etiquetas em **tamanho real**, uma página A4 — recortar e colar **em cima** dos botões (32) e nos cantos do logo (2) |
@@ -554,8 +676,73 @@ quando o Luan ouviu os chimbais sumirem.
 | `apagar_luzes.py` | Apaga os LEDs dos Launchpad. Alias `launchpad_blackout` no `~/.zshrc` |
 
 O `.app` carrega uma **cópia** dos scripts em `Contents/Resources/`. Depois de editar
-o `gui.py` ou o `lp_tr8s.py`, rodar `python3 criar_app.py` de novo. Se ele não abrir,
-o motivo cai em `~/Library/Logs/tr8s-grid.log`.
+`servidor.py`, `pagina.html` ou `lp_tr8s.py`, rodar `python3 criar_app.py` de novo. Se
+ele não abrir, o motivo cai em `~/Library/Logs/tr8s-grid.log`.
+
+### Por que a janela Tk morreu (15/08/2026)
+
+O Python 3.9 do Command Line Tools traz **Tk 8.5.9** — build de 2010, o Aqua legado
+que a Apple abandonou. Com a janela de abas ele entrava em **tempestade de redesenho**
+no macOS 26. Medido com o app lançado pelo Finder, contando eventos `Expose` em 2,5 s:
+
+| o que estava na tela | Expose |
+|---|---|
+| janela + label / canvas / 11 Scales / Notebook / label com wraplength (cada um isolado) | 17–97 |
+| App completo | **4313–6538** |
+| App com as abas vazias | 1190 |
+| App com abas vazias e sem o laço de UI | 200 |
+
+O `sample` do processo mostrava `TclServiceIdle → XDrawLine → NSView
+lockFocusIfCanDraw → setNeedsDisplayInRect` em loop: o layout nunca estabilizava, a
+janela nunca terminava de pintar e o processo passava de 600 MB (um esquecido aberto
+por 12 h chegou a 1,6 GB). **Não era layout**: a janela pedia 796×633 numa área de
+820×680 — cabia folgado. Nenhum widget isolado reproduzia; só o conjunto.
+
+Duas armadilhas de diagnóstico que custaram tempo e ficam registradas:
+1. **Testar com `withdraw()` esconde o problema** — sem desenho não há tempestade, e
+   todos os smoke tests passavam. Janela Tk só se testa visível.
+2. **`~/Library/Logs/TR8S-Grid.log` e `tr8s-grid.log` são o mesmo arquivo** (o disco
+   do macOS não distingue maiúsculas): o log do app apagava o stderr do lançador,
+   justamente onde apareceria o traceback. O do app virou `TR8S-Grid-app.log`.
+
+A troca para página web resolveu na medida: **23 MB e 0,6 % de CPU, estáveis**.
+
+### O servidor local não é privado (15/08/2026)
+
+Uma página web local é servida a **qualquer coisa aberta no navegador**. Sem
+proteção, um site qualquer poderia `POST /acao` e disparar um WRITE na TR-8S.
+O que fecha isso, tudo com a stdlib:
+
+- **token de sessão** (`secrets.token_urlsafe`) entregue por `?t=` na abertura e
+  guardado em cookie `SameSite=Strict; HttpOnly`; todo POST exige o header
+  `X-TR8S-Token` (um `<form>` de outro site não emite header custom, e um
+  `fetch` cross-site dispara preflight, que respondemos sem CORS);
+- validação de **`Origin`** e de **`Host`** (esta fecha DNS rebinding);
+- **CSP** `default-src 'none'` — só possível porque o CSS e o JS saíram do HTML
+  para `web/`;
+- limite de corpo, e `403` **com linha no log**: se aparecer, é informação.
+
+Testável inteiro por `curl`, sem hardware: POST sem token → 403, com token e
+motor desligado → 409 (erro legível, não silêncio), Origin forjada → 403, Host
+forjado → 403, `..%2f` → 403, corpo de 300 KB → 413, `OPTIONS` sem nenhum
+`Access-Control-Allow-*`.
+
+Dois detalhes que custam tempo se esquecidos: o **`mimetypes` do Python 3.9 não
+conhece `.mjs`** (sem registrar `text/javascript` o navegador recusa os módulos
+e a página fica em branco), e o `_porta_livre()` antigo tratava **qualquer**
+listener na porta como "sou eu mesmo" — agora o processo deixa
+`~/.lp_tr8s_servidor.json` (0600) e a segunda instância confirma por `GET /ping`
+antes de só reabrir a página.
+
+### Armadilha de teste: aba em segundo plano não pinta
+
+`requestAnimationFrame` não dispara em aba oculta, e o laço de estado cai para
+2 s com `document.hidden`. Isso é o comportamento certo — mas escondeu um bug
+real: **nada forçava um repaint ao voltar para a aba**, então a tela mostrava o
+quadro velho por até 2 s. O `store` agora anota o render devido e o refaz no
+`visibilitychange`. Vale para o diagnóstico também: automação de browser roda a
+aba em background, então `document.hidden` é `true` e a tela parece morta — foi
+preciso ativar o Chrome de verdade para validar a pintura.
 
 **Duas armadilhas de macOS que custaram a primeira tentativa** (13/08/2026), ambas
 invisíveis pelo Terminal e só reproduzíveis pelo Finder:
@@ -1057,7 +1244,27 @@ o aparelho enumerado primeiro é o da **direita**:
 Não hardcodar essa tabela — vale só para aquela enumeração. É o `learn` que amarra
 índice → aparelho, e o snapshot que detecta quando a amarração venceu.
 
-### Onde parou agora
+### Onde parou em 15/08/2026 (fim da sessão da interface)
+
+A tela saiu do Tkinter e virou página web (ver §4). Estão no ar e **validados**:
+o grid da aba Pattern conferido contra os Launchpads, a barra de estado, o
+seletor BD–RC, a biblioteca, o chain, a estocástica e a aba Avançado.
+
+O catálogo de efeitos está completo — **243 parâmetros** do Reference p. 24–37
+(INST 9 · INST FX 97 · REVERB 7 · DELAY 23 · MASTER FX 102 · LFO 3 · KIT 2) —
+e a aba Efeitos desenha todos, **todos apagados**, porque nenhum offset é
+conhecido.
+
+**O próximo passo é a sessão de sniff do TR-EDITOR (M2)**, que é o que
+transforma esses 243 knobs apagados em controles de verdade. A ferramenta de
+decodificação já existe: `python3 tr8s_sysex.py fx <captura.mmon>` lista as
+mudanças em ordem cronológica e marca as de 2 bytes. Roteiro em 7.2, item 6.
+
+Continuam de pé, e não dependem da interface: `prob_watch` (fecha a tabela de
+probability), `pattern B2` (troca remota — destrava o chain de verdade) e
+conferir o nome do tone da aba Instrumento contra o visor.
+
+### Onde parou antes disso
 
 Os botões estão mapeados (seção 5), o app está no Desktop, e o HIDE e o LAST STEP
 funcionam. O que resta não é ergonomia: é **protocolo que ainda não foi decodificado**.
@@ -1152,13 +1359,41 @@ precedência de cor, wrap do playhead, lote de SysEx de LED, desenhos, ondinha) 
    A primeira versão eram tiras em L com furos redondos, medindo o bezel inteiro a
    partir da spec de 181 mm; virou lixo assim que se soube a forma e a ideia.
 
+6. **Tudo que entrou em 14/08/2026 com a reforma da janela** — escrito e testado em
+   mesa (testes de unidade sem porta), **nada em hardware**. A fila de sessões, da
+   mais barata para a mais cara:
+
+   | Sessão | O quê | Ferramenta | Risco |
+   |---|---|---|---|
+   | A | Fechar a tabela de probability (o painel dita, o watch lê o byte 3) | `python3 lp_tr8s.py prob_watch` | zero (leitura em endereço provado) |
+   | — | Calibrar `BRILHO_BORDA` olhando o adesivo (e o quanto o "ativo" precisa se destacar) | abrir o `.app`, modo ON | zero |
+   | — | GUI nova no ar: modos indicando o ativo, editor pintando o pattern real, playhead em fase, clique escrevendo (ouvir!) | `.app` | zero |
+   | — | `definir_prob` de 50% num step e OUVIR a máquina pular o step ~metade das voltas | janela, duplo clique no step | zero |
+   | B | Troca remota de pattern: `pattern <A1..H16>` (nextPattern), depois com `now` (currentPattern), tocando e parada; `pc <n>` como plano B | `python3 lp_tr8s.py pattern B2` | baixo (DT1 do mapa oficial; não é RQ1) |
+   | — | Tone: abrir a aba Instrumento, conferir se o nome mostrado bate com o visor da máquina (valida a hipótese de id do tones.py); trocar o BD por outro tone e OUVIR | aba Instrumento | baixo (leitura provada; escrita DT1 nova) |
+   | K | Decodificar CTRL SELECT / INST FX / knobs do kit: watch nos 128 B de params do instrumento, um gesto por vez | `python3 lp_tr8s.py kit_watch BD` | zero (leitura provada) |
+   | ~~grid da tela~~ | ~~Comparar o grid da aba Pattern com os Launchpads e o painel~~ — **FEITO 15/08/2026: o grid está igual.** Valida a tradução inteira de `cor_do_step()` para CSS (nota forte/fraca, flam, sub step, ALT, accent, linha muda, step além do last step) e a régua de last step. A escrita pela tela fica liberada para teste | aba Pattern | — |
+   | M1 | Mixer: escolher o parâmetro na lista do catálogo (ela mostra o gesto), Capturar, mexer SÓ nesse controle — **girando de ponta a ponta** nos de 2 bytes. Nas listas (waveform, destino do LFO, tipos de FX), depois de capturar, anotar cada opção com o visor na opção. Depois mover o controle novo e OUVIR | aba Mixer & FX | baixo (leitura passiva + escrita em offset capturado) |
+   | M2 | Sniff do TR-EDITOR (.app FECHADO): MIDI Monitor na porta CTRL + TR-EDITOR; mexer UM controle por vez nas abas EFX e INST, anotando a ordem; salvar o `.mmon` — o `tr8s_sysex.py` lê direto e os offsets viram entradas fixas do `efeitos.py` | MIDI Monitor + TR-EDITOR | zero (escuta passiva) |
+   | — | Probability fácil (depois da sessão A): fader PROB do CH a ~50% com a máquina tocando → o chimbal falha metade das voltas; régua por step da Estocástica confere com o painel | abas Mixer / Estocástica | zero |
+   | C | Escrita da máscara de variação | `python3 lp_tr8s.py var_mask B` | baixo |
+   | — | Biblioteca: escrever um pattern numa variação descartável, ouvir, Desfazer | aba Biblioteca | zero |
+   | — | Chain reescrita de ponta a ponta: 2 entradas × 2 reps trocando na virada sem furo audível | aba Chain | zero |
+   | — | Estocástica: densidade audível; mesma seed = mesmo resultado; Reverter | aba Estocástica | zero |
+   | — | Utility: está tocando? / versão / visor / WRITE (religar depois!) | aba Avançado | baixo (2.9) |
+
+   As CLIs de sessão exigem o `.app` **fechado** (porta CTRL única). Registrar cada
+   resultado aqui, positivo ou negativo, como manda o Método.
+
 ---
 
 ## 8. Ideias registradas, não implementadas
 
 - **Edição silenciosa + lançamento separado:** CLIP STOP escolhe onde editar,
   SHIFT + CLIP STOP dispara a troca de variação na máquina. Depende de capturar o
-  comando de troca de variação.
+  comando de troca de variação — a dimensão de *pattern* destravou com o mapa do
+  ARIA (2.9, `01 00 00 01/02`, sessão B); a de *variação* é a sessão C (escrita da
+  máscara 63–66).
 - **Controladora custom:** desenhos SVG existem (`tr_grid_8s.svg` 16×13,
   `tr_grid_1000.svg` 16×12). Cérebro RP2040 como USB MIDI class-compliant, matriz
   com diodos, LEDs SK6812/WS2812B. Rota NeoTrellis (12 placas 4×4 + NeoKey 1x4 QT)
@@ -1174,7 +1409,13 @@ precedência de cor, wrap do playhead, lote de SysEx de LED, desenhos, ondinha) 
 
 ## 9. Referências
 
-- `github.com/compuphonic/TR-8S-SysEx` — dumps de kits, parou antes dos patterns
+- `github.com/compuphonic/TR-8S-SysEx` — clone local em `../TR-8S-SysEx/`. Muito
+  mais valioso do que parecia: `js/Tr8s/Tr8sData.js` carrega **o mapa de endereços
+  oficial da Roland** em base64 (ver 2.9), e os 4 `.mmon` são tráfego real do site
+  ARIA (o `tr8s_sysex.py` lê `.mmon` direto)
+- `github.com/surge-synthesizer/stochas` — o sequenciador estocástico que inspirou
+  a aba Estocástica (probabilidade por célula, poly bias→densidade, humanize,
+  retrigger, seed estável)
 - Thread do Elektronauts sobre SysEx da TR-8S
 - Launchpad Mini MK3 Programmer's Reference (Novation)
 - Manuais em `/mnt/project/`: `TR8S_Reference_eng05_W.pdf`,
