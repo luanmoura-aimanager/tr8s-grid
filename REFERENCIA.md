@@ -517,8 +517,21 @@ tijolar a máquina.
 - **Variação que está tocando** (2.3.2) — confirmada em três variações
 - **Byte 4 do step = ALTERNATE** (2.4) — confirmado de ouvido em 14/08/2026
 
+- **O byte 1 da região de pattern é `pattern × 16 + variação`** (16/08/2026,
+  ver 7) — com carry de 7 bits para o byte 0. Provado no sniff do TR-EDITOR e
+  conferido em quatro patterns, incluindo os que transbordam. Isto corrige um
+  erro que estava no projeto **desde o primeiro dia**: todo endereço caía no
+  pattern 0 (1-01).
+- **`10 KK 00 00` = nome do kit KK**, e o byte de kit do perf é **0-based**
+  (visor "003" ↔ perf `2` ↔ `10 02` = TR-707)
+- **`20 00 00 14`–`15` = kitReference do pattern do buffer**, 1-based — o
+  detector de dessincronia, validado nos dois estados (7)
+
 **Observado uma vez, não confirmado:**
-- (nada no momento)
+- A TR-8S responde um bloco **truncado** (1 byte) no instante em que troca de
+  pattern. Visto três vezes em 16/08/2026, sempre no mesmo momento; não foi
+  investigado além de tratar o caso. Quem ler `01 00 00 00` sem guarda de
+  tamanho quebra ali — foi o que derrubou a primeira versão do `pattern_watch`.
 
 **Documentado pela Roland (mapa do ARIA, 2.9), nunca exercitado NA NOSSA máquina:**
 - Troca remota de kit/pattern (`01 00 00 00/01/02`) — sessão B
@@ -657,7 +670,7 @@ quando o Luan ouviu os chimbais sumirem.
 | Arquivo | Estado |
 |---|---|
 | `apc_tr8s.py` | **Funcionando e testado** — APC40 mkII |
-| `lp_tr8s.py` | Dois Launchpad Mini MK3. O motor virou `class Motor`; o `run` do terminal só instancia e chama `tick()` num laço. Desde 14/08/2026: fila de comandos da janela (`enfileirar`), probability (`PROB_BYTE`/`ler_prob`/`escrever_step(prob=)`), guarda do cache inválido, `escrever_pattern`+`desfazer_escrita`, luz da borda escurecida (`BRILHO_BORDA`), comandos utility (2.9) e as CLIs de sessão `prob_watch`/`pattern`/`pc`/`var_mask` |
+| `lp_tr8s.py` | Dois Launchpad Mini MK3. O motor virou `class Motor`; o `run` do terminal só instancia e chama `tick()` num laço. Desde 14/08/2026: fila de comandos da janela (`enfileirar`), probability (`PROB_BYTE`/`ler_prob`/`escrever_step(prob=)`), guarda do cache inválido, `escrever_pattern`+`desfazer_escrita`, luz da borda escurecida (`BRILHO_BORDA`), comandos utility (2.9) e as CLIs de sessão `prob_watch`/`pattern`/`pc`/`var_mask`. Desde 16/08/2026: `pattern_watch` (perf + nó de pattern + grid na mesma volta, com autoteste e recusa de rodar com o motor ligado — ver 7) e o detector `_conferir_troca_de_pattern` |
 | `web/` | **A interface, desde 15/08/2026.** `index.html` + `css/` (tokens, base, componentes, grade, abas) + `js/` (nucleo: rede/store/dom/paleta/formato · comp: knob, fader, LED, grade-steps, toast, tooltip · abas: pattern, mixer, instrumento, biblioteca, chain, estocastica, avancado). Módulos ES nativos, zero build, zero dependência. Cada aba monta uma vez e só a visível é atualizada |
 | `servidor.py` + `pagina.html` | **A tela, desde 15/08/2026.** (`pagina.html` virou fallback: o servidor prefere `web/index.html`) Servidor HTTP local (só stdlib, 127.0.0.1) + página. O `.app` sobe o servidor e abre o navegador. Motor, SysEx e Launchpads inalterados: a página fala com o Motor pelas mesmas chamadas (`enfileirar`) que a janela Tk fazia. Segunda instância só reabre a página em vez de brigar pela porta CTRL |
 | ~~`gui.py`~~ | **Obsoleto** — a janela Tk. Não é mais empacotada; ver a nota sobre o Tk 8.5.9 abaixo |
@@ -1202,6 +1215,29 @@ import rtmidi
 m = rtmidi.MidiIn(); [ (i, m.get_port_name(i)) for i in range(m.get_port_count()) ]
 ```
 
+### O índice nunca foi a identidade (corrigido em 16/08/2026)
+
+O `learn` gravava "esquerdo = índice 6" mais um snapshot da lista de portas, e
+qualquer diferença no snapshot **derrubava o app**: "as portas MIDI mudaram,
+aperte Recalibrar". A causa real apareceu ao vivo e é das mais banais — o Luan
+plugou um **KeyLab 49 mk3**, que entrou nos índices 3 e 4 e empurrou os dois
+Launchpad em +2. Os índices salvos passaram a apontar para o teclado, e a
+recusa estava certíssima: SysEx de LED no aparelho errado.
+
+Mas o índice sempre foi só *onde a porta calhou de cair naquele dia*. A
+identidade é o par **(nome, n-ésima ocorrência)** — que é exatamente a
+distinção que o mido apaga e que motivou este projeto a usar rtmidi cru.
+
+O `resolver_layout()` reencontra cada Launchpad por esse par, e o
+`carregar_layout()` e o servidor passaram a usar os dois a mesma função. Só
+recusa quando um aparelho **sumiu de verdade** (Launchpad desligado), que é
+quando recusar é a resposta certa. Layouts antigos migram sozinhos: o ordinal
+é deduzido do snapshot que o `learn` velho já salvava, sem obrigar ninguém a
+apertar pad de novo.
+
+Medido na situação real: esquerdo 6 → 8, direito 4 → 6, ambos caindo em portas
+de Launchpad.
+
 rtmidi enumera 7 entradas (os dois aparelhos inteiros); o mido devolve 5. **Dois
 bugs distintos** em `mido/backends/rtmidi.py`:
 
@@ -1319,22 +1355,179 @@ persistiu. O que já se sabe:
   motor (reescrever `01 00 00 01` com o mesmo n ao detectar troca) que
   **pode não fazer nada**.
 
-**Roteiro do debug com calma (próxima sessão), do isolante ao complexo:**
+#### 16/08/2026, tarde — a observação que estreitou o campo
 
-1. App **fechado**. Máquina tocando o pattern X, variação A só.
-   `python3 lp_tr8s.py prob_watch` (vigia o step 1 do BD na var A).
-   Ligar/desligar o step 1 do BD **no painel** → o watch imprime?
-   - Imprime → o nó 20 segue o pattern corrente; o bug é do motor
-     (variação aberta/cache/rodízio) — instrumentar o motor.
-   - Silêncio → **buffer dessincronizado confirmado**; ir ao passo 2.
-2. Com o watch rodando, trocar o pattern **pelo painel** e repetir o toggle.
-   Depois trocar **remotamente** (`pattern <n>`) e repetir. Isola qual troca
-   dessincroniza.
-3. Se dessincroniza: testar ressincronizadores um a um, com o watch aberto —
-   escrever `01 00 00 01` = n; `01 00 00 02` = n; `UTIL 0x12`/GET-like?
-   O TR-EDITOR resolve com o botão GET — se nada funcionar, capturar o GET
-   dele (1 gesto) e imitar.
-4. Só então revalidar grid/ghosts/click-to-sound.
+O Luan reportou o sintoma com precisão: trocando de pattern no painel **com a
+máquina tocando**, o **número no topo da tela muda** (`ptn 2-05` → `2-06`) mas
+**o grid continua com os steps do pattern anterior**.
+
+Isso, lido contra o código, já elimina várias hipóteses **sem gastar hardware**:
+
+1. O número só é escrito em `ler_mudos()`. Se ele mudou, o `if` da detecção
+   disparou → `pattern_trocou = True` **e** o resync especulativo foi enviado.
+   Ou seja: **o offset 1 do perf acompanha a troca feita no painel** (era
+   leitura nunca confirmada; agora é observação) **e o resync não resolve**.
+2. Com o flag levantado, o `tick()` chama `recarregar()`, que relê os 11 blocos.
+3. Se essas leituras tivessem **falhado**, o grid ficaria **em branco** e o log
+   encheria de "(!) leitura do BD falhou". Não é o que acontece.
+4. E o `_reler_pattern_rodizio()` relê o grid inteiro a cada ~3 s, para sempre.
+   Esperar não conserta.
+
+**Dedução (do código, não medida):** a máquina está devolvendo os bytes do
+pattern **antigo** em `20 0V I 08`. Falta separar um terceiro caso que a
+dedução não alcança e que muda todo o conserto: o buffer pode acompanhar
+**com atraso** (ou só na virada do compasso), e aí o `recarregar()` disparado
+na hora lê cedo demais e nunca tenta de novo.
+
+**A ferramenta:** `python3 lp_tr8s.py pattern_watch [A..H] [BD SD]`
+(`--segundos N` limita a duração). Olha as **três camadas na mesma volta** e
+imprime só o que muda, com carimbo de tempo — porque a **ordem e o atraso**
+entre elas são metade da resposta:
+
+| camada | endereço | mostra |
+|---|---|---|
+| perf | `01 00 00 00` | offset 0 = kit, **1 = pattern atual**, 2 = próximo |
+| pattern | `20 00 00 00` | nome (0–15), variações habilitadas (63–66), last step A–H |
+| grid | `20 0V I 08` | as 16 velocities do instrumento, em linha |
+
+Tudo leitura, e só em endereço provado — nenhum risco da armadilha 3.1. Tem
+**autoteste periódico** (se a máquina calar, ele diz) e **recusa rodar com o
+motor ligado**: no CoreMIDI a porta CTRL aceita dois clientes, então nada
+falha de forma visível — os dois processos passam a consumir a resposta um do
+outro e a medida sai errada **sem sintoma**. (Este erro foi cometido ao
+escrever a ferramenta, com o motor do Luan no ar; a guarda nasceu dele.)
+
+A guarda pergunta pelo **motor**, não pelo app, e a diferença importa: o
+servidor sozinho não abre porta MIDI nenhuma, e desde o `instalar_agente.py`
+ele tem `KeepAlive` — exigir o app fora tornaria estas sessões impossíveis.
+Para isso o `/ping` passou a responder `motor: true/false`.
+
+**Roteiro (próxima sessão), do isolante ao complexo:**
+
+0. Pré-requisito que decide o teste: **dois patterns cujo BD da variação A seja
+   visivelmente diferente**. Com dois patterns iguais ou vazios, "o grid não
+   mudou" é o comportamento **certo** e o teste não diz nada.
+1. **Motor em OFF** na tela (não precisa fechar o app: quem segura a CTRL é o
+   motor, e o agente do launchd volta sozinho). Máquina **parada** no pattern X:
+   `python3 lp_tr8s.py pattern_watch A BD SD`. Esperar a linha de base.
+2. Trocar para Y **pelo painel**; anotar o que apareceu e **em que ordem**.
+   Voltar para X pelo painel (o inverso prova mais que a ida).
+3. Repetir com a máquina **tocando** — aqui interessa também *quando*: no toque
+   ou só na virada do compasso.
+4. Sair do watch, `python3 lp_tr8s.py pattern A2`, voltar ao watch: isola se a
+   troca **remota** dessincroniza igual à do painel.
+
+#### RESOLVIDO em 16/08/2026 — era o ENDEREÇO, e a culpa era nossa
+
+**O byte 1 da região de pattern nunca foi "a variação". Ele é
+`pattern × 16 + variação`.** O projeto sempre montou `(0x20, var, inst, 0x08)`,
+ou seja **pattern 0** — e por isso leu e escreveu no **1-01 desde o primeiro
+dia**, sem que ninguém percebesse enquanto a máquina ficava nesse pattern.
+
+```python
+# ERRADO (até 16/08/2026)          # CERTO
+(0x20, var, inst, 0x08)            addr_soma(REGIAO_PATTERN,
+                                             (pattern*16 + var) * 16384
+                                             + inst*128 + 8)
+```
+
+**A prova veio do sniff do TR-EDITOR** (captura guiada pelo Luan): com a
+máquina no pattern 4 (1-05), o editor perguntou `01 00 00 01` (pattern atual
+→ `04`) e foi ler `20 40 00 00` (nome `"SambaWork"`) e `20 41 00 08` (BD da
+variação A). E **4 × 16 = 64 = 0x40**.
+
+Confirmado na máquina, lendo quatro patterns pelo endereço calculado — inclui
+os casos que **transbordam o carry de 7 bits** para o byte 0:
+
+| pattern | endereço do BD var A | nome |
+|---|---|---|
+| 0 (1-01) | `20 01 00 08` | `----` |
+| 4 (1-05) | `20 41 00 08` | `SambaWork` |
+| 43 (3-12) | `25 31 00 08` | `Loafing` |
+| 127 (8-16) | `2F 71 00 08` | `----` |
+
+**A lição de método é cara e vale mais que o achado.** O sintoma ("o grid não
+mostra a realidade", "editar não soa") foi perseguido por horas como se fosse
+um *buffer que não ressincronizava*. Sete estímulos foram testados contra essa
+hipótese e **todos deram negativo — corretamente**, porque não havia nada para
+ressincronizar. Uma pilha de negativos consistentes pareceu confirmar a
+hipótese quando na verdade só dizia que ela era irrelevante. O que quebrou o
+impasse não foi mais um teste na mesma direção: foi **ir ver o que o programa
+que funciona faz** (o TR-EDITOR), em uma captura de um gesto.
+
+Os sete negativos ficam registrados porque continuam sendo fatos sobre a
+máquina, e porque a próxima pessoa a suspeitar de "buffer dessincronizado"
+merece saber que essa estrada já foi andada até o fim:
+
+| estímulo | resultado |
+|---|---|
+| troca de pattern **pelo painel** | perf muda, `20 xx` não |
+| troca **remota** (`01 00 00 01`, comando provado) | idem |
+| `01 00 00 01` = n (o "resync" que estava no motor) | nada — era código morto |
+| `01 00 00 02` = n | nada |
+| ler os keep-alive do TR-EDITOR (`00 03 00 3B`/`36`) | nada; e os dois respondem **idêntico** nos dois patterns, então não é por ali que o editor se informa |
+| entrar em **TR-REC** + selecionar variação A | nada |
+| **`[UTILITY]` + `[PTN SELECT]`** (Reload Pattern, manual p. 18) | nada |
+
+*(Todos esses negativos estão certos: a máquina nunca precisou reapontar nada.
+O endereço é que ia para outro lugar.)*
+
+**Um raciocínio errado que parecia rigoroso, e por que falhou.** Durante a
+sessão se argumentou que "não cabe índice de pattern no endereço", porque um
+pattern são 24504 bytes (número da própria Roland) e `20 V B O` já usaria o
+espaço todo em variação · bloco · offset. A conta estava certa e a conclusão
+errada: cada variação ocupa **16384** bytes de *espaço de endereço* (bytes 2 e
+3, 7 bits cada), 16 variações por pattern, e o pattern anda no byte 1 **com
+carry para o byte 0**. Cabem os 128. Contar o tamanho do *dado* e concluir
+sobre o tamanho do *endereçamento* foi o passo em falso.
+
+Contraste útil, medido junto: **o kit é endereçado por índice** —
+`10 KK 00 00` devolve o nome do kit KK (`00`=TR-808, `01`=TR-909, `02`=TR-707,
+`03`=TR-727, `04`=TR-606, `05`=TR-626). Isso fecha a dúvida que o `_fx_kit()`
+carregava no docstring: **o byte de kit do perf é 0-based** (visor "003" ↔ perf
+`2` ↔ `10 02` = TR-707).
+
+**O `kitReference` (`20 00 00 14`–`15`, 1-based) foi o que quebrou o caso.**
+Era um campo do mapa do ARIA que ninguém usava. Com a máquina em 3-12 (kit 21)
+o nó lido declarava o kit 3 — prova de que o endereço caía noutro pattern, e
+foi o que apontou o dedo para o endereço em vez de para a máquina.
+
+**Não usar para bloquear escrita.** O `kitReference` é o kit *salvo no
+pattern*; o do nó de performance é o que está *tocando*. Trocar o kit sem
+salvar o pattern faz os dois divergirem legitimamente. Uma versão intermediária
+do `lp_tr8s.py` travava a escrita nessa comparação e teria travado o app à toa.
+
+**O que mudou no programa:**
+
+- **`addr_variacao(pattern, var)` e o `pattern` obrigatório** em `addr_bloco`,
+  `addr_step`, `addr_accent`, `addr_last_var`, `addr_last_track`. Sem default:
+  um `pattern=0` implícito É o bug, e calado. Quem não souber o pattern leva
+  `TypeError` em vez de ler o 1-01.
+- **`_garantir_pattern()`** lê o nó de performance antes de montar qualquer
+  endereço, e `recarregar()` / `ler_last_steps()` / o rodízio abortam com log
+  se ele for `None`.
+- **`_dt1_pattern()`**, ponto único por onde passam os **12** lugares que
+  escrevem na região `20 xx` (steps, accent, last step, CLEAR, PASTE,
+  biblioteca, estocástica). Antes só o `escrever_step` tinha guarda; a linha
+  ACC, o last step e as rajadas escapavam. Guarda por lugar é uma lista que
+  alguém esquece — o choke point é estrutural.
+- **`_conferir_troca_de_pattern()`**: se o pattern trocar e **nenhum** dos 11
+  blocos mudar, o log avisa e a tela mostra "⚠ grid pode ser o pattern
+  anterior". Virou **tripwire de regressão** — é exatamente a assinatura do bug
+  que acabou de ser corrigido.
+- **Nome do pattern no cabeçalho**, ao lado do número: eles vêm de nós
+  diferentes (número do perf, nome do nó do pattern), então discordar é
+  sintoma. O motor já lia `pattern_nome` e ninguém mostrava.
+- **Botão "Reler tudo da máquina"** na aba Avançado — a ação `reler` já existia
+  no servidor sem botão nenhum.
+
+**Verificado em hardware pelo Luan, 16/08/2026** — o repro original, com o
+gesto original: com a máquina em 1-05 o grid carregou o `SambaWork` batendo com
+os pads, e **trocar para o 1-06 no painel mudou o grid**. Antes disso, a
+verificação de mesa: cabeçalho passou a mostrar `SambaWork`, o ACCENT foi de
+`0x5555` (que era do 1-01) para `0x1111`, e uma troca remota 1-05 → 3-12
+chegou ao grid em ~2 s com o BD do `Loafing` idêntico ao lido direto em
+`25 31 00 08`.
 
 **Pedidos de interface anotados em 15/08 à noite** (para o plano da reforma):
 

@@ -201,6 +201,10 @@ function pintar(e, dados) {
     attr(el, "data-vazio", vazio ? "1" : null);
   };
   seg("#d-ptn", nomePattern(e.pattern_atual), e.pattern_atual == null);
+  // O numero vem do no de PERFORMANCE e o nome vem do no do PATTERN: duas
+  // fontes para a mesma coisa. Mostrar as duas custa nada e torna visivel o
+  // bug da REFERENCIA 7 - se o numero anda e o nome fica, o grid tambem ficou.
+  texto($("#d-ptn-nome"), e.pattern_nome || "");
   seg(
     "#d-kit",
     e.kit_nome || (e.kit_atual == null ? "—" : e.kit_atual + 1),
@@ -249,6 +253,11 @@ function pintar(e, dados) {
   (e.cache_invalido || []).forEach((i) =>
     quer.push(["inv-" + i, "chip", "⚠ " + dados.instrumentos[i] + " não lido"]),
   );
+  // Tripwire de regressao: se o pattern trocar e NENHUM dos 11 blocos mudar,
+  // o endereco voltou a apontar para o lugar errado (era o bug de 16/08, em
+  // que o byte 1 do endereco fixava o pattern 0). Ver REFERENCIA 7.
+  if (e.grid_suspeito)
+    quer.push(["susp", "chip", "⚠ grid pode ser o pattern anterior"]);
   if (e.alt) quer.push(["alt", "chip", "ALT ligado"]);
   if (e.armado) quer.push(["arm", "chip", "CLEAR armado"]);
   if (e.polirritmia) quer.push(["poli", "chip", "polirritmia"]);

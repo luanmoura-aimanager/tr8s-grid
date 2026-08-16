@@ -50,6 +50,14 @@ export default {
       agir({ acao: "util", op: "write" });
     };
 
+    // A acao "reler" ja existia no servidor (-> Motor.recarregar) sem botao
+    // nenhum. Ela vale por dois: e a saida de emergencia quando o grid
+    // desconfia de si mesmo (REFERENCIA 7), e e um TESTE - se recarregar na
+    // mao conserta, o problema e o momento em que o motor le; se nao
+    // conserta, e a maquina servindo o pattern anterior.
+    const bReler = h("button.bt", { type: "button" }, "Reler tudo da máquina");
+    bReler.onclick = () => agir({ acao: "reler" });
+
     logbox = h("ol.lista", {
       style: {
         maxHeight: "220px",
@@ -60,10 +68,23 @@ export default {
     });
 
     raiz.append(
+      // FORA do aviso de baixo, de proposito: reler e leitura em endereco
+      // provado, o oposto dos comandos utility que nunca rodaram aqui.
+      h(
+        "div.linha",
+        {},
+        bReler,
+        h(
+          "span.dica",
+          {},
+          "relê os 11 blocos de steps, os last steps e os mutes — " +
+            "use quando o grid não bater com o que a máquina toca",
+        ),
+      ),
       h(
         "p.aviso",
         {},
-        "Comandos do mapa oficial da Roland (achados nas " +
+        "Os botões abaixo são comandos do mapa oficial da Roland (achados nas " +
           "capturas do ARIA). NENHUM foi testado nesta máquina: cada botão é " +
           "uma mini-sessão — observe a TR-8S e o resultado vai para a REFERENCIA.",
       ),

@@ -26,7 +26,9 @@
 <!-- barra de estado: displays, LEDs e chips no lugar da string corrida -->
 <header id="topo">
   <div class="displays">
-    <div class="seg" id="d-ptn"><span class="seg-rot">ptn</span><span class="seg-val">—</span></div>
+    <!-- o numero e o nome do pattern vem de NOS DIFERENTES da maquina (ver o
+         CSS de .seg-sub): mostrar os dois deixa a dessincronia a vista -->
+    <div class="seg" id="d-ptn"><span class="seg-rot">ptn</span><span class="seg-val">—</span><span class="seg-sub" id="d-ptn-nome"></span></div>
     <div class="seg" id="d-kit"><span class="seg-rot">kit</span><span class="seg-val">—</span></div>
     <div class="seg" id="d-bpm"><span class="seg-rot">bpm</span><span class="seg-val">—</span></div>
     <div class="seg" id="d-var"><span class="seg-rot">toca</span><span class="seg-val">—</span></div>

@@ -22,6 +22,15 @@ Engenharia reversa do que ainda falta no protocolo:
     python3 lp_tr8s.py snap  base.json [--amplo mapa.json]
     python3 lp_tr8s.py snapdiff a.json b.json
 
+Sessoes guiadas (com o MOTOR em OFF - quem segura a porta CTRL e ele, nao o
+servidor; o pattern_watch confere isso sozinho e se recusa a medir):
+    python3 lp_tr8s.py prob_watch            # tabela de probability
+    python3 lp_tr8s.py tempo_watch           # o byte do TEMPO
+    python3 lp_tr8s.py kit_watch BD          # params do instrumento
+    python3 lp_tr8s.py pattern_watch [A] [BD SD]
+                       # perf + no de pattern + grid na mesma volta: por que
+                       # trocar de pattern nao chega ao grid (REFERENCIA 7)
+
     O roteiro de captura do MUTE:
       varrer mapa.json
       snap m0.json  --amplo mapa.json          # base
@@ -138,10 +147,38 @@ def addr_soma(addr, offset):
         offset += v >> 7
     return tuple(a)
 
-def addr_bloco(inst, var=None):   return (0x20, var or VARIACAO, inst, 0x08)
-def addr_step(inst, s, var=None): return addr_soma(addr_bloco(inst, var),
-                                                   s * BYTES_P_STEP)
-def addr_accent(var=None):        return (0x20, var or VARIACAO, 0x00, 0x00)
+# REGIAO DE PATTERN - corrigida em 16/08/2026, e foi A correcao do projeto.
+#
+# O byte 1 NUNCA foi "a variacao". Ele e `pattern * 16 + variacao`, e o
+# projeto inteiro montava (0x20, var, ...) - ou seja, PATTERN 0. Durante dias
+# o grid leu e escreveu no 1-01 enquanto a maquina tocava outro pattern, e o
+# sintoma ("o grid nao mostra a realidade", "editar nao soa") foi caçado como
+# se fosse um buffer que nao ressincronizava. Nao havia o que ressincronizar.
+#
+# A prova veio do sniff do TR-EDITOR: com a maquina no pattern 4 (1-05), ele
+# perguntou `01 00 00 01` (pattern atual -> 4) e foi ler `20 40 00 00`
+# (nome "SambaWork") e `20 41 00 08` (BD da variacao A). E 4*16 = 64 = 0x40.
+# Confirmado na maquina: 20 01 00 08 devolve o 1-01 e 20 41 00 08 o 1-05.
+#
+# Cada (pattern, variacao) ocupa VAO_VARIACAO do offset de 28 bits, e o
+# addr_soma cuida do carry de 7 bits - por isso patterns altos transbordam
+# para o byte 0 (o 3-12, indice 43, mora em 25 31 00 08).
+#
+# O parametro `pattern` e OBRIGATORIO de proposito: um default 0 e exatamente
+# o bug, e calado. Melhor o Python reclamar.
+REGIAO_PATTERN = (0x20, 0x00, 0x00, 0x00)
+VAO_VARIACAO   = 128 * 128        # 16384 bytes de espaco por variacao
+
+def addr_variacao(pattern, var):
+    """Base da variacao `var` (0 = no do pattern, 1-8 = A-H, 9-10 = fills)."""
+    return addr_soma(REGIAO_PATTERN, (pattern * 16 + var) * VAO_VARIACAO)
+
+def addr_no_pattern(pattern):     return addr_variacao(pattern, 0)
+def addr_bloco(inst, var, pattern):
+    return addr_soma(addr_variacao(pattern, var), inst * 128 + 8)
+def addr_step(inst, s, var, pattern):
+    return addr_soma(addr_bloco(inst, var, pattern), s * BYTES_P_STEP)
+def addr_accent(var, pattern):    return addr_variacao(pattern, var)
 # NIVEL DE KIT - estrutura levantada no sniff do TR-EDITOR (15/08/2026).
 #
 # O segundo byte e o NUMERO DO KIT, nao um zero fixo: o kit "003 TR-707" do
@@ -165,7 +202,28 @@ def addr_fx(bloco, kit=0, inst=None):
 # Os dois LAST STEP moram na mesma tabela de 20 bytes e sao 0-based: o valor 0x0F
 # e 16 steps. As variacoes A-H tem slot; os dois Fill In nao - onde eles guardam
 # o comprimento continua desconhecido.
+# NAO USAR para ler o pattern corrente: isto e o no do pattern ZERO (1-01).
+# Sobrou so como endereco de liveness, que precisa existir sempre e nao pode
+# depender de saber onde a maquina esta. Para o pattern corrente e
+# addr_no_pattern(p) - ver REGIAO_PATTERN.
 ADDR_PATTERN   = (0x20, 0x00, 0x00, 0x00)
+# KIT DO PATTERN QUE ESTA NO BUFFER 20 xx - decodificado em 16/08/2026.
+#
+# Dois nibbles em 20 00 00 14/15, valor 1-BASED (igual ao visor: o kit "003"
+# le 3). O mapa do ARIA ja chamava isso de kitReference; o que faltava era o
+# uso. Ele e o UNICO jeito conhecido de perguntar "de que pattern e o conteudo
+# que estou lendo?", porque o no 20 xx nao carrega numero de pattern.
+#
+# Ele foi decisivo no diagnostico de 16/08: com a maquina em 3-12 (kit 21) o
+# no lido declarava o kit 3, provando que o endereco caia noutro pattern. Com
+# o endereco corrigido isso deixou de ser sintoma.
+#
+# NAO usar para bloquear escrita. O kitReference e o kit SALVO no pattern, e o
+# do no de performance e o que esta tocando: trocar o kit sem salvar o pattern
+# faz os dois divergirem legitimamente. Uma versao intermediaria deste arquivo
+# travava a escrita nessa comparacao e teria travado o app a toa.
+OFF_KIT_REF = 0x14
+
 OFF_VAR_TOCANDO = 63   # 63-66: mascara de 4 nibbles, bit i = variacao i+1
 OFF_LAST_VAR   = 67    # +0 = A ... +7 = H
 OFF_LAST_TRACK = 75    # +0 = BD ... +10 = RC, +11 = TRG
@@ -182,8 +240,10 @@ OFF_LAST_TRACK = 75    # +0 = BD ... +10 = RC, +11 = TRG
 # Trocar de variacao NAO emite Program Change - escutado por 14 s na porta comum,
 # so clock. Ler este endereco e o unico caminho.
 
-def addr_last_var(var):     return addr_soma(ADDR_PATTERN, OFF_LAST_VAR + var - 1)
-def addr_last_track(inst):  return addr_soma(ADDR_PATTERN, OFF_LAST_TRACK + inst)
+def addr_last_var(var, pattern):
+    return addr_soma(addr_no_pattern(pattern), OFF_LAST_VAR + var - 1)
+def addr_last_track(inst, pattern):
+    return addr_soma(addr_no_pattern(pattern), OFF_LAST_TRACK + inst)
 
 # MUTE DE TRACK - decodificado em 14/08/2026 (REFERENCIA 5.3).
 #
@@ -805,9 +865,17 @@ def cmd_learn():
     if cfg["esquerdo"]["out_idx"] == cfg["direito"]["out_idx"]:
         print("\n(!) os dois lados ficaram com a MESMA saida - rode 'learn' de novo.")
 
-    # snapshot: se a enumeracao mudar (replug, reboot), os indices nao valem mais
+    # snapshot da enumeracao do dia. Ele NAO e mais um veto: se a lista mudar,
+    # o resolver_layout reencontra cada aparelho pelo par (nome, n-esima
+    # ocorrencia) - o ordinal abaixo. O snapshot fica porque e dele que os
+    # layouts antigos, sem ordinal, deduzem o seu.
     cfg["_portas_in"]  = [n for _, n in listar_portas(True)]
     cfg["_portas_out"] = [n for _, n in listar_portas(False)]
+    for lado in ("esquerdo", "direito"):
+        cfg[lado]["in_ord"] = ordinal_da_porta(cfg["_portas_in"],
+                                               cfg[lado]["in_idx"])
+        cfg[lado]["out_ord"] = ordinal_da_porta(cfg["_portas_out"],
+                                                cfg[lado]["out_idx"])
 
     with open(LAYOUT_FILE, "w") as f:
         json.dump(cfg, f, indent=2)
@@ -824,6 +892,89 @@ def cmd_learn():
                 f"{c['origem'] + l*c['passo_lin'] + s*c['passo_col']:3}" for s in range(8)))
 
 
+def ordinal_da_porta(lista, idx):
+    """Quantas portas com o MESMO nome vem antes de idx. None se idx nao serve.
+
+    E a identidade de verdade de um Launchpad: nao "o indice 6", e sim "o
+    SEGUNDO 'Launchpad Mini MK3 LPMiniMK3 MIDI Out'". O indice e so onde ela
+    calhou de cair na enumeracao daquele dia."""
+    if not 0 <= idx < len(lista):
+        return None
+    nome = lista[idx]
+    return sum(1 for n in lista[:idx] if n == nome)
+
+
+def porta_por_ordinal(lista, nome, ordinal):
+    """Indice da (ordinal+1)-esima porta chamada 'nome', ou None."""
+    vistos = 0
+    for i, n in enumerate(lista):
+        if n == nome:
+            if vistos == ordinal:
+                return i
+            vistos += 1
+    return None
+
+
+def resolver_layout(cfg):
+    """Reencontra os indices das portas do 'learn' na enumeracao de AGORA.
+
+    Devolve (cfg, aviso, erro). Com erro != None nao da pra subir. Nao imprime
+    nada e nao sai: quem chama decide (o CLI imprime, o servidor loga na tela).
+
+    Muta o cfg recebido - e o mesmo dicionario que vira Motor."""
+    agora = {True: [n for _, n in listar_portas(True)],
+             False: [n for _, n in listar_portas(False)]}
+    salvo = {True: cfg.get("_portas_in") or [],
+             False: cfg.get("_portas_out") or []}
+    if salvo[True] == agora[True] and salvo[False] == agora[False]:
+        return cfg, None, None
+
+    # A LISTA MUDOU. Ate 16/08/2026 isto era morte subita, e a causa mais
+    # comum e das mais bobas: plugar um teclado. O KeyLab 49 entrou nos
+    # indices 3 e 4 e empurrou os dois Launchpad em +2 - os indices salvos
+    # passaram a apontar pro teclado, e o app se recusou a subir (com razao:
+    # SysEx de LED no aparelho errado).
+    #
+    # Mas o indice nunca foi a identidade. Ela e o par (nome, n-esima
+    # ocorrencia) - foi por isso que o projeto abandonou o mido, que colapsa
+    # nomes duplicados (REFERENCIA 7). Com o ordinal em maos da pra reencontrar
+    # cada aparelho onde quer que ele tenha caido hoje.
+    faltando, remapeado = [], []
+    for lado in ("esquerdo", "direito"):
+        c = cfg.get(lado)
+        if not c:
+            continue
+        for chave, ent in (("in", True), ("out", False)):
+            nome = c.get(f"{chave}_nome")
+            # ordinal gravado pelo learn novo; senao, deduzido do que o learn
+            # velho ja salvava (lista da epoca + indice) - assim layouts
+            # antigos migram sozinhos, sem obrigar ninguem a apertar pad
+            ordinal = c.get(f"{chave}_ord")
+            if ordinal is None:
+                ordinal = ordinal_da_porta(salvo[ent], c.get(f"{chave}_idx", -1))
+            novo = (None if (nome is None or ordinal is None)
+                    else porta_por_ordinal(agora[ent], nome, ordinal))
+            if novo is None:
+                faltando.append(f"{lado} {chave} ('{nome}', {ordinal}a)")
+                continue
+            if novo != c.get(f"{chave}_idx"):
+                remapeado.append(f"{lado} {chave}: "
+                                 f"{c.get(f'{chave}_idx')} -> {novo}")
+            c[f"{chave}_idx"], c[f"{chave}_ord"] = novo, ordinal
+
+    if faltando:
+        # aparelho que sumiu de verdade: aqui a recusa continua certa
+        return cfg, None, ("nao achei estes aparelhos do 'learn' na lista de "
+                           "agora: " + "; ".join(faltando)
+                           + ". Ligue o Launchpad que falta, ou Recalibrar.")
+    aviso = None
+    if remapeado:
+        aviso = ("a lista de portas mudou (aparelho novo ligado?). Reencontrei "
+                 "os Launchpad pelo nome e pela ordem: " + "; ".join(remapeado))
+    cfg["_portas_in"], cfg["_portas_out"] = agora[True], agora[False]
+    return cfg, aviso, None
+
+
 def carregar_layout():
     if not os.path.exists(LAYOUT_FILE):
         print("Rode 'learn' primeiro."); sys.exit(1)
@@ -834,13 +985,11 @@ def carregar_layout():
         print("Layout no formato antigo (portas por nome). Rode 'learn' de novo.")
         sys.exit(1)
 
-    # indices so valem enquanto a enumeracao do CoreMIDI for a mesma
-    if (cfg.get("_portas_in")  != [n for _, n in listar_portas(True)] or
-            cfg.get("_portas_out") != [n for _, n in listar_portas(False)]):
-        print("(!) As portas MIDI mudaram desde o 'learn' (replug? outro aparelho "
-              "ligado?).\n    Os indices salvos podem apontar pro aparelho errado. "
-              "Rode 'learn' de novo.")
-        sys.exit(1)
+    cfg, aviso, erro = resolver_layout(cfg)
+    if erro:
+        print(f"(!) {erro}"); sys.exit(1)
+    if aviso:
+        print(f"(i) {aviso}")
     return cfg
 
 
@@ -900,6 +1049,15 @@ def ler_bloco(tr_in, tr_out, addr, tamanho=128, timeout=APC_TIMEOUT):
     return None
 
 
+def pattern_corrente(tr_in, tr_out):
+    """Indice do pattern que a maquina tem carregado, ou None.
+
+    Todo endereco da regiao 20 xx depende dele (ver REGIAO_PATTERN). Quem
+    monta endereco sem perguntar isto cai no pattern 0 - o bug de 16/08."""
+    d = ler_bloco(tr_in, tr_out, ADDR_PERF, 128, timeout=SNAP_TIMEOUT)
+    return d[OFF_PATTERN_ATUAL] if d and len(d) > OFF_PATTERN_ATUAL else None
+
+
 def _portas_tr8s():
     """(indice_in, indice_out) da porta CTRL, ou (None, None)."""
     i = achar_portas(TR8S_MATCH)
@@ -923,11 +1081,16 @@ def cmd_dump():
     if not (tin and tout):
         print("Porta TR-8S CTRL nao encontrada."); return
     with EntradaMIDI(*tin) as tin, SaidaMIDI(*tout) as tout:
-        cab = ler_bloco(tin, tout, addr_accent(), 8)
+        p = pattern_corrente(tin, tout)
+        if p is None:
+            print("(!) nao consegui ler em que pattern a maquina esta - sem "
+                  "isso todo endereco cairia no 1-01."); return
+        print(f"pattern {nome_pattern(p)}, variacao {VARIACOES[VARIACAO-1]}\n")
+        cab = ler_bloco(tin, tout, addr_accent(VARIACAO, p), 8)
         if cab:
             print(f"ACCENT = 0x{nibbles_para_mascara(cab[:4]):04X}\n")
         for i, nome in enumerate(INSTRUMENTOS):
-            d = ler_bloco(tin, tout, addr_bloco(i))
+            d = ler_bloco(tin, tout, addr_bloco(i, VARIACAO, p))
             if d is None:
                 print(f"{nome}: sem resposta"); continue
             ligados = []
@@ -1150,7 +1313,9 @@ def cmd_sniff(argv):
             if tout:
                 tr_in.iter_pending()
                 with SaidaMIDI(*tout) as t_out:
-                    t_out.send(rq1(addr_accent(), 8))
+                    # endereco de liveness: o no do pattern 0 existe sempre e
+                    # nao depende de saber onde a maquina esta
+                    t_out.send(rq1(addr_no_pattern(0), 8))
                 limite, ecoou = time.time() + 1.5, False
                 while time.time() < limite and not ecoou:
                     for msg in tr_in.iter_pending():
@@ -1561,6 +1726,11 @@ class Motor:
         self.kit_atual = None                   # offset 0 do perf (01 00 00 00)
         self.kit_trocou = False                 # troca vista no painel
         self.pattern_trocou = False             # idem, para o pattern
+        # o pattern trocou e o conteudo nao mexeu: o grid pode estar mentindo
+        # (REFERENCIA 7). Ver _conferir_troca_de_pattern.
+        self.grid_suspeito = False
+        self.kit_do_buffer = None   # kit que o pattern do buffer 20 xx declara
+        self._avisou_bloqueio = False   # o log do bloqueio sai uma vez, nao em rajada
         self.pattern_nome = None                # bytes 0-15 do no do pattern
         self._var_seguida = None                # ultima variacao seguida
         self.vars_habilitadas = []              # mascara 63-66 decodificada
@@ -1665,11 +1835,15 @@ class Motor:
 
     # ── leitura do pattern ──────────────────────────────────
     def recarregar(self):
+        if self._garantir_pattern() is None:
+            self.log("(!) nao sei em que pattern a maquina esta - releitura "
+                     "abortada (montar endereco sem isso leria o 1-01).")
+            return
         for i in range(len(INSTRUMENTOS)):
             d = None
             for _ in range(2):                     # a maquina engasga as vezes
                 d = ler_bloco(self.tr_in, self.tr_out,
-                              addr_bloco(i, self.variacao))
+                              addr_bloco(i, self.variacao, self.pattern_atual))
                 if d: break
             if d:
                 self.cache[i] = d
@@ -1685,7 +1859,7 @@ class Motor:
                 self.log(f"(!) leitura do {INSTRUMENTOS[i]} falhou - "
                          "escrita nessa linha bloqueada ate reler")
         cab = ler_bloco(self.tr_in, self.tr_out,
-                        addr_accent(self.variacao), 8) or [0]*8
+                        addr_accent(self.variacao, self.pattern_atual), 8) or [0]*8
         self.acc = nibbles_para_mascara(cab[:4])
         self.ler_last_steps()
         self.ler_mudos()
@@ -1707,6 +1881,8 @@ class Motor:
         Falha isolada aqui NAO invalida a linha (diferente do recarregar()):
         aqui e vigilancia de fundo, e marcar a linha como nao lida bloquearia
         a escrita dela por um engasgo passageiro."""
+        if self._garantir_pattern() is None:
+            return False
         mudou = False
         total = len(INSTRUMENTOS) + 1          # +1 = a fileira de accent
         for _ in range(self.LINHAS_POR_CICLO):
@@ -1714,14 +1890,14 @@ class Motor:
             self.rodizio_linha = (self.rodizio_linha + 1) % total
             if i == len(INSTRUMENTOS):
                 cab = ler_bloco(self.tr_in, self.tr_out,
-                                addr_accent(self.variacao), 8)
+                                addr_accent(self.variacao, self.pattern_atual), 8)
                 if cab:
                     novo = nibbles_para_mascara(cab[:4])
                     if novo != self.acc:
                         self.acc, mudou = novo, True
                 continue
             d = ler_bloco(self.tr_in, self.tr_out,
-                          addr_bloco(i, self.variacao))
+                          addr_bloco(i, self.variacao, self.pattern_atual))
             if d and d != self.cache[i]:
                 self.cache[i] = d
                 self.cache_invalido.discard(i)
@@ -1734,7 +1910,13 @@ class Motor:
         Chamado tambem periodicamente pelo tick(), senao mexer no [LAST] do painel
         nunca apareceria no grid."""
         self.ultima_leitura = time.time()
-        d = ler_bloco(self.tr_in, self.tr_out, ADDR_PATTERN, 128,
+        p = self._garantir_pattern()
+        if p is None:
+            if not quieto:
+                self.log("(!) ainda nao sei em que pattern a maquina esta - "
+                         "sem isso nao da pra montar endereco (REFERENCIA 7).")
+            return False
+        d = ler_bloco(self.tr_in, self.tr_out, addr_no_pattern(p), 128,
                       timeout=SNAP_TIMEOUT)
         if not d or len(d) < OFF_LAST_TRACK + len(INSTRUMENTOS):
             if not quieto:
@@ -1744,6 +1926,10 @@ class Motor:
         # '----' = sem nome) - de graca na leitura que ja acontece
         self.pattern_nome = ("".join(chr(b) for b in d[:16]
                                      if 32 <= b < 127).strip() or None)
+        # de que pattern e o conteudo que estamos lendo? (ver OFF_KIT_REF).
+        # Guardado 0-based para comparar direto com o kit do no de performance.
+        self.kit_do_buffer = (((d[OFF_KIT_REF] << 4) | d[OFF_KIT_REF + 1]) - 1
+                              if len(d) > OFF_KIT_REF + 1 else None)
         antes = (dict(self.ultimo_var), list(self.ultimo_track),
                  self.variacao_tocando)
         for v in range(1, 9):                       # A-H; fills nao tem slot
@@ -1803,7 +1989,7 @@ class Motor:
             n = max(1, min(16, int(n)))
             self.ultimo_var[self.variacao] = n
             if self.tr_out and self.variacao <= 8:
-                self.tr_out.send(dt1(addr_last_var(self.variacao), [n - 1]))
+                self._dt1_pattern(addr_last_var(self.variacao, self.pattern_atual), [n - 1])
             elif self.variacao > 8:
                 self.log("(!) o last step dos Fill In nao foi decodificado - "
                          "este valor fica so aqui, nao vai pra maquina.")
@@ -1815,7 +2001,7 @@ class Motor:
             n = 16 if n is None else max(1, min(16, int(n)))
             self.ultimo_track[i] = n
             if self.tr_out:
-                self.tr_out.send(dt1(addr_last_track(i), [n - 1]))
+                self._dt1_pattern(addr_last_track(i, self.pattern_atual), [n - 1])
             self._persistir(); self.pintar()
             self.log(f"last step do {INSTRUMENTOS[i]}: {n}")
 
@@ -1894,6 +2080,65 @@ class Motor:
         mudou = novo != self.mudo
         self.mudo = novo
         return mudou
+
+    def _garantir_pattern(self):
+        """Indice do pattern corrente, lendo o perf se ainda nao souber.
+
+        TODO endereco da regiao 20 xx depende dele (byte 1 = pattern*16 +
+        variacao, ver REGIAO_PATTERN). Nao existe default: chutar 0 e
+        exatamente o bug de 16/08/2026, que fez o projeto ler e escrever no
+        1-01 por dias sem ninguem perceber. Quem chama trata o None."""
+        if self.pattern_atual is None and self.tr_in and self.tr_out:
+            self.pattern_atual = pattern_corrente(self.tr_in, self.tr_out)
+        return self.pattern_atual
+
+    def _dt1_pattern(self, addr, dados):
+        """TODO DT1 na regiao 20 xx passa por aqui. Devolve False se recusou.
+
+        Ponto unico de proposito. Sao doze lugares que escrevem no pattern
+        (steps, accent, last step, CLEAR, PASTE, biblioteca, estocastica) e um
+        guarda por lugar e uma lista que alguem esquece de atualizar. Aqui a
+        garantia e estrutural: nao ha caminho para o pattern que nao passe por
+        este metodo.
+
+        A condicao que resta e simples: sem saber o pattern corrente nao existe
+        endereco valido, e o default 0 e o bug de 16/08 - melhor recusar."""
+        if self.pattern_atual is None:
+            if not self._avisou_bloqueio:
+                self._avisou_bloqueio = True
+                self.log("(!) escrita recusada: ainda nao sei em que pattern a "
+                         "maquina esta (o endereco depende dele).")
+            return False
+        self._avisou_bloqueio = False
+        self.tr_out.send(dt1(addr, dados))
+        return True
+
+    def _conferir_troca_de_pattern(self, antes):
+        """Depois de trocar de pattern, o grid TEM que mudar - senao ele mente.
+
+        O bug de 16/08/2026: o numero do pattern na tela troca (vem do no de
+        performance, 01 00 00 00 offset 1) mas os steps continuam os do
+        pattern anterior (vem dos blocos 20 0V I 08). A suspeita registrada na
+        REFERENCIA 7 e que o buffer de edicao nao acompanhe a troca; enquanto
+        isso nao esta provado nem consertado, o minimo e o grid AVISAR que
+        pode estar mostrando o pattern velho, em vez de afirmar com ar de
+        certeza - a regra da casa e que falta de informacao se mostra, nao se
+        esconde.
+
+        Falso positivo possivel e aceito: dois patterns de conteudo identico
+        (ou dois vazios) levantam a bandeira a toa. Por isso a mensagem diz
+        'pode estar', e a primeira releitura que enxergar qualquer mudanca
+        derruba a suspeita (ver o rodizio no tick)."""
+        if not antes or self.cache_invalido:
+            return          # leitura falhou; ja tem log proprio, nao acumular
+        if any(self.cache.get(i) != d for i, d in antes.items()):
+            self.grid_suspeito = False
+            return
+        self.grid_suspeito = True
+        self.log("(!) o pattern trocou mas NENHUM dos 11 blocos mudou - o "
+                 "grid pode estar mostrando o pattern anterior. Se os dois "
+                 "patterns nao forem iguais, e o bug da REFERENCIA 7 "
+                 "(rode 'pattern_watch' com o motor em OFF).")
 
     def ler_passo_maquina(self):
         """O step em que o sequenciador da TR-8S esta, 0-15, ou None."""
@@ -2235,8 +2480,12 @@ class Motor:
         O step de 8 bytes vai inteiro pra maquina, entao os bytes que este
         metodo nao entende (0-2) saem do cache - dai o guarda: cache que nao
         reflete a maquina nao pode ser escrito de volta."""
+        if self.pattern_atual is None:
+            self.log("(!) escrita abortada: ainda nao sei em que pattern a "
+                     "maquina esta (o endereco depende dele).")
+            return False
         if i in self.cache_invalido:
-            d = ler_bloco(self.tr_in, self.tr_out, addr_bloco(i, self.variacao))
+            d = ler_bloco(self.tr_in, self.tr_out, addr_bloco(i, self.variacao, self.pattern_atual))
             if not d:
                 self.log(f"(!) {INSTRUMENTOS[i]}: cache invalido e releitura "
                          "falhou - escrita abortada")
@@ -2250,8 +2499,8 @@ class Motor:
         self.cache[i][b+ALT_BYTE] = (ALT_LIGADO if alt else 0) if vel else 0
         if prob is not None and vel:
             self.cache[i][b+PROB_BYTE] = prob_para_byte(prob)
-        self.tr_out.send(dt1(addr_step(i, step, self.variacao),
-                             self.cache[i][b:b+BYTES_P_STEP]))
+        self._dt1_pattern(addr_step(i, step, self.variacao, self.pattern_atual),
+                             self.cache[i][b:b+BYTES_P_STEP])
         return True
 
     def limpar_instrumento(self, i):
@@ -2268,7 +2517,7 @@ class Motor:
                 self.escrever_step(i, s, 0, 0)
                 time.sleep(0.002)
         self.acc = 0
-        self.tr_out.send(dt1(addr_accent(self.variacao), mascara_para_nibbles(0)))
+        self._dt1_pattern(addr_accent(self.variacao, self.pattern_atual), mascara_para_nibbles(0))
         self.log(f"CLEAR variacao {VARIACOES[self.variacao-1]} (11 instrumentos + ACC)")
 
     def copiar_variacao(self):
@@ -2285,12 +2534,12 @@ class Motor:
             for s in range(16):
                 b = s * BYTES_P_STEP
                 self.cache[i][b:b+BYTES_P_STEP] = dados[b:b+BYTES_P_STEP]
-                self.tr_out.send(dt1(addr_step(i, s, self.variacao),
-                                     dados[b:b+BYTES_P_STEP]))
+                self._dt1_pattern(addr_step(i, s, self.variacao, self.pattern_atual),
+                                     dados[b:b+BYTES_P_STEP])
                 time.sleep(0.002)
         self.acc = mascara
-        self.tr_out.send(dt1(addr_accent(self.variacao),
-                             mascara_para_nibbles(mascara)))
+        self._dt1_pattern(addr_accent(self.variacao, self.pattern_atual),
+                             mascara_para_nibbles(mascara))
         self.log(f"PASTE: {origem} -> {VARIACOES[self.variacao-1]}")
 
     def escrever_pattern(self, dados, accent=0, last_var=None, nome=""):
@@ -2317,8 +2566,8 @@ class Motor:
                     return False
                 time.sleep(0.002)          # rajada: nao afogar a maquina
         self.acc = accent & 0xFFFF
-        self.tr_out.send(dt1(addr_accent(self.variacao),
-                             mascara_para_nibbles(self.acc)))
+        self._dt1_pattern(addr_accent(self.variacao, self.pattern_atual),
+                             mascara_para_nibbles(self.acc))
         if last_var is not None:
             self.definir_last_var(last_var)
         self.pintar()
@@ -2395,12 +2644,12 @@ class Motor:
             for s in range(16):
                 b = s * BYTES_P_STEP
                 self.cache[i][b:b+BYTES_P_STEP] = dados_i[b:b+BYTES_P_STEP]
-                self.tr_out.send(dt1(addr_step(i, s, self.variacao),
-                                     dados_i[b:b+BYTES_P_STEP]))
+                self._dt1_pattern(addr_step(i, s, self.variacao, self.pattern_atual),
+                                     dados_i[b:b+BYTES_P_STEP])
                 time.sleep(0.002)
         self.acc = mascara
-        self.tr_out.send(dt1(addr_accent(self.variacao),
-                             mascara_para_nibbles(mascara)))
+        self._dt1_pattern(addr_accent(self.variacao, self.pattern_atual),
+                             mascara_para_nibbles(mascara))
         self.pintar()
         return True
 
@@ -2431,8 +2680,8 @@ class Motor:
             self.armado = None
             if self.eh_acc(linha):
                 self.acc = 0
-                self.tr_out.send(dt1(addr_accent(self.variacao),
-                                     mascara_para_nibbles(0)))
+                self._dt1_pattern(addr_accent(self.variacao, self.pattern_atual),
+                                     mascara_para_nibbles(0))
                 self.log("CLEAR ACCENT")
             else:
                 i = self.inst_da_linha(linha)
@@ -2442,8 +2691,8 @@ class Motor:
             return
         if self.eh_acc(linha):
             self.acc ^= (1 << step)
-            self.tr_out.send(dt1(addr_accent(self.variacao),
-                                 mascara_para_nibbles(self.acc)))
+            self._dt1_pattern(addr_accent(self.variacao, self.pattern_atual),
+                                 mascara_para_nibbles(self.acc))
             self.log(f"ACC step {step+1:2} -> "
                      f"{'ON ' if self.acc & (1<<step) else 'OFF'}  (0x{self.acc:04X})")
             return
@@ -2475,8 +2724,8 @@ class Motor:
             return
         if i == len(INSTRUMENTOS):
             self.acc ^= (1 << step)
-            self.tr_out.send(dt1(addr_accent(self.variacao),
-                                 mascara_para_nibbles(self.acc)))
+            self._dt1_pattern(addr_accent(self.variacao, self.pattern_atual),
+                                 mascara_para_nibbles(self.acc))
             self.log(f"ACC step {step+1:2} -> "
                      f"{'ON ' if self.acc & (1 << step) else 'OFF'}"
                      f"  (0x{self.acc:04X})")
@@ -2617,10 +2866,11 @@ class Motor:
                      + ("..." if len(faltaram) > 6 else ""))
 
     def _fx_kit(self):
-        """Numero do kit para o endereco. NAO VERIFICADO se o byte lido do
-        no de performance ja e 0-based: o kit "003" do Luan mora em 10 02, e
-        so uma comparacao com o visor fecha isso. Enquanto nao fecha, vale o
-        valor cru - que ao menos acerta o kit 001 como antes."""
+        """Numero do kit para o endereco. CONFIRMADO 0-based em 16/08/2026:
+        o visor mostrava "003 TR-707", o byte do no de performance dizia 2 e
+        10 02 00 00 respondeu 'TR-707' - com a escala inteira batendo ao lado
+        (00=TR-808, 01=TR-909, 03=TR-727, 04=TR-606, 05=TR-626). O valor cru
+        esta certo; era a duvida que este docstring carregava."""
         return self.kit_atual or 0
 
     def _fx_alvos(self):
@@ -3327,11 +3577,16 @@ class Motor:
                         self.chain and getattr(self.chain, "_fila_escrita",
                                                None)):
                     self.pattern_trocou = False
+                    antes_cache = {i: list(d) for i, d in self.cache.items()}
                     self.recarregar()
                     self.pintar()
+                    self._conferir_troca_de_pattern(antes_cache)
                 # e as notas: sem isto, ligar um step no painel da TR-8S
                 # nunca chegaria ao grid nem aos Launchpad
                 if self._reler_pattern_rodizio():
+                    # conteudo se mexendo prova que a maquina esta servindo o
+                    # pattern corrente: a suspeita levantada na troca cai
+                    self.grid_suspeito = False
                     self.pintar()
                 self._ressincronizar()
             if self.modo_geral == MODO_ON and self.chain:
@@ -3442,6 +3697,8 @@ class Motor:
                 "kit_atual": self.kit_atual,
                 "pattern_atual": self.pattern_atual,
                 "pattern_nome": self.pattern_nome,
+                "grid_suspeito": self.grid_suspeito,
+                "kit_do_buffer": self.kit_do_buffer,
                 "kit_nome": self.kit_nome,
                 "tone_ids": list(self.tone_ids),
                 # indices (nao so os nomes): a tela precisa marcar qual chip
@@ -3557,13 +3814,17 @@ def cmd_prob_watch():
     tin, tout = _portas_tr8s()
     if not (tin and tout):
         print("Porta TR-8S CTRL nao encontrada."); return
-    print("Observando o step 1 do BD (variacao A). Ctrl+C sai.\n"
-          "byte3 e a PROBABILITY; anote o valor do painel a cada mudanca.\n")
     with EntradaMIDI(*tin) as tin, SaidaMIDI(*tout) as tout:
+        p = pattern_corrente(tin, tout)
+        if p is None:
+            print("(!) nao consegui ler o pattern corrente."); return
+        print(f"Observando o step 1 do BD (pattern {nome_pattern(p)}, variacao "
+              "A). Ctrl+C sai.\n"
+              "byte3 e a PROBABILITY; anote o valor do painel a cada mudanca.\n")
         antes = None
         try:
             while True:
-                d = ler_bloco(tin, tout, addr_bloco(0, 0x01), 8)
+                d = ler_bloco(tin, tout, addr_bloco(0, 0x01, p), 8)
                 if d and d[:BYTES_P_STEP] != antes:
                     antes = d[:BYTES_P_STEP]
                     vel = (d[VEL_HI] << 4) | d[VEL_LO]
@@ -3666,6 +3927,247 @@ def cmd_kit_watch(argv):
             print("\nfim.")
 
 
+def _app_rodando():
+    """(porta, motor_ligado) do TR-8S Grid se estiver no ar, senao None.
+
+    Confirma pelo /ping como o servidor.py faz - o bilhete em ~/ pode ter
+    ficado para tras de um processo que ja morreu. Sem a chave 'motor'
+    (servidor velho), assume o pior: melhor recusar a medir do que medir
+    errado."""
+    try:
+        with open(os.path.expanduser("~/.lp_tr8s_servidor.json")) as f:
+            porta = int(json.load(f)["porta"])
+        import urllib.request
+        with urllib.request.urlopen(f"http://127.0.0.1:{porta}/ping",
+                                    timeout=1.0) as r:
+            info = json.loads(r.read())
+        if info.get("app") == "tr8s-grid":
+            return porta, bool(info.get("motor", True))
+    except Exception:
+        return None
+    return None
+
+
+def _exigir_app_fechado():
+    """True se da pra medir. Imprime o motivo quando nao da.
+
+    O que atrapalha NAO e o servidor estar no ar - ele nao abre porta MIDI
+    nenhuma, e com o agente do launchd (KeepAlive) ele volta sozinho, entao
+    exigir que ele saia tornaria estas sessoes impossiveis. O que atrapalha e
+    o MOTOR ligado, que e quem segura a CTRL.
+
+    E o modo como isso falha e traicoeiro: no CoreMIDI a porta CTRL aceita
+    varios clientes (ela e broadcast), entao NADA da erro - os dois processos
+    so passam a consumir a resposta um do outro, e a medida sai errada sem
+    sintoma. Um watch que mede errado e pior que um watch que nao roda: o
+    resultado dele entra na REFERENCIA como fato (Metodo 3.2, item 1)."""
+    info = _app_rodando()
+    if not info or not info[1]:
+        return True
+    print(f"(!) o TR-8S Grid esta com o MOTOR LIGADO (porta {info[0]}) e ja\n"
+          "    fala com a TR-8S. Aperte OFF na tela antes de medir: com os\n"
+          "    dois falando as respostas se misturam e o resultado sai errado\n"
+          "    SEM dar erro. Nao precisa fechar o app - so desligar o motor.")
+    return False
+
+
+def _linha_vel(d):
+    """As 16 velocities de um bloco de 128 bytes, em linha. '.' = step off."""
+    fora = []
+    for s in range(16):
+        b = s * BYTES_P_STEP
+        v = (d[b + VEL_HI] << 4) | d[b + VEL_LO]
+        fora.append(f"{v:3d}" if v else "  .")
+    return " ".join(fora)
+
+
+def _texto_ascii(bs):
+    return "".join(chr(b) for b in bs if 32 <= b < 127).strip() or "(sem nome)"
+
+
+def cmd_pattern_watch(argv):
+    """Sessao P: por que trocar de pattern nao chega ao grid (REFERENCIA 7).
+
+    uso: pattern_watch [A..H] [BD SD ...] [--segundos N]
+         padrao: variacao A, BD e SD, sem limite de tempo
+
+    O SINTOMA (16/08/2026): trocando o pattern no painel, o NUMERO no topo da
+    tela muda mas o GRID continua com os steps do pattern anterior. O numero
+    vem do no de performance (01 00 00 00, offset 1); o grid vem dos blocos
+    20 0V I 08. Um dos dois nao esta acompanhando a troca, e de dentro do
+    programa nao da pra saber qual.
+
+    Este watch olha as TRES camadas na mesma volta e imprime com carimbo de
+    tempo, porque a ORDEM e o ATRASO entre elas sao metade da resposta:
+
+      perf     01 00 00 00   offset 0 = kit, 1 = pattern atual, 2 = proximo
+      pattern  20 00 00 00   bytes 0-15 = nome, 63-66 = vars habilitadas,
+                             67-74 = last step de A-H
+      grid     20 0V I 08    as 16 velocities do instrumento, uma linha
+
+    So leitura, e so em endereco provado: nenhum risco da armadilha 3.1 (o
+    veneno e RQ1 em endereco que NAO existe). Autoteste embutido, como manda o
+    Metodo 3.2: se a maquina parar de responder, ele diz - senao "nao mudou
+    nada" seria ambiguo entre maquina calada e maquina quieta.
+
+    TRES desfechos possiveis, cada um com um conserto diferente:
+      1. o grid NUNCA muda   -> o buffer de edicao nao acompanha a troca de
+         pattern; o conserto e achar o ressincronizador (o GET do TR-EDITOR
+         resolve isso no editor: capturar e imitar);
+      2. o grid muda NA HORA -> a maquina esta bem, o bug e do motor;
+      3. o grid muda COM ATRASO (ou so na virada) -> o motor le cedo demais e
+         nunca tenta de novo.
+
+    Roteiro pro Luan:
+      1. Aperte OFF na tela do TR-8S Grid (e feche qualquer 'run' esquecido):
+         quem segura a porta CTRL e o MOTOR, nao o servidor. Este comando
+         confere sozinho e se recusa a medir se achar o motor ligado;
+      2. escolha DOIS patterns cujo BD da variacao A seja visivelmente
+         DIFERENTE - com dois patterns iguais (ou vazios) "o grid nao mudou" e
+         o comportamento certo, e o teste nao diz nada;
+      3. maquina PARADA no pattern X: espere a linha de base imprimir;
+      4. troque para Y pelo painel; anote o que apareceu e em que ORDEM;
+      5. volte para X pelo painel (o inverso prova mais que a ida);
+      6. repita 4 e 5 com a maquina TOCANDO - aqui interessa tambem se a troca
+         acontece no toque ou so na virada do compasso.
+    """
+    argv = list(argv or [])
+    # --segundos existe pelo mesmo motivo do cmd_escutar: um watch sem fim,
+    # morto a forca pelo timeout de quem chamou, ja deixou a porta rtmidi
+    # aberta - e foi logo depois de um desses que a CTRL emudeceu em 14/08.
+    segundos = None
+    if "--segundos" in argv:
+        i = argv.index("--segundos")
+        segundos = float(argv[i + 1])
+        del argv[i:i + 2]
+    var = 0x01
+    if argv and len(argv[0]) == 1 and argv[0].upper() in "ABCDEFGH":
+        var = "ABCDEFGH".index(argv.pop(0).upper()) + 1
+    nomes = [a.upper() for a in argv] or ["BD", "SD"]
+    desconhecidos = [n for n in nomes if n not in INSTRUMENTOS]
+    if desconhecidos:
+        print(f"instrumento desconhecido: {' '.join(desconhecidos)}\n"
+              f"uso: pattern_watch [A..H] [{' '.join(INSTRUMENTOS)}]")
+        return
+    insts = [INSTRUMENTOS.index(n) for n in nomes]
+
+    if not _exigir_app_fechado():
+        return
+    tin, tout = _portas_tr8s()
+    if not (tin and tout):
+        print("Porta TR-8S CTRL nao encontrada. A TR-8S esta ligada e o "
+              "TR-8S Grid.app fechado?")
+        return
+
+    print(f"Observando perf + no de pattern + grid da variacao "
+          f"{VARIACOES[var-1]} ({' '.join(nomes)}). "
+          + (f"{segundos:.0f} s." if segundos else "Ctrl+C sai.") + "\n"
+          "Troque de pattern no painel e observe QUAL camada muda, e quando.\n")
+    with EntradaMIDI(*tin) as tin, SaidaMIDI(*tout) as tout:
+        t0 = time.time()
+        fim = None if segundos is None else t0 + segundos
+        antes, mudo_desde, leituras, curtas = {}, None, {}, {}
+
+        def linha(txt):
+            # flush: sem ele um watch interrompido perde as ultimas linhas
+            # quando a saida esta num pipe, que e onde ela costuma estar
+            print(f"[{time.time() - t0:6.1f}s] {txt}", flush=True)
+
+        def valida(rot, minimo):
+            """O bloco, se der pra usar. None se veio curto - e avisa.
+
+            A TR-8S as vezes responde um bloco MENOR que o endereco (visto em
+            16/08/2026: o perf voltou com menos de 3 bytes e derrubou a
+            primeira versao disto). Isso nao e silencio - o autoteste acima
+            nao pega - e nao pode virar 'nao mudou nada', que e justamente a
+            conclusao que esta sessao quer evitar. Avisa uma vez por camada
+            para nao encher a tela, e conta quantas vezes aconteceu."""
+            d = leituras.get(rot)
+            if d is None or len(d) >= minimo:
+                return d
+            curtas[rot] = curtas.get(rot, 0) + 1
+            if curtas[rot] == 1:
+                linha(f"(!) '{rot}' respondeu CURTO ({len(d)} bytes, esperado "
+                      f">= {minimo}) - leitura descartada, nao e 'sem mudanca'")
+            return None
+
+        try:
+            while fim is None or time.time() < fim:
+                leituras.clear()
+                perf = ler_bloco(tin, tout, ADDR_PERF, 128,
+                                 timeout=SNAP_TIMEOUT)
+                leituras["perf"] = perf
+                # o endereco do pattern DEPENDE do pattern corrente (byte 1 =
+                # pattern*16 + variacao). Sem o perf desta volta nao da pra
+                # montar endereco nenhum - e chutar o 0 foi o bug de 16/08.
+                p = (perf[OFF_PATTERN_ATUAL]
+                     if perf and len(perf) > OFF_PATTERN_ATUAL else None)
+                if p is not None:
+                    leituras["ptn"] = ler_bloco(tin, tout, addr_no_pattern(p),
+                                                128, timeout=SNAP_TIMEOUT)
+                    for i in insts:
+                        leituras[INSTRUMENTOS[i]] = ler_bloco(
+                            tin, tout, addr_bloco(i, var, p), 128,
+                            timeout=SNAP_TIMEOUT)
+
+                # AUTOTESTE (Metodo 3.2 item 1): sem isto, "o grid nao mudou"
+                # seria indistinguivel de "a maquina parou de responder".
+                if any(v is None for v in leituras.values()):
+                    if mudo_desde is None:
+                        mudo_desde = time.time()
+                        quais = [k for k, v in leituras.items() if v is None]
+                        linha(f"(!) sem resposta em: {' '.join(quais)} - "
+                              "NAO conclua nada enquanto isto durar")
+                elif mudo_desde is not None:
+                    linha(f"a maquina voltou a responder "
+                          f"({time.time() - mudo_desde:.1f}s calada)")
+                    mudo_desde = None
+
+                d = valida("perf", OFF_PATTERN_PROX + 1)
+                if d:
+                    novo = (d[OFF_KIT_ATUAL], d[OFF_PATTERN_ATUAL],
+                            d[OFF_PATTERN_PROX])
+                    if novo != antes.get("perf"):
+                        antes["perf"] = novo
+                        linha(f"perf     kit={novo[0]:3d}  "
+                              f"pattern={novo[1]:3d} ({nome_pattern(novo[1])})"
+                              f"  proximo={novo[2]:3d} "
+                              f"({nome_pattern(novo[2])})")
+
+                d = valida("ptn", OFF_LAST_VAR + 8)
+                if d:
+                    m = nibbles_para_mascara(d[OFF_VAR_TOCANDO:
+                                               OFF_VAR_TOCANDO + 4])
+                    novo = (_texto_ascii(d[:16]), m,
+                            tuple(d[OFF_LAST_VAR:OFF_LAST_VAR + 8]))
+                    if novo != antes.get("ptn"):
+                        antes["ptn"] = novo
+                        habs = " ".join("ABCDEFGH"[v] for v in range(8)
+                                        if m >> v & 1) or "nenhuma"
+                        linha(f"pattern  nome='{novo[0]}'  habilitadas={habs}"
+                              f"  last A-H="
+                              + " ".join(str(x + 1) for x in novo[2]))
+
+                for i in insts:
+                    nome = INSTRUMENTOS[i]
+                    d = valida(nome, 128)
+                    if not d:
+                        continue
+                    # compara o bloco INTEIRO (flam, ALT e probability tambem
+                    # contam como "o conteudo mudou") mas mostra a velocity,
+                    # que e o que da pra conferir de olho no painel
+                    if list(d) != antes.get(nome):
+                        igual = (antes.get(nome) is not None
+                                 and _linha_vel(d) == _linha_vel(antes[nome]))
+                        antes[nome] = list(d)
+                        linha(f"grid {nome}  {_linha_vel(d)}"
+                              + ("   (bytes mudaram, velocity nao: flam/ALT/"
+                                 "probability)" if igual else ""))
+                time.sleep(0.3)
+        except KeyboardInterrupt:
+            print("\nfim.")
+
+
 def _num_pattern(arg):
     """'A12' -> 11, '27' -> 27. 0-based no fio (banco A-H x 16)."""
     a = arg.strip().upper()
@@ -3738,10 +4240,14 @@ def cmd_var_mask(argv):
     if not (tin and tout):
         print("Porta TR-8S CTRL nao encontrada."); return
     with EntradaMIDI(*tin) as tin, SaidaMIDI(*tout) as tout:
-        alvo = addr_soma(ADDR_PATTERN, OFF_VAR_TOCANDO)
+        p = pattern_corrente(tin, tout)
+        if p is None:
+            print("(!) nao consegui ler o pattern corrente."); return
+        no = addr_no_pattern(p)
+        alvo = addr_soma(no, OFF_VAR_TOCANDO)
         tout.send(dt1(alvo, mascara_para_nibbles(1 << (v - 1))))
         time.sleep(0.1)
-        d = ler_bloco(tin, tout, ADDR_PATTERN, 128, timeout=SNAP_TIMEOUT)
+        d = ler_bloco(tin, tout, no, 128, timeout=SNAP_TIMEOUT)
         if d:
             m = nibbles_para_mascara(d[OFF_VAR_TOCANDO:OFF_VAR_TOCANDO + 4])
             print(f"mascara relida: 0x{m:04X} "
@@ -3779,5 +4285,7 @@ if __name__ == "__main__":
         cmd_var_mask(resto)
     elif cmd == "kit_watch":
         cmd_kit_watch(resto)
+    elif cmd == "pattern_watch":
+        cmd_pattern_watch(resto)
     else:
         print(__doc__)

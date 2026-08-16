@@ -45,12 +45,27 @@ trabalho é entregue:
 
 ## Depois de editar
 
-- Mexeu em `gui.py` ou `lp_tr8s.py` → rodar `python3 criar_app.py`. O `.app` do Desktop
-  carrega uma **cópia** dos scripts; sem isso ele segue rodando a versão velha
+O código roda em **três cópias**, e nenhuma delas é a pasta do projeto. Editar sem
+atualizar a cópia certa faz testar a versão velha — que é o jeito mais fácil de tirar
+uma conclusão falsa sobre o hardware.
+
+- Mexeu em `lp_tr8s.py`, `servidor.py`, `web/`, `efeitos.py`, `ferramentas.py`,
+  `biblioteca.py` ou `tones.py`:
+  - `python3 instalar_agente.py` → atualiza `~/Library/Application Support/tr8s-grid/`
+    e **reinicia o agente do launchd**, que é quem está no ar no dia a dia (é o que o
+    app da Dock abre). Reiniciar **desliga o motor**: apertar ON de novo na tela
+  - `python3 criar_app.py` → atualiza o `TR-8S Grid.app` do Desktop, que tem a sua
+    própria cópia
+  - o terceiro caminho é rodar da pasta do projeto (`python3 lp_tr8s.py ...`), que usa
+    o código editado direto — é por onde as sessões de hardware acontecem
 - Mexeu em `gen_layout.py` ou `gen_adesivo.py` → regerar. O adesivo precisa da
   compensação de impressora: `python3 gen_adesivo.py --medido 93`
-- Só um processo por vez pode usar a porta CTRL. Um `run` esquecido em background impede
-  o `.app` de abrir
+- **Só um processo por vez fala com a porta CTRL** — e o modo como isso falha é
+  traiçoeiro: no CoreMIDI a porta aceita vários clientes, então nada dá erro; os dois
+  só passam a consumir a resposta um do outro e a medida sai errada **sem sintoma**.
+  Quem segura a CTRL é o **motor**, não o servidor: com o motor em OFF o agente pode
+  ficar no ar. As sessões guiadas (`pattern_watch` e companhia) checam isso sozinhas
+  pelo `/ping` e se recusam a medir
 
 ## Idioma
 

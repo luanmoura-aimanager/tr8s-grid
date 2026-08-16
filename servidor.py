@@ -130,13 +130,17 @@ class Host:
         except Exception as e:
             self.log(f"(!) layout ilegivel: {e}")
             return False
-        atual_in = [n for _, n in L.listar_portas(True)]
-        atual_out = [n for _, n in L.listar_portas(False)]
-        if cfg.get("_portas_in") != atual_in or cfg.get("_portas_out") != atual_out:
-            self.log("(!) As portas MIDI mudaram desde o 'learn' (replug?). "
-                     "Aperte Recalibrar - escrever agora poderia cair no "
-                     "aparelho errado.")
+        # A lista de portas mudar NAO e mais motivo para recusar: plugar um
+        # teclado empurra os indices e antes isso derrubava o app inteiro
+        # (aconteceu em 16/08/2026 com um KeyLab 49). O resolver_layout
+        # reencontra cada Launchpad por (nome, n-esima ocorrencia), que e a
+        # identidade de verdade. So recusa quando um aparelho SUMIU.
+        cfg, aviso, erro = L.resolver_layout(cfg)
+        if erro:
+            self.log(f"(!) {erro}")
             return False
+        if aviso:
+            self.log(f"(i) {aviso}")
         try:
             L._programmer_mode(True)
             self.motor = L.Motor(cfg, log=self.log)
@@ -552,9 +556,14 @@ class Handler(http.server.BaseHTTPRequestHandler):
             return self._servir_pagina()
         if rota == "/ping":
             # e assim que a segunda instancia sabe que quem esta na porta somos
-            # nos, em vez de supor (o que o _porta_livre antigo fazia)
+            # nos, em vez de supor (o que o _porta_livre antigo fazia).
+            # "motor" diz se a porta CTRL esta OCUPADA - o servidor sozinho nao
+            # abre MIDI nenhum, e com o agente do launchd (KeepAlive) ele esta
+            # sempre no ar. As sessoes de hardware precisam da diferenca entre
+            # "o app esta aberto" e "o app esta falando com a maquina".
             return self._responder(json.dumps(
-                {"app": "tr8s-grid", "pid": os.getpid()}))
+                {"app": "tr8s-grid", "pid": os.getpid(),
+                 "motor": HOST.motor is not None}))
         if rota.startswith("/web/"):
             return self._servir_estatico(rota)
         if rota == "/token":

@@ -31,6 +31,14 @@
           letter-spacing:var(--esp-rot); text-transform:uppercase }
 .seg-val{ font-size:var(--t-med); font-weight:600 }
 .seg[data-vazio="1"] .seg-val{ color:var(--linha2); text-shadow:none }
+/* Segundo testemunho, so no PTN: o NUMERO vem do no de performance
+   (01 00 00 00, offset 1) e o NOME vem do no do pattern (20 00 00 00, bytes
+   0-15) - fontes diferentes para a mesma coisa. Se os dois discordarem depois
+   de uma troca, e o bug da REFERENCIA 7 aparecendo sozinho, sem sessao de
+   debug. Fica discreto: quem manda no display continua sendo o numero. */
+.seg-sub{ font-size:var(--t-micro); color:var(--fraco); text-shadow:none;
+          letter-spacing:.02em; max-width:11ch; overflow:hidden;
+          text-overflow:ellipsis; white-space:nowrap }
 
 /* O KIT manda em tudo que a aba Efeitos e a Instrumento mostram: um nome
    errado ali (foi o que aconteceu com o "TR-808") faz a tela inteira falar
