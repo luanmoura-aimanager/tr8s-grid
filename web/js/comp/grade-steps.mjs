@@ -100,9 +100,6 @@ export function gradeSteps({
   let janelaChave = "";
 
   function marcarJanela(indices) {
-    const chave = indices.join(",");
-    if (chave === janelaChave) return;
-    janelaChave = chave;
     // linhas nao contiguas (esconder_mudos tirou uma do meio): a moldura
     // mentiria, entao ela some e a marca vai para os rotulos das linhas
     const contigua =
@@ -110,9 +107,19 @@ export function gradeSteps({
       indices[indices.length - 1] - indices[0] === indices.length - 1;
     janela.hidden = !contigua;
     if (contigua) {
-      prop(janela, "--j0", indices[0]);
-      prop(janela, "--jn", indices.length);
+      // MEDIR, nao calcular: a primeira versao somava "16px de regua +
+      // n*(altura+gap)" e o erro acumulado deixava a moldura cortando a
+      // ultima linha no meio. offsetTop dos rotulos reais nao mente e
+      // sobrevive a troca de densidade.
+      const r0 = rotulos[indices[0]];
+      const r1 = rotulos[indices[indices.length - 1]];
+      janela.style.top = r0.offsetTop + "px";
+      janela.style.height =
+        r1.offsetTop + r1.offsetHeight - r0.offsetTop + "px";
     }
+    const chave = indices.join(",");
+    if (chave === janelaChave) return;
+    janelaChave = chave;
     rotulos.forEach((r, l) =>
       attr(r, "data-lp", indices.includes(l) && !contigua ? "" : null),
     );

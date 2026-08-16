@@ -232,6 +232,11 @@ OFF_PATTERN_PROX  = 2
 # vizinhos (kit no 0, pattern no 1/2).
 OFF_TEMPO = 0x3A
 
+# perf offset 0x40: alterna 0/1 a cada volta MESMO com A->B->C ciclando
+# (watch de 16/08) - e paridade de compasso ou algo do genero, NAO a
+# variacao tocando. Registrado para ninguem confundir de novo.
+OFF_PARIDADE = 0x40
+
 def addr_mute():            return addr_soma(ADDR_PERF, OFF_MUTE)
 
 # BLOCO UTILITY (50 00 00 xx) - do mesmo mapa oficial do ARIA. Semantica
@@ -1559,6 +1564,14 @@ class Motor:
         self.pattern_nome = None                # bytes 0-15 do no do pattern
         self._var_seguida = None                # ultima variacao seguida
         self.vars_habilitadas = []              # mascara 63-66 decodificada
+        # ciclo de variacoes derivado do CLOCK (16/08/2026): a variacao que
+        # toca nao existe em nenhum no SysEx que conhecemos (o watch de 193
+        # bytes nao viu nada mudar com A->B->C ciclando) - mas da para contar:
+        # ordem ascendente das habilitadas, cada uma dura o SEU last step.
+        # None = ainda nao ancorado (so um start alinha; quem chega com a
+        # maquina ja rodando fica honesto no "?").
+        self._ciclo_idx = None
+        self._ciclo_limite = 0
         self.fx_fila = []                       # blocos de FX a reler, aos poucos
         self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
         self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
@@ -1744,9 +1757,17 @@ class Motor:
         # varias habilitadas, a variacao tocando e DESCONHECIDA ate o
         # var_watch achar o byte dela - e melhor "?" que errado.
         m = nibbles_para_mascara(d[OFF_VAR_TOCANDO:OFF_VAR_TOCANDO + 4])
-        bits = [v for v in range(1, 9) if m >> (v - 1) & 1]
-        self.vars_habilitadas = bits
-        self.variacao_tocando = bits[0] if len(bits) == 1 else None
+        antes_hab = self.vars_habilitadas
+        self.vars_habilitadas = [v for v in range(1, 9) if m >> (v - 1) & 1]
+        # com UMA habilitada a tocando e ela propria; com varias, a conta do
+        # clock manda (_avancar_ciclo_vars) - e se o conjunto mudou no meio,
+        # a ancora ja nao vale
+        if len(self.vars_habilitadas) == 1:
+            self.variacao_tocando = self.vars_habilitadas[0]
+            self._ciclo_idx = None
+        elif antes_hab != self.vars_habilitadas:
+            self._ciclo_idx = None
+            self.variacao_tocando = None
         mudou = antes != (dict(self.ultimo_var), list(self.ultimo_track),
                           self.variacao_tocando)
         if mudou:
@@ -3141,20 +3162,60 @@ class Motor:
                 if self.tocando:
                     self.pulsos += 1
                     self.passo_abs = self.pulsos // PULSOS_P_STEP
+                    self._avancar_ciclo_vars()
                     # da a volta no last step da variacao, nao em 16 fixo - era
                     # a causa da dessincronizacao documentada na REFERENCIA 5
                     self.mover_playhead(self.passo_abs % max(1, self.last_var()))
             elif t == 'start':
                 self.pulsos, self.passo_abs, self.tocando = 0, 0, True
+                self._ancorar_ciclo_vars()
                 self.mover_playhead(0)
             elif t == 'continue':
+                # retomada no meio: com varias variacoes habilitadas nao ha
+                # como saber em qual a maquina esta - honesto e "?"
                 self.tocando = True
+                if len(self.vars_habilitadas) > 1:
+                    self._ciclo_idx = None
+                    self.variacao_tocando = None
             elif t == 'stop':
                 # repinta o quadro inteiro, nao a coluna: com track curto cada
                 # linha tem o playhead numa coluna diferente, e limpar so uma
                 # deixaria as outras com o verde preso na tela
                 self.tocando, self.passo = False, -1
                 self.pintar()
+
+    # ── ciclo de variacoes derivado do clock ────────────────
+    # A variacao que TOCA nao existe em nenhum no SysEx conhecido (o watch de
+    # 193 bytes nao viu nada mudar com A->B->C ciclando; o perf 0x40 e so
+    # paridade). Mas da para CONTAR: a maquina cicla as habilitadas em ordem
+    # ascendente e cada uma dura o proprio last step - com o clock pulso a
+    # pulso, a conta e exata. Limite conhecido: se a variacao principal nao
+    # for a mais baixa das habilitadas (ex. segurar C e somar A), o comeco
+    # desalinha - caso raro, documentado.
+
+    def _ancorar_ciclo_vars(self):
+        vs = self.vars_habilitadas
+        if len(vs) > 1:
+            self._ciclo_idx = 0
+            self.variacao_tocando = vs[0]
+            self._ciclo_limite = self.ultimo_var.get(vs[0], 16)
+        else:
+            self._ciclo_idx = None
+            if vs:
+                self.variacao_tocando = vs[0]
+
+    def _avancar_ciclo_vars(self):
+        vs = self.vars_habilitadas
+        if len(vs) <= 1:
+            self.variacao_tocando = vs[0] if vs else self.variacao_tocando
+            return
+        if self._ciclo_idx is None:
+            return                      # sem ancora (continue/attach): "?"
+        while self.passo_abs >= self._ciclo_limite:
+            self._ciclo_idx = (self._ciclo_idx + 1) % len(vs)
+            v = vs[self._ciclo_idx]
+            self.variacao_tocando = v
+            self._ciclo_limite += self.ultimo_var.get(v, 16)
 
     def _bpm_medido(self):
         """BPM derivado do intervalo entre clocks (24 por seminima), ou None.
@@ -3530,24 +3591,27 @@ def cmd_tempo_watch():
     tin, tout = _portas_tr8s()
     if not (tin and tout):
         print("Porta TR-8S CTRL nao encontrada."); return
-    alvos = [("perf", ADDR_PERF), ("pattern", ADDR_PATTERN)]
+    # o no de pattern tem 193 bytes (o TR-EDITOR le 16+193); ler so 128
+    # escondia a regiao 128-192 - e foi ali que a variacao tocando NAO
+    # apareceu na primeira cacada, entao agora o watch olha o no inteiro
+    alvos = [("perf", ADDR_PERF, 128), ("pattern", ADDR_PATTERN, 193)]
     print("Observando os nos de perf e de pattern. Gire o TEMPO devagar.\n"
           "Ctrl+C sai.\n")
     with EntradaMIDI(*tin) as tin, SaidaMIDI(*tout) as tout:
         antes = {}
         try:
             while True:
-                for rot, addr in alvos:
-                    d = ler_bloco(tin, tout, addr, 128, timeout=SNAP_TIMEOUT)
+                for rot, addr, tam in alvos:
+                    d = ler_bloco(tin, tout, addr, tam, timeout=SNAP_TIMEOUT)
                     if not d:
                         continue
                     a = antes.get(rot)
                     if a and len(a) == len(d):
                         difs = [(i, x, y) for i, (x, y)
                                 in enumerate(zip(a, d)) if x != y]
-                        # ignora o passo do sequenciador andando (perf off 7)
+                        # ignora o passo (perf 7) e a paridade (perf 0x40)
                         difs = [x for x in difs
-                                if not (rot == "perf" and x[0] == 7)]
+                                if not (rot == "perf" and x[0] in (7, 0x40))]
                         if difs and len(difs) <= 6:
                             print(f"{rot}: " + "  ".join(
                                 f"off {i} (0x{i:02X}): {x:02X}->{y:02X}"

@@ -125,8 +125,7 @@
  * origem, porque vem do estado do motor. */
 .janela-lp{
   position:absolute; left:calc(var(--rot-l)); right:0; pointer-events:none;
-  top:calc(16px + var(--j0,1) * (var(--cel-h) + var(--gap)));
-  height:calc(var(--jn,8) * (var(--cel-h) + var(--gap)) - var(--gap));
+  /* top/height sao MEDIDOS do DOM em marcarJanela (offsetTop dos rotulos) */
   border:2px solid var(--c-play,#33d17a); border-radius:var(--r2);
   opacity:.45;
 }
