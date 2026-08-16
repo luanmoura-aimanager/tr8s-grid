@@ -153,13 +153,19 @@ class Chain:
             self.log(f"chain: nextPattern {L.nome_pattern(n)} "
                      "enviado (troca na virada - provado 15/08)")
         elif ent["tipo"] == "variacao":
-            # addr_no_pattern(o pattern CORRENTE), nao ADDR_PATTERN: aquele e
-            # o no do pattern 0, e escrever nele pedia variacao no 1-01 com a
-            # maquina tocando outra coisa. Mesmo bug do 20 xx, sobrevivendo
-            # neste canto (16/08/2026).
+            # addr_no_pattern do pattern CORRENTE, nao ADDR_PATTERN_ZERO:
+            # este ultimo e o no do 1-01, e escrever nele pedia variacao no
+            # 1-01 com a maquina tocando outra coisa. Mesmo bug do endereco
+            # de pattern, sobrevivendo neste canto (16/08/2026).
+            #
+            # A guarda importa mais aqui que noutros lugares: uma excecao
+            # dentro do Chain.tick faz o Motor DESARMAR o chain, entao uma
+            # leitura que falhou por um instante mataria a corrente inteira.
+            p = motor._pattern_para_escrever("chain: pedir variacao")
+            if p is None:
+                return
             motor.tr_out.send(L.dt1(
-                L.addr_soma(L.addr_no_pattern(motor.pattern_atual),
-                            L.OFF_VAR_TOCANDO),
+                L.addr_soma(L.addr_no_pattern(p), L.OFF_VAR_TOCANDO),
                 L.mascara_para_nibbles(1 << (ent["var"] - 1))))
             self.log(f"chain: variacao {L.VARIACOES[ent['var']-1]} pedida "
                      "(sessao C decide se obedece)")
