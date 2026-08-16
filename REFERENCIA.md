@@ -1301,6 +1301,41 @@ futuro para o nosso.
 
 Capturas de tudo em `capturas/*-2026-08-15.mmon`.
 
+### BUG ABERTO em 16/08/2026, madrugada — o grid não espelha o que toca
+
+Sintoma: com a máquina tocando (patterns/variações trocados livremente), o
+conteúdo do grid **não corresponde ao que soa**, e editar pelo grid não soa.
+A sessão achou e consertou várias causas parciais — kit certo, espelho
+bidirecional, seguir variação, nomenclatura 2-05, moldura — e o sintoma
+persistiu. O que já se sabe:
+
+- A máscara 63–66 é das variações **habilitadas**; a variação tocando **não
+  existe em nó SysEx conhecido** (watch de 193 bytes em silêncio; perf 0x40
+  é paridade de compasso). Hoje ela é **derivada do clock** (ordem
+  ascendente × last step de cada uma, âncora no start) — `_avancar_ciclo_vars`.
+- Hipótese PRINCIPAL não testada de forma isolada: o **buffer de edição
+  (nós `20 xx`) não acompanha a troca de pattern** — leituras e escritas
+  continuariam caindo no pattern antigo. Há um "resync" especulativo no
+  motor (reescrever `01 00 00 01` com o mesmo n ao detectar troca) que
+  **pode não fazer nada**.
+
+**Roteiro do debug com calma (próxima sessão), do isolante ao complexo:**
+
+1. App **fechado**. Máquina tocando o pattern X, variação A só.
+   `python3 lp_tr8s.py prob_watch` (vigia o step 1 do BD na var A).
+   Ligar/desligar o step 1 do BD **no painel** → o watch imprime?
+   - Imprime → o nó 20 segue o pattern corrente; o bug é do motor
+     (variação aberta/cache/rodízio) — instrumentar o motor.
+   - Silêncio → **buffer dessincronizado confirmado**; ir ao passo 2.
+2. Com o watch rodando, trocar o pattern **pelo painel** e repetir o toggle.
+   Depois trocar **remotamente** (`pattern <n>`) e repetir. Isola qual troca
+   dessincroniza.
+3. Se dessincroniza: testar ressincronizadores um a um, com o watch aberto —
+   escrever `01 00 00 01` = n; `01 00 00 02` = n; `UTIL 0x12`/GET-like?
+   O TR-EDITOR resolve com o botão GET — se nada funcionar, capturar o GET
+   dele (1 gesto) e imitar.
+4. Só então revalidar grid/ghosts/click-to-sound.
+
 **Pedidos de interface anotados em 15/08 à noite** (para o plano da reforma):
 
 - Biblioteca: clicar no estilo já muda BPM e kit (ou botão ali mesmo);
