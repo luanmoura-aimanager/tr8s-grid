@@ -1542,6 +1542,7 @@ class Motor:
         self.kit_atual = None                   # offset 0 do perf (01 00 00 00)
         self.kit_trocou = False                 # troca vista no painel
         self.pattern_trocou = False             # idem, para o pattern
+        self.pattern_nome = None                # bytes 0-15 do no do pattern
         self.fx_fila = []                       # blocos de FX a reler, aos poucos
         self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
         self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
@@ -1710,6 +1711,10 @@ class Motor:
             if not quieto:
                 self.log("(!) nao consegui ler os last steps; usando o espelho.")
             return False
+        # o NOME do pattern corrente mora nos bytes 0-15 do mesmo no (ASCII,
+        # '----' = sem nome) - de graca na leitura que ja acontece
+        self.pattern_nome = ("".join(chr(b) for b in d[:16]
+                                     if 32 <= b < 127).strip() or None)
         antes = (dict(self.ultimo_var), list(self.ultimo_track),
                  self.variacao_tocando)
         for v in range(1, 9):                       # A-H; fills nao tem slot
@@ -1831,6 +1836,15 @@ class Motor:
             n = novo_pat
             self.log("pattern mudou "
                      f"({'ABCDEFGH'[n // 16]}{n % 16 + 1}): relendo o grid")
+            # HIPOTESE de 16/08/2026 (sintoma: apos trocar de pattern, editar
+            # o grid nao soava e o painel nao aparecia no grid): o buffer de
+            # edicao SysEx (blocos 20 xx) pode nao acompanhar a troca sozinho.
+            # Reescrever o pattern ATUAL com o mesmo numero deve forca-lo a
+            # recarregar - o offset 1 e provado e preserva a posicao do step,
+            # entao com o MESMO pattern e para ser inaudivel. Se o Luan ainda
+            # vir dessincronizacao, este e o primeiro suspeito a revisar.
+            self.tr_out.send(dt1(addr_soma(ADDR_PERF, OFF_PATTERN_ATUAL),
+                                 [n & 0x7F]))
         self.pattern_atual = novo_pat
         m = nibbles_para_mascara(d[OFF_MUTE:OFF_MUTE + 4])
         novo = [bool(m >> i & 1) for i in range(len(INSTRUMENTOS))]
@@ -3302,6 +3316,7 @@ class Motor:
                 "chain": self.chain.resumo() if self.chain else None,
                 "kit_atual": self.kit_atual,
                 "pattern_atual": self.pattern_atual,
+                "pattern_nome": self.pattern_nome,
                 "kit_nome": self.kit_nome,
                 "tone_ids": list(self.tone_ids),
                 # indices (nao so os nomes): a tela precisa marcar qual chip
@@ -3432,6 +3447,49 @@ def cmd_prob_watch():
                           f"(formula linear diria {byte_para_prob(d[PROB_BYTE])}%)"
                           f"   vel={vel}")
                 time.sleep(0.5)
+        except KeyboardInterrupt:
+            print("\nfim.")
+
+
+def cmd_tempo_watch():
+    """Sessao T: achar o byte do TEMPO (destrava o Auto BPM de verdade).
+
+    Le em loop os nos de performance (01 00 00 00) e de pattern
+    (20 00 00 00) - ambos leitura provada - e imprime o que mudar.
+
+    Roteiro pro Luan (app FECHADO/off - porta CTRL unica):
+      1. rodar isto;
+      2. girar o knob TEMPO da TR-8S devagar, de ponta a ponta;
+      3. ditar dois valores do visor (ex. "agora 90.0", "agora 240.0")
+         para casar byte com escala.
+    """
+    tin, tout = _portas_tr8s()
+    if not (tin and tout):
+        print("Porta TR-8S CTRL nao encontrada."); return
+    alvos = [("perf", ADDR_PERF), ("pattern", ADDR_PATTERN)]
+    print("Observando os nos de perf e de pattern. Gire o TEMPO devagar.\n"
+          "Ctrl+C sai.\n")
+    with EntradaMIDI(*tin) as tin, SaidaMIDI(*tout) as tout:
+        antes = {}
+        try:
+            while True:
+                for rot, addr in alvos:
+                    d = ler_bloco(tin, tout, addr, 128, timeout=SNAP_TIMEOUT)
+                    if not d:
+                        continue
+                    a = antes.get(rot)
+                    if a and len(a) == len(d):
+                        difs = [(i, x, y) for i, (x, y)
+                                in enumerate(zip(a, d)) if x != y]
+                        # ignora o passo do sequenciador andando (perf off 7)
+                        difs = [x for x in difs
+                                if not (rot == "perf" and x[0] == 7)]
+                        if difs and len(difs) <= 6:
+                            print(f"{rot}: " + "  ".join(
+                                f"off {i} (0x{i:02X}): {x:02X}->{y:02X}"
+                                for i, x, y in difs))
+                    antes[rot] = list(d)
+                time.sleep(0.4)
         except KeyboardInterrupt:
             print("\nfim.")
 
@@ -3570,7 +3628,7 @@ if __name__ == "__main__":
     cmd, resto = (sys.argv[1] if len(sys.argv) > 1 else ""), sys.argv[2:]
     simples = {"ports": cmd_ports, "learn": cmd_learn, "probe": cmd_probe,
                "colors": cmd_colors, "dump": cmd_dump, "run": cmd_run,
-               "prob_watch": cmd_prob_watch}
+               "prob_watch": cmd_prob_watch, "tempo_watch": cmd_tempo_watch}
     if cmd in simples:
         simples[cmd]()
     elif cmd == "standby":

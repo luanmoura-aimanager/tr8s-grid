@@ -20,9 +20,20 @@ const nomePat = (n) => "ABCDEFGH"[n >> 4] + ((n % 16) + 1);
 
 let D_;
 let sel = null; // {tipo:"groove", p} | {tipo:"pattern", n}
-let fila = []; // [{tipo, id?|alvo?, nome, reps}]
+// A fila e um LOOP persistente (pedido de 16/08): sobrevive a recarregar a
+// pagina, e cada card pode ser tirado do loop sem ser apagado (off:true).
+let fila = []; // [{tipo, id?|alvo?, nome, reps, off?}]
+try {
+  fila = JSON.parse(localStorage.getItem("filaGrooves") || "[]");
+} catch {
+  fila = [];
+}
 let ultimo = {};
 let armado = 0;
+
+function salvarFila() {
+  localStorage.setItem("filaGrooves", JSON.stringify(fila));
+}
 
 // elementos vivos
 let tbodyBib, gradeMaq, elSel, elFilaCards, elFilaEstado, bArmar, bParar;
@@ -149,23 +160,31 @@ export default {
     );
     const pnSel = painel("Selecionado", elSel);
 
-    // ── FILA ─────────────────────────────────────────────
+    // ── FILA (loop persistente) ──────────────────────────
     elFilaCards = h("div.fila-cards");
     elFilaEstado = h("span.chip", { hidden: true });
-    bArmar = h("button.bt", { type: "button" }, "Armar");
+    bArmar = h("button.bt", { type: "button" }, "Tocar loop");
     bArmar.onclick = armarFila;
     bParar = h("button.bt.bt-perigo", { type: "button" }, "Parar");
     bParar.onclick = () => agir({ acao: "chain_parar" });
+    const bLimpar = h("button.bt.bt-peq", { type: "button" }, "Limpar");
+    bLimpar.onclick = () => {
+      fila = [];
+      salvarFila();
+      desenharFila(ultimo.chain);
+    };
     const pnFila = painel(
-      "Fila de encadeamento",
-      { dir: [elFilaEstado] },
+      "Loop de encadeamento",
+      { dir: [elFilaEstado, bLimpar] },
       elFilaCards,
       h("div.linha", {}, bArmar, bParar),
       h(
-        "p.aviso",
+        "p.dica",
         {},
-        "groove na fila ESCREVE na variação aberta do pattern corrente — " +
-          "o Desfazer volta.",
+        "o loop repete do começo quando acaba, e fica salvo. Clique no " +
+          "nome de um card para tirá-lo do loop sem apagar (× apaga). " +
+          "Groove ESCREVE na variação aberta do pattern corrente — o " +
+          "Desfazer volta.",
       ),
     );
 
@@ -200,17 +219,17 @@ export default {
     if (bEscrever)
       attr(bEscrever, "aria-disabled", e.carregado ? null : "true");
 
-    // fila: armado, o resumo do motor e a verdade e a local trava
+    // fila: sempre a LOCAL na tela (com os controles); o resumo do motor so
+    // fornece a posicao ativa e os ciclos restantes do card em destaque
     const c = e.chain;
     const armadoAgora = !!(c && c.ativo);
     elFilaEstado.hidden = !armadoAgora || e.tocando;
     if (armadoAgora && !e.tocando)
       texto(elFilaEstado, "esperando play na TR-8S");
     attr(bParar, "aria-disabled", armadoAgora ? null : "true");
-    attr(bArmar, "aria-disabled", armadoAgora ? "true" : null);
-    const chave = armadoAgora
-      ? `arm:${c.posicao}:${c.reps_restantes}`
-      : "local:" + fila.map((f) => f.nome + f.reps).join("|");
+    const chave =
+      (armadoAgora ? `arm:${c.posicao}:${c.reps_restantes}|` : "solto|") +
+      fila.map((f) => f.nome + f.reps + (f.off ? "!" : "")).join("|");
     if (elFilaCards.dataset.chave !== chave) {
       elFilaCards.dataset.chave = chave;
       desenharFila(c);
@@ -265,7 +284,7 @@ function montarSelGroove(p) {
     value: 2,
     "aria-label": "repetições",
   });
-  const bFila = h("button.bt", { type: "button" }, "+ Fila");
+  const bFila = h("button.bt", { type: "button" }, "+ Loop");
   bFila.onclick = () => {
     fila.push({
       tipo: "groove",
@@ -273,7 +292,8 @@ function montarSelGroove(p) {
       nome: p.nome,
       reps: repsEscolhidas(),
     });
-    desenharFila();
+    salvarFila();
+    desenharFila(ultimo.chain);
   };
 
   elSel.append(
@@ -329,10 +349,9 @@ function montarSelGroove(p) {
 }
 
 function montarSelPattern(n) {
-  const bVirada = h("button.bt", { type: "button" }, "Na virada");
-  bVirada.onclick = () => agir({ acao: "pattern", n, agora: false });
-  const bAgora = h("button.bt", { type: "button" }, "Agora");
-  bAgora.onclick = () => agir({ acao: "pattern", n, agora: true });
+  // simplificado a pedido (16/08): a troca e SEMPRE na virada, um botao so
+  const bTocar = h("button.bt", { type: "button" }, "Tocar");
+  bTocar.onclick = () => agir({ acao: "pattern", n, agora: false });
   inReps = h("input", {
     type: "number",
     min: 1,
@@ -340,7 +359,7 @@ function montarSelPattern(n) {
     value: 2,
     "aria-label": "repetições",
   });
-  const bFila = h("button.bt", { type: "button" }, "+ Fila");
+  const bFila = h("button.bt", { type: "button" }, "+ Loop");
   bFila.onclick = () => {
     fila.push({
       tipo: "pattern",
@@ -348,18 +367,18 @@ function montarSelPattern(n) {
       nome: nomePat(n),
       reps: repsEscolhidas(),
     });
-    desenharFila();
+    salvarFila();
+    desenharFila(ultimo.chain);
   };
+  const meta =
+    ultimo.pattern_atual === n && ultimo.pattern_nome
+      ? `tocando agora · “${ultimo.pattern_nome}”`
+      : "a troca acontece na virada do compasso, como no painel. O nome " +
+        "do pattern só é legível quando ele está tocando.";
   elSel.append(
     h("h2", {}, "Pattern " + nomePat(n)),
-    h(
-      "p.dica",
-      {},
-      "provado em hardware: “Na virada” espera o compasso acabar, como no " +
-        "painel; “Agora” corta no meio preservando o step — troca de " +
-        "conteúdo com o relógio intacto.",
-    ),
-    h("div.linha", {}, bVirada, bAgora, campo("Repetições", inReps), bFila),
+    h("p.dica", {}, meta),
+    h("div.linha", {}, bTocar, campo("Repetições", inReps), bFila),
   );
 }
 
@@ -399,92 +418,97 @@ function escrever(p, botao, aviso) {
   agir({ acao: "biblioteca", id: p.id });
 }
 
-// ── fila ───────────────────────────────────────────────────
+// ── fila (loop persistente) ────────────────────────────────
+// A tela mostra SEMPRE a fila local, com todos os controles. Quando o loop
+// esta tocando, o resumo do motor so diz qual entrada esta ativa - o
+// destaque cai no n-esimo card LIGADO (os desligados nao foram enviados).
+function noLoop() {
+  return fila.filter((f) => !f.off);
+}
+
 function desenharFila(chain) {
   elFilaCards.replaceChildren();
-  const armadoAgora = !!(chain && chain.ativo);
-  const itens = armadoAgora ? chain.entradas : fila;
-  if (!itens.length) {
+  if (!fila.length) {
     elFilaCards.append(
-      h("p.vazio", {}, "fila vazia — selecione algo e clique “+ Fila”"),
+      h("p.vazio", {}, "loop vazio — selecione algo e clique “+ Loop”"),
     );
     return;
   }
-  itens.forEach((f, i) => {
+  const armadoAgora = !!(chain && chain.ativo);
+  const ligados = noLoop();
+  const ativo =
+    armadoAgora && ligados.length
+      ? ligados[chain.posicao % ligados.length]
+      : null;
+  fila.forEach((f, i) => {
+    const nome = h("strong", { title: "clique: tira/volta do loop" }, f.nome);
     const card = h(
       "div.card-chain",
-      { "data-tipo": f.tipo },
+      { "data-tipo": f.tipo, "data-off": f.off ? "" : null },
       h("span.badge", {}, f.tipo === "groove" ? "groove" : "pattern"),
-      h("strong", {}, f.nome),
+      nome,
     );
-    if (armadoAgora) {
-      if (i === chain.posicao) {
-        attr(card, "data-ativo", "");
-        card.append(
-          h("span.dica", {}, `faltam ${chain.reps_restantes} ciclos`),
-        );
-      } else card.append(h("span.dica", {}, `${f.reps}×`));
-    } else {
-      // editavel: stepper de reps, reordenar, remover
-      const menos = h("button.bt.bt-peq", { type: "button" }, "−");
-      const mais = h("button.bt.bt-peq", { type: "button" }, "+");
-      const nreps = h("span.mono", {}, `${f.reps}×`);
-      menos.onclick = () => {
-        f.reps = Math.max(1, f.reps - 1);
-        desenharFila();
-      };
-      mais.onclick = () => {
-        f.reps = Math.min(16, f.reps + 1);
-        desenharFila();
-      };
-      const esq = h(
-        "button.bt.bt-peq",
-        { type: "button", title: "mover" },
-        "◀",
-      );
-      const dir = h(
-        "button.bt.bt-peq",
-        { type: "button", title: "mover" },
-        "▶",
-      );
-      esq.onclick = () => {
-        if (i > 0) {
-          [fila[i - 1], fila[i]] = [fila[i], fila[i - 1]];
-          desenharFila();
-        }
-      };
-      dir.onclick = () => {
-        if (i < fila.length - 1) {
-          [fila[i + 1], fila[i]] = [fila[i], fila[i + 1]];
-          desenharFila();
-        }
-      };
-      const rem = h(
-        "button.bt.bt-peq",
-        { type: "button", title: "remover" },
-        "×",
-      );
-      rem.onclick = () => {
-        fila.splice(i, 1);
-        desenharFila();
-      };
-      card.append(menos, nreps, mais, esq, dir, rem);
+    nome.onclick = () => {
+      f.off = !f.off;
+      salvarFila();
+      desenharFila(ultimo.chain);
+    };
+    if (f === ativo) {
+      attr(card, "data-ativo", "");
+      card.append(h("span.dica", {}, `faltam ${chain.reps_restantes}`));
     }
+    const menos = h("button.bt.bt-peq", { type: "button" }, "−");
+    const mais = h("button.bt.bt-peq", { type: "button" }, "+");
+    const nreps = h("span.mono", {}, `${f.reps}×`);
+    menos.onclick = () => {
+      f.reps = Math.max(1, f.reps - 1);
+      salvarFila();
+      desenharFila(ultimo.chain);
+    };
+    mais.onclick = () => {
+      f.reps = Math.min(16, f.reps + 1);
+      salvarFila();
+      desenharFila(ultimo.chain);
+    };
+    const esq = h("button.bt.bt-peq", { type: "button", title: "mover" }, "◀");
+    const dir = h("button.bt.bt-peq", { type: "button", title: "mover" }, "▶");
+    esq.onclick = () => {
+      if (i > 0) {
+        [fila[i - 1], fila[i]] = [fila[i], fila[i - 1]];
+        salvarFila();
+        desenharFila(ultimo.chain);
+      }
+    };
+    dir.onclick = () => {
+      if (i < fila.length - 1) {
+        [fila[i + 1], fila[i]] = [fila[i], fila[i + 1]];
+        salvarFila();
+        desenharFila(ultimo.chain);
+      }
+    };
+    const rem = h("button.bt.bt-peq", { type: "button", title: "apagar" }, "×");
+    rem.onclick = () => {
+      fila.splice(i, 1);
+      salvarFila();
+      desenharFila(ultimo.chain);
+    };
+    card.append(menos, nreps, mais, esq, dir, rem);
     elFilaCards.append(card);
-    if (i < itens.length - 1)
+    if (i < fila.length - 1)
       elFilaCards.append(h("span.dica.seta-fila", {}, "→"));
   });
 }
 
 function armarFila() {
-  if (!fila.length) {
-    toast("a fila está vazia");
+  const ligados = noLoop();
+  if (!ligados.length) {
+    toast("o loop está vazio (ou tudo está desligado)");
     return;
   }
   agir({
     acao: "chain_armar",
     modo: "misto",
-    entradas: fila.map((f) =>
+    entradas: ligados.map((f) =>
       f.tipo === "groove"
         ? { tipo: "groove", id: f.id, reps: f.reps }
         : { tipo: "pattern", alvo: f.alvo, reps: f.reps },

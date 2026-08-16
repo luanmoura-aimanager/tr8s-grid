@@ -120,6 +120,8 @@ main{ padding:var(--e4); padding-bottom:56px }
                                          color:var(--fundo) }
 .card-chain[data-ativo]{ border-color:var(--ok);
                          box-shadow:0 0 8px #33d17a44 }
+.card-chain[data-off]{ opacity:.4 }          /* fora do loop, sem apagar */
+.card-chain strong{ cursor:pointer }
 .seta-fila{ user-select:none }
 
 /* estocastica: linhas de sliders por instrumento */
