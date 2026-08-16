@@ -209,7 +209,14 @@ function pintar(e, dados) {
   // BPM medido do MIDI clock (24 ppq): a TR-8S manda clock mesmo parada,
   // entao ele aparece sempre que o cabo esta la. Escrever BPM nao existe.
   seg("#d-bpm", e.bpm != null ? e.bpm.toFixed(1) : "—", e.bpm == null);
-  seg("#d-var", e.variacao_nome || "—", !e.variacao_nome);
+  // "toca" e "edita" sao coisas DIFERENTES (o visor diz 2-04B enquanto o
+  // grid edita a A) - a barra mostra as duas. "?" = varias variacoes
+  // habilitadas e o byte da que toca ainda nao foi decodificado.
+  const toca =
+    e.variacao_tocando_nome ||
+    ((e.vars_habilitadas || []).length > 1 ? "?" : null);
+  seg("#d-var", toca || "—", !toca);
+  seg("#d-vedit", e.variacao_nome || "—", !e.variacao_nome);
   seg(
     "#d-step",
     e.tocando && e.passo >= 0 ? String(e.passo + 1) : "—",

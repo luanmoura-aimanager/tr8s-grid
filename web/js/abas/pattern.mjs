@@ -234,11 +234,11 @@ export default {
     }
 
     // janela dos Launchpads: a moldura verde sobre o proprio grid substitui
-    // o antigo "espelho dos LEDs" (a ondinha do standby saiu da web junto).
+    // o antigo "espelho dos LEDs". Usa e.janela (lista de INDICES, criada
+    // para isto) - a primeira versao mapeava e.visiveis, que e uma STRING
+    // de log, e o .map explodia calado e a moldura nunca nascia (16/08).
     // +1 porque a linha 0 do grid e a ACC
-    const idx = (e.visiveis || [])
-      .map((n) => D.instrumentos.indexOf(n) + 1)
-      .filter((x) => x > 0);
+    const idx = (e.janela || []).map((i) => i + 1);
     grade.marcarJanela(idx);
     const rotJanela = $("#rot-janela");
     if (rotJanela && idx.length) {

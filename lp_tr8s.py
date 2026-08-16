@@ -1558,6 +1558,7 @@ class Motor:
         self.pattern_trocou = False             # idem, para o pattern
         self.pattern_nome = None                # bytes 0-15 do no do pattern
         self._var_seguida = None                # ultima variacao seguida
+        self.vars_habilitadas = []              # mascara 63-66 decodificada
         self.fx_fila = []                       # blocos de FX a reler, aos poucos
         self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
         self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
@@ -1736,10 +1737,16 @@ class Motor:
             self.ultimo_var[v] = d[OFF_LAST_VAR + v - 1] + 1
         for i in range(len(INSTRUMENTOS)):
             self.ultimo_track[i] = d[OFF_LAST_TRACK + i] + 1
-        # a variacao que toca vem no mesmo bloco, de graca (ver OFF_VAR_TOCANDO)
+        # CORRECAO DE 16/08/2026: a mascara dos offsets 63-66 e das variacoes
+        # HABILITADAS para ciclar, nao da que toca agora. Com uma so
+        # habilitada as duas coincidem (por isso funcionou ate hoje); com
+        # A..C habilitadas a tela cravava "A" enquanto o visor dizia C. Com
+        # varias habilitadas, a variacao tocando e DESCONHECIDA ate o
+        # var_watch achar o byte dela - e melhor "?" que errado.
         m = nibbles_para_mascara(d[OFF_VAR_TOCANDO:OFF_VAR_TOCANDO + 4])
-        self.variacao_tocando = next((v for v in range(1, 9) if m >> (v-1) & 1),
-                                     None)
+        bits = [v for v in range(1, 9) if m >> (v - 1) & 1]
+        self.vars_habilitadas = bits
+        self.variacao_tocando = bits[0] if len(bits) == 1 else None
         mudou = antes != (dict(self.ultimo_var), list(self.ultimo_track),
                           self.variacao_tocando)
         if mudou:
@@ -3332,6 +3339,10 @@ class Motor:
                 "modo": MODOS[self.modo][0],
                 "base_inst": self.base_inst,
                 "visiveis": self.visiveis(),
+                # a JANELA dos Launchpads como lista de indices (a moldura da
+                # tela usa; "visiveis" e string para logs e nao serve de dado)
+                "janela": list(self.lista_visivel()[
+                    self.base_inst:self.base_inst + self.linhas_de_inst()]),
                 "mostrar_acc": self.mostrar_acc,
                 "passo": self.passo, "tocando": self.tocando,
                 "carregado": self.carregado,
@@ -3342,6 +3353,10 @@ class Motor:
                 "armado": self.armado,
                 "esconder_mudos": self.esconder_mudos,
                 "variacao_tocando": self.variacao_tocando,
+                "variacao_tocando_nome": (
+                    VARIACOES[self.variacao_tocando - 1]
+                    if self.variacao_tocando else None),
+                "vars_habilitadas": self.vars_habilitadas,
                 "playhead_visivel": self.playhead_visivel(),
                 "lista_visivel": self.lista_visivel(),
                 "tem_clock": self.clk is not None,
