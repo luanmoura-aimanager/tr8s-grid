@@ -224,6 +224,14 @@ OFF_KIT_ATUAL     = 0
 OFF_PATTERN_ATUAL = 1
 OFF_PATTERN_PROX  = 2
 
+# TEMPO - achado com cmd_tempo_watch em 16/08/2026, o Luan girando o knob de
+# ponta a ponta: tempo x 10 em TRES NIBBLES nos offsets 0x3A-0x3C do perf.
+# Conferido nas pontas: 05 07 08 = 0x578 = 1400 = 140.0 (o visor dizia
+# ~139.7) e 0B 0B 08 = 0xBB8 = 3000 = 300.0 (o teto do knob). Faixa
+# 40.0-300.0. LEITURA provada; escrita e a mesma hipotese ja confirmada nos
+# vizinhos (kit no 0, pattern no 1/2).
+OFF_TEMPO = 0x3A
+
 def addr_mute():            return addr_soma(ADDR_PERF, OFF_MUTE)
 
 # BLOCO UTILITY (50 00 00 xx) - do mesmo mapa oficial do ARIA. Semantica
@@ -1543,6 +1551,7 @@ class Motor:
         self.kit_trocou = False                 # troca vista no painel
         self.pattern_trocou = False             # idem, para o pattern
         self.pattern_nome = None                # bytes 0-15 do no do pattern
+        self._var_seguida = None                # ultima variacao seguida
         self.fx_fila = []                       # blocos de FX a reler, aos poucos
         self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
         self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
@@ -2318,6 +2327,19 @@ class Motor:
         self.log(f"kit -> {n + 1:03d} (escrita nova em hardware: confira o "
                  "visor da TR-8S)")
 
+    def definir_bpm(self, bpm):
+        """Escreve o TEMPO da maquina (40.0-300.0) - o Auto BPM de verdade.
+
+        tempo x 10 em 3 nibbles no perf (OFF_TEMPO); primeira escrita em
+        16/08/2026, conferir o visor no primeiro uso."""
+        if self.modo_geral != MODO_ON or not self.tr_out:
+            self.log("(!) BPM so no modo ON")
+            return
+        v = int(round(max(40.0, min(300.0, float(bpm))) * 10))
+        self.tr_out.send(dt1(addr_soma(ADDR_PERF, OFF_TEMPO),
+                             [(v >> 8) & 0x0F, (v >> 4) & 0x0F, v & 0x0F]))
+        self.log(f"TEMPO -> {v / 10:.1f} (confira o visor)")
+
     def snapshot_escrita(self, rotulo):
         """Empilha o estado da variacao aberta antes de uma escrita em massa.
 
@@ -2884,6 +2906,21 @@ class Motor:
             (INSTRUMENTOS[i].lower() if self.mudo[i] else INSTRUMENTOS[i])
             for i in vis)                 # minusculo = mutado na TR-8S
 
+    def _seguir_variacao(self):
+        """Abre no grid a variacao que a maquina passou a tocar.
+
+        So age quando a variacao TOCANDO muda (memoria em _var_seguida):
+        quem abre outra variacao de proposito para editar fica nela ate a
+        maquina trocar de novo - senao o follow brigaria com o usuario a
+        cada tick."""
+        v = self.variacao_tocando
+        if not v or v == self._var_seguida:
+            return
+        self._var_seguida = v
+        if v != self.variacao and self.tocando:
+            self.log(f"grid seguindo a variacao {VARIACOES[v-1]} que toca")
+            self.executar("variacao", v)
+
     def executar(self, tipo, arg):
         if tipo == "variacao":
             self.variacao, self.armado = arg, None
@@ -3177,12 +3214,18 @@ class Motor:
                     if self.variacao_tocando != antes_toc:
                         nome = (VARIACOES[self.variacao_tocando-1]
                                 if self.variacao_tocando else "?")
-                        self.log(f"a TR-8S passou a tocar a variacao {nome}"
-                                 + ("" if self.playhead_visivel() else
-                                    "  - o grid esta noutra, playhead escondido"))
+                        self.log(f"a TR-8S passou a tocar a variacao {nome}")
                     else:
                         self.log(f"last steps mudaram no painel  |  "
                                  f"variacao {self.last_var()}")
+                # SEGUIR A VARIACAO QUE TOCA (16/08/2026). O visor mostrava
+                # "2-04B" com o grid na A: editar nao soava, o painel nao
+                # aparecia no grid e a estocastica caia no vazio - o Luan
+                # diagnosticou "esta tudo errado", e estava. Quando a variacao
+                # tocando difere da aberta, o grid vai atras. Quem quiser
+                # editar OUTRA variacao clica nela: o grid fica la ate a
+                # variacao tocando MUDAR de novo.
+                self._seguir_variacao()
                 # mesma releitura periodica dos last steps, mesmo motivo: sem ela
                 # o [MUTE] do painel nunca chegaria ao grid. Custa um RQ1, ~20 ms.
                 if self.ler_mudos(quieto=True):

@@ -387,6 +387,9 @@ ACOES = {
                                          int(a["n"]), bool(a.get("agora"))),
     # HIPOTESE ate o primeiro teste com o visor (ver definir_kit)
     "kit": lambda a: HOST.enfileirar(HOST.motor.definir_kit, int(a["n"])),
+    # tempo x 10 em 3 nibbles (OFF_TEMPO, achado no tempo_watch de 16/08)
+    "bpm": lambda a: HOST.enfileirar(HOST.motor.definir_bpm,
+                                     float(a["valor"])),
     "chain_armar": _acao_chain_armar,
     "chain_parar": lambda a: (HOST.motor and HOST.motor.chain
                               and HOST.enfileirar(HOST.motor.chain.parar)),

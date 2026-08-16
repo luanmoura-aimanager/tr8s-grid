@@ -213,7 +213,12 @@ export default {
       const alvo = sel.p.bpm;
       const longe = e.bpm != null && Math.abs(e.bpm - alvo) > 1;
       chipBpm.hidden = !longe;
-      if (longe) texto(chipBpm, `gire o TEMPO para ${alvo}`);
+      if (longe)
+        texto(
+          chipBpm,
+          `máquina em ${e.bpm.toFixed(1)} — clique no BPM ` +
+            `para escrever ${alvo}`,
+        );
     }
     const bEscrever = elSel.querySelector("[data-escrever]");
     if (bEscrever)
@@ -246,12 +251,8 @@ function selecionar(s) {
   // automatismos na selecao (os toggles)
   if (s.tipo === "groove") {
     if (autoKit && s.p.kit_num) agir({ acao: "kit", n: s.p.kit_num - 1 });
-    if (autoBpm && ultimo.bpm != null && Math.abs(ultimo.bpm - s.p.bpm) > 1)
-      toast(
-        `BPM alvo ${s.p.bpm} — gire o TEMPO da TR-8S (agora: ` +
-          `${ultimo.bpm.toFixed(1)})`,
-        { ttl: 6000 },
-      );
+    // BPM de verdade: o tempo_watch de 16/08 achou o byte (OFF_TEMPO)
+    if (autoBpm) agir({ acao: "bpm", valor: s.p.bpm });
   }
 }
 
@@ -310,7 +311,15 @@ function montarSelGroove(p) {
         h(
           "div.linha",
           {},
-          h("span.mono.bpm-alvo", {}, String(p.bpm)),
+          (() => {
+            const b = h(
+              "button.bt",
+              { type: "button", title: "escreve o TEMPO na TR-8S" },
+              String(p.bpm),
+            );
+            b.onclick = () => agir({ acao: "bpm", valor: p.bpm });
+            return b;
+          })(),
           h("span.dica", { "data-bpm-medido": "" }, ""),
         ),
       ),
@@ -328,7 +337,7 @@ function montarSelGroove(p) {
         autoKit,
       ),
       toggle(
-        "Auto BPM (aviso apenas)",
+        "Auto BPM",
         (v) => {
           autoBpm = v;
           localStorage.setItem("autoBpm", v ? "1" : "0");
