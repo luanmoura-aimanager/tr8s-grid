@@ -121,21 +121,14 @@ class Host:
     def garantir_motor(self):
         if self.motor:
             return True
-        if not os.path.exists(L.LAYOUT_FILE):
-            self.log("(!) Nenhum layout salvo. Aperte Recalibrar.")
-            return False
-        try:
-            with open(L.LAYOUT_FILE) as f:
-                cfg = json.load(f)
-        except Exception as e:
-            self.log(f"(!) layout ilegivel: {e}")
-            return False
-        atual_in = [n for _, n in L.listar_portas(True)]
-        atual_out = [n for _, n in L.listar_portas(False)]
-        if cfg.get("_portas_in") != atual_in or cfg.get("_portas_out") != atual_out:
-            self.log("(!) As portas MIDI mudaram desde o 'learn' (replug?). "
-                     "Aperte Recalibrar - escrever agora poderia cair no "
-                     "aparelho errado.")
+        # a resolucao mora em lp_tr8s (carregar_layout_resolvido): antes esta
+        # regra estava copiada aqui, no gui.py e no lp_tr8s.py, e as tres
+        # comparavam a lista INTEIRA de portas - por isso desligar a interface
+        # de audio derrubava o app inteiro
+        cfg, msgs = L.carregar_layout_resolvido()
+        for m in msgs:
+            self.log(("(!) " if cfg is None else "") + m)
+        if cfg is None:
             return False
         try:
             L._programmer_mode(True)
@@ -346,6 +339,22 @@ def _acao_exec(a):
 ACOES = {
     "modo": _acao_modo,
     "exec": _acao_exec,
+    # duplo clique na variacao: pede que ela TOQUE (o clique simples so a abre
+    # no grid pra editar). Ver Motor.pedir_variacao - a escrita da mascara
+    # 63-66 ainda nao foi provada em hardware
+    "tocar_variacao": lambda a: HOST.enfileirar(HOST.motor.pedir_variacao,
+                                                int(a["var"])),
+    # Alt-clique: liga/desliga a variacao no RODIZIO, sem zerar as outras -
+    # o caminho de volta depois de um duplo clique, que deixa uma so
+    "ciclo_variacao": lambda a: HOST.enfileirar(HOST.motor.alternar_no_ciclo,
+                                                int(a["var"])),
+    # quantas linhas o INST UP/DOWN anda por toque (vale pros Launchpad tambem)
+    "passo_inst": lambda a: HOST.enfileirar(HOST.motor.definir_passo_inst,
+                                            int(a["valor"])),
+    # o Luan diz qual variacao o visor mostra; sem isso, quem sobe o app com a
+    # maquina ja rodando fica em "?" (nao ha start pra ancorar a conta)
+    "ancorar_variacao": lambda a: HOST.enfileirar(HOST.motor.ancorar_variacao,
+                                                  int(a["var"])),
     "editor_toggle": lambda a: HOST.enfileirar(
         HOST.motor.alternar_editor, int(a["inst"]), int(a["step"]),
         bool(a.get("fraco"))),
@@ -467,10 +476,22 @@ class Handler(http.server.BaseHTTPRequestHandler):
     def _autorizado_post(self):
         """POST exige o header proprio: um <form> de outro site nao consegue
         emitir header custom, e um fetch cross-site dispara preflight, que
-        recusamos. O cookie e SameSite=Strict, entao nem viaja de fora."""
+        recusamos. O cookie e SameSite=Strict, entao nem viaja de fora.
+
+        Devolve (ok, motivo). O motivo importa: o TOKEN e sorteado a cada boot
+        do servidor, entao uma pagina que ficou aberta enquanto o servidor
+        reiniciou manda o token velho - e dizer "origem nao autorizada" ali
+        mandava procurar o problema no lugar errado (aconteceu em 16/08/2026).
+        Nao vaza nada: quem chega aqui ja esta em 127.0.0.1."""
+        if not self._host_ok():
+            return False, "host nao autorizado"
+        if not self._origem_ok():
+            return False, "origem nao autorizada"
         t = self.headers.get("X-TR8S-Token") or ""
-        return (self._host_ok() and self._origem_ok()
-                and secrets.compare_digest(t, TOKEN))
+        if not secrets.compare_digest(t, TOKEN):
+            return False, ("sessao vencida - o servidor reiniciou desde que "
+                           "esta pagina abriu. Recarregue (Cmd+R)")
+        return True, ""
 
     def _responder(self, corpo, tipo="application/json; charset=utf-8",
                    codigo=200, extra=None):
@@ -575,10 +596,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ── POST ────────────────────────────────────────────────
     def do_POST(self):
-        if not self._autorizado_post():
-            HOST.log(f"(!) POST recusado em {self.path} "
-                     f"(origem {self.headers.get('Origin') or '-'})")
-            return self._erro("origem nao autorizada", 403)
+        ok, motivo = self._autorizado_post()
+        if not ok:
+            HOST.log(f"(!) POST recusado em {self.path}: {motivo}")
+            return self._erro(motivo, 403)
         try:
             n = int(self.headers.get("Content-Length", 0))
         except ValueError:

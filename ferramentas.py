@@ -124,13 +124,19 @@ class Chain:
             self._ciclo = ciclo
             if self.reps_restantes == 1:
                 self._preparar_troca(motor)
-        if ciclo != self._ciclo:
+        # so conta VIRADA pra frente. Um ciclo menor que o anterior significa
+        # que o passo_abs andou pra tras (correcao de fase), nao que uma
+        # repeticao aconteceu - contar ali avancava o chain sem a musica ter
+        # dado a volta. Ver lp_tr8s._ressincronizar, consertado em 16/08/2026
+        if ciclo > self._ciclo:
             self._ciclo = ciclo
             self.reps_restantes -= 1
             if self.reps_restantes <= 0:
                 self._avancar(motor)
             if self.reps_restantes == 1:
                 self._preparar_troca(motor)
+        elif ciclo < self._ciclo:
+            self._ciclo = ciclo         # so reancora; nao conta repeticao
         if self._fila_escrita is not None:
             self._perseguir(motor)
 
@@ -175,7 +181,7 @@ class Chain:
                 self._fila_escrita = {"passo": 0, "dados": ent["dados"]}
             self._perseguir(motor, tudo=True)
             motor.acc = ent.get("accent", 0) & 0xFFFF
-            motor.tr_out.send(L.dt1(L.addr_accent(motor.variacao),
+            motor.tr_out.send(L.dt1(L.addr_accent_rd(motor.variacao),
                                     L.mascara_para_nibbles(motor.acc)))
             motor.pintar()
             self.log(f"chain: '{ent.get('nome', '?')}' no ar "

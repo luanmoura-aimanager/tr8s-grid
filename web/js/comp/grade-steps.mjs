@@ -99,7 +99,12 @@ export function gradeSteps({
   raiz.append(janela);
   let janelaChave = "";
 
-  function marcarJanela(indices) {
+  // ultimoStep = last step da variação (1..16). A moldura pára nele, e não na
+  // coluna 16: com uma variação de 12 steps ela avançava sobre os steps 13-16,
+  // que estão fora do pattern e aparecem apagados — dava a impressão de que o
+  // playhead ia até o 13. O grid dos Launchpads continua tendo 16 colunas
+  // físicas; o que a moldura marca é a área que de fato toca.
+  function marcarJanela(indices, ultimoStep = 16) {
     // linhas nao contiguas (esconder_mudos tirou uma do meio): a moldura
     // mentiria, entao ela some e a marca vai para os rotulos das linhas
     const contigua =
@@ -113,8 +118,9 @@ export function gradeSteps({
       // (deslocava as celulas auto-posicionadas - piorou tudo). Celula de
       // esquina nao tem como mentir. Os indices ja sao linhas do grid
       // (o +1 da ACC veio de quem chamou).
+      const col = Math.min(15, Math.max(0, ultimoStep - 1));
       const primeira = celulas[indices[0] * 16];
-      const ultima = celulas[indices[indices.length - 1] * 16 + 15];
+      const ultima = celulas[indices[indices.length - 1] * 16 + col];
       const m = 3; // folga para a borda nao encostar nas celulas
       janela.style.top = primeira.offsetTop - m + "px";
       janela.style.left = primeira.offsetLeft - m + "px";
@@ -181,10 +187,16 @@ export function gradeSteps({
   // parar ou virar a volta, o pior caso e ficar um step adiantada por uma
   // fracao de segundo - e o quadro seguinte corrige. Adivinhar mais do que
   // isso daria um playhead fluido e mentiroso.
+  // O ciclo é o LAST STEP da variação, não 16. Enquanto isto foi 16 fixo, uma
+  // variação de 12 steps fazia o relógio adivinhar o step 13 (que não existe) e
+  // depois cair no 2 em vez do 1 — o servidor confirmava o step 1, mas o
+  // relógio já tinha disparado o passo seguinte. Era o "playhead maluco" de
+  // 16/08/2026, e não estava no motor: o motor sempre mandou 0..11.
   let passoReal = -1,
     tPasso = 0,
     durStep = 0,
-    timer = 0;
+    timer = 0,
+    ciclo = 16;
 
   function pararRelogio() {
     if (timer) {
@@ -199,7 +211,8 @@ export function gradeSteps({
     if (p !== passoReal) {
       const agora = performance.now();
       if (passoReal >= 0 && tPasso) {
-        const dt = (agora - tPasso) / Math.max(1, (p - passoReal + 16) % 16);
+        const dt =
+          (agora - tPasso) / Math.max(1, (p - passoReal + ciclo) % ciclo);
         // 30..2000 ms cobre de 500 bpm a 8 bpm; fora disso e engasgo de rede
         if (dt > 30 && dt < 2000)
           durStep = durStep ? durStep * 0.7 + dt * 0.3 : dt;
@@ -216,7 +229,7 @@ export function gradeSteps({
       () => {
         timer = 0;
         if (passoReal >= 0) {
-          const prox = (passoReal + 1) % 16;
+          const prox = (passoReal + 1) % ciclo;
           prop(playhead, "--p", prox);
           pintarColuna(prox);
         }
@@ -330,7 +343,10 @@ export function gradeSteps({
         }
       }
 
-      // playhead: so quando a maquina toca E o grid esta na variacao que soa
+      // playhead: so quando a maquina toca E o grid esta na variacao que soa.
+      // O ciclo do relogio local acompanha o last step da variacao - sem isto
+      // ele adivinhava steps que o pattern nem tem (ver comentario la em cima)
+      ciclo = Math.min(16, Math.max(1, e.last_var || 16));
       const mostra = e.tocando && e.playhead_visivel && e.passo >= 0;
       playhead.hidden = !mostra;
       if (mostra) marcarPasso(e.passo);

@@ -16,8 +16,44 @@ export async function pegarToken() {
   const r = await fetch("/token");
   if (!r.ok) throw new Error("sem sessao (abra pelo atalho do app)");
   TOKEN = (await r.json()).token;
+  sessionStorage.removeItem(RECARGA); // deu certo: libera a rede de seguranca
   history.replaceState(null, "", "/"); // tira o ?t= da barra do navegador
   return TOKEN;
+}
+
+const RECARGA = "tr8s-recarregou";
+let recuperando = null;
+
+/**
+ * O servidor sorteia um TOKEN novo a cada boot. Entao reiniciar o servidor -
+ * um `instalar_agente.py`, um reboot, o app sendo reaberto - deixa a pagina
+ * aberta com credencial velha, e TODO clique vira 403 "origem nao autorizada".
+ * A pagina reconectava o polling (que e GET e nao usa token) e dizia "contato
+ * restabelecido", entao parecia viva enquanto nada funcionava.
+ *
+ * Aconteceu de verdade em 16/08/2026 e so um F5 manual resolvia - sem que a
+ * mensagem dissesse isso. Agora a pagina repega o token sozinha; se o cookie
+ * tambem venceu (so o GET / reemite), recarrega UMA vez.
+ */
+async function recuperarSessao() {
+  if (!recuperando) {
+    recuperando = (async () => {
+      try {
+        await pegarToken();
+        return true;
+      } catch (e) {
+        if (!sessionStorage.getItem(RECARGA)) {
+          // uma vez so: com o servidor fora do ar isto viraria laco de reload
+          sessionStorage.setItem(RECARGA, "1");
+          location.reload();
+        }
+        return false;
+      } finally {
+        recuperando = null;
+      }
+    })();
+  }
+  return recuperando;
 }
 
 export async function getJSON(rota, ms = 1200) {
@@ -33,7 +69,7 @@ export async function getJSON(rota, ms = 1200) {
 }
 
 /** Manda uma acao. Devolve {ok, erro}. Nunca lanca - quem chama decide. */
-export async function acao(corpo, ms = 4000) {
+export async function acao(corpo, ms = 4000, jaTentou = false) {
   const ctl = new AbortController();
   const t = setTimeout(() => ctl.abort(), ms);
   try {
@@ -44,6 +80,10 @@ export async function acao(corpo, ms = 4000) {
       body: JSON.stringify(corpo),
     });
     if (r.ok) return { ok: true };
+    // 403 = o servidor reiniciou e o token mudou. Repega e repete UMA vez;
+    // a acao nao chegou a rodar, entao repetir nao duplica nada
+    if (r.status === 403 && !jaTentou && (await recuperarSessao()))
+      return acao(corpo, ms, true);
     let erro = `HTTP ${r.status}`;
     try {
       erro = (await r.json()).erro || erro;

@@ -31,7 +31,43 @@ export default {
         "data-v": n,
         class: n > 8 ? "fill" : "",
       });
-      b.onclick = () => agir({ acao: "exec", tipo: "variacao", arg: n });
+      // clique = ABRIR no grid pra editar (o playhead some, porque o que soa
+      // e outra variacao). Duplo clique = pedir que ela TOQUE, na virada.
+      // Sao coisas diferentes de proposito: editar uma variacao enquanto
+      // outra soa e o recurso mais valioso do projeto (REFERENCIA 2.3.2).
+      // O duplo clique tem que cancelar o simples, senao abriria o grid junto
+      let tSimples = null;
+      // liga/desliga no rodízio, sem zerar as outras — o caminho de volta,
+      // já que o duplo clique deixa UMA habilitada e mata o A→B→C.
+      // Clique direito, não Alt-clique: o teclado do Mac não tem tecla "Alt"
+      // escrita (é a Option), e o resto do app já oferece as duas formas
+      b.oncontextmenu = (ev) => {
+        ev.preventDefault();
+        clearTimeout(tSimples);
+        agir({ acao: "ciclo_variacao", var: n });
+      };
+      b.onclick = (ev) => {
+        clearTimeout(tSimples);
+        if (ev.altKey) {
+          agir({ acao: "ciclo_variacao", var: n });
+          return;
+        }
+        if (ev.shiftKey) {
+          // "e ESTA que esta no visor": ancora a conta da variacao. Quem sobe
+          // o app com a maquina ja rodando nunca recebe um start, e sem start
+          // nao ha como deduzir qual toca - so o olho do Luan sabe
+          agir({ acao: "ancorar_variacao", var: n });
+          return;
+        }
+        tSimples = setTimeout(
+          () => agir({ acao: "exec", tipo: "variacao", arg: n }),
+          220,
+        );
+      };
+      b.ondblclick = () => {
+        clearTimeout(tSimples);
+        agir({ acao: "tocar_variacao", var: n });
+      };
       elVars.append(b);
     });
 
@@ -148,6 +184,17 @@ export default {
     );
     bBaixo.onclick = () => agir({ acao: "exec", tipo: "rolar", arg: 1 });
 
+    // quantas linhas cada toque anda. 3 por padrão porque é o que falta: são
+    // 11 instrumentos numa janela de 8, então um toque só leva de BD–CH a
+    // MT–RC e o resto aparece inteiro. Vale para os pads do Launchpad também
+    const selPasso = h("select", {
+      id: "passo-inst",
+      "aria-label": "linhas por toque do INST UP/DOWN",
+    });
+    for (let i = 1; i <= 8; i++) selPasso.append(new Option(i, i));
+    selPasso.onchange = () =>
+      agir({ acao: "passo_inst", valor: +selPasso.value });
+
     elFerr.append(
       grupo("velocity", velChips),
       grupo("modo do step", modoChips, bAlt),
@@ -172,6 +219,7 @@ export default {
           bBaixo,
           h("span.mono.dica", { id: "rot-janela" }, "—"),
         ),
+        h("div.linha", {}, h("label", {}, "linhas por toque"), selPasso),
       ),
     );
 
@@ -190,7 +238,9 @@ export default {
             "clique liga/desliga · Shift-clique grava fraco · " +
               "arraste para pintar vários · clique direito (ou Alt-clique) " +
               "abre velocity/sub step/alternate/probability · a moldura " +
-              "verde é a janela dos Launchpads",
+              "verde é a janela dos Launchpads · nas variações: clique abre " +
+              "para editar, duplo clique faz tocar na virada (só ela), " +
+              "clique direito liga/desliga no rodízio A→B→C",
           ),
         ),
         elFerr,
@@ -203,11 +253,14 @@ export default {
     ultimoEstado = e;
     grade.pintar(e, pendentes);
 
-    // variacoes: aberta (borda) e a que soa (ponto verde)
+    // variacoes: aberta (borda), a que soa (ponto verde) e a pedida (piscando
+    // ate a virada). O ponto verde so aparece quando a conta esta ANCORADA -
+    // sem ancora nao sabemos qual toca, e inventar seria pior que nao dizer
     [...elVars.children].forEach((b) => {
       const v = +b.dataset.v;
       attr(b, "data-aberta", v === e.variacao ? "" : null);
       attr(b, "data-tocando", v === e.variacao_tocando ? "" : null);
+      attr(b, "data-pedida", v === e.var_pedida ? "" : null);
     });
 
     [...elFerr.querySelectorAll("[data-vel]")].forEach((b) =>
@@ -239,7 +292,8 @@ export default {
     // de log, e o .map explodia calado e a moldura nunca nascia (16/08).
     // +1 porque a linha 0 do grid e a ACC
     const idx = (e.janela || []).map((i) => i + 1);
-    grade.marcarJanela(idx);
+    // a moldura pára no last step da variação: além dele os steps não tocam
+    grade.marcarJanela(idx, e.last_var || 16);
     const rotJanela = $("#rot-janela");
     if (rotJanela && idx.length) {
       texto(
@@ -251,6 +305,9 @@ export default {
     const emBaixo = idx.length && idx[idx.length - 1] === D.instrumentos.length;
     attr($("#b-rolar-cima"), "aria-disabled", emCima ? "true" : null);
     attr($("#b-rolar-baixo"), "aria-disabled", emBaixo ? "true" : null);
+    const selP = $("#passo-inst");
+    if (selP && e.passo_inst && +selP.value !== e.passo_inst)
+      selP.value = String(e.passo_inst);
   },
 };
 

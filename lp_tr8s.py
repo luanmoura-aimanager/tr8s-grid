@@ -142,6 +142,47 @@ def addr_bloco(inst, var=None):   return (0x20, var or VARIACAO, inst, 0x08)
 def addr_step(inst, s, var=None): return addr_soma(addr_bloco(inst, var),
                                                    s * BYTES_P_STEP)
 def addr_accent(var=None):        return (0x20, var or VARIACAO, 0x00, 0x00)
+
+# ── LEITURA do pattern: regiao 24 5x, achada em 16/08/2026 ────────────
+#
+# O `20 xx` acima NAO devolve o pattern que a maquina toca. Ele devolve sempre
+# o mesmo conteudo, para qualquer pattern - trocar no painel ou remotamente nao
+# mexe nele (medido: 1-01 e 3-06 devolveram bytes identicos). Foi a causa do
+# "grid nao espelha o que toca", aberto desde 15/08.
+#
+# O sniff do GET do TR-EDITOR mostrou que ele le OUTRA regiao, `24 5x`, com a
+# mesma forma: 24 50 = cabecalho, 24 51..24 5A = as 10 variacoes (A-H + os dois
+# Fill In), terceiro byte = instrumento, quarto = 0x08. Ou seja, e o `20 0V`
+# deslocado: 0x20 -> 0x24 e o segundo byte somado de 0x50.
+#
+# Conferido contra o painel (pattern 3-06 var A, BD so no step 1, last 12):
+#
+#             20 01 ii 08        24 51 ii 08     painel
+#   BD        [1, 10, 13]        [1]             [1]
+#   last A-H  [16, 16, ...]      [12, 12, ...]   12
+#   nome      '----'             '32bars Trap'   -
+#
+# A ESCRITA vai no MESMO lugar - provado em 16/08/2026 com um segundo sniff.
+# Ligando o step 2 do BD no TR-EDITOR saiu UMA mensagem:
+#
+#   DT1  24 51 00 10   data=[0, 0, 0, 0, 0, 0, 5, 0]
+#
+# 24 51 = variacao A, 00 = BD, 0x10 = 0x08 + 1*8 = step 2; e os nibbles 5 e 0
+# sao a velocity 80 que o editor mostrava. Bate byte a byte com addr_step().
+#
+# Ou seja, o `20 xx` estava errado nas DUAS pontas. Escrever nele nunca chegou
+# a mudar a maquina - o que parecia "sincronizar ao clicar" era so o grid
+# atualizando o proprio cache local.
+ADDR_PATTERN_RD = (0x24, 0x50, 0x00, 0x00)
+
+def addr_bloco_rd(inst, var=None):
+    return (0x24, 0x50 + (var or VARIACAO), inst, 0x08)
+
+def addr_step_rd(inst, s, var=None):
+    return addr_soma(addr_bloco_rd(inst, var), s * BYTES_P_STEP)
+
+def addr_accent_rd(var=None):
+    return (0x24, 0x50 + (var or VARIACAO), 0x00, 0x00)
 # NIVEL DE KIT - estrutura levantada no sniff do TR-EDITOR (15/08/2026).
 #
 # O segundo byte e o NUMERO DO KIT, nao um zero fixo: o kit "003 TR-707" do
@@ -501,6 +542,41 @@ INTERVALO_RELEITURA = 1.5
 # e volta a confiar so na contagem de clock.
 TOLERANCIA_SYNC = 1
 
+# Prazo de validade do passo_maquina, em segundos. Ele nasce de um round-trip
+# de SysEx e e gravado no ler_mudos(), mas so consumido pelo _ressincronizar
+# depois do ler_kit, da fila de FX e do rodizio de releitura - um recarregar
+# saudavel ja custa ~1 s, e a 86 bpm um step dura 0,17 s. Corrigir a fase por
+# um alvo velho faz o playhead tremer sozinho, sem nenhum pulso ter se perdido.
+VALIDADE_PASSO = 0.15
+
+# Acima de quantos steps de correcao a ancora do ciclo de variacoes e SOLTA.
+# Um desvio desse tamanho nao e latencia de medicao: e pulso de clock perdido
+# de verdade. A fase da pra consertar pelo step que a maquina informa; QUAL
+# variacao esta tocando, nao - e a regra da casa e "?" em vez de errado.
+SALTO_SOLTA_ANCORA = 3
+
+# Quantas correcoes grandes, dentro de quantos segundos, denunciam que o no
+# 20 xx nao corresponde ao pattern que a maquina toca (Motor._conferir_espelho).
+# Medido em 16/08/2026 com o espelho errado: ~5 por minuto, sem parar. Com o
+# espelho certo o resync mal dispara, entao 4 numa janela de 60 s nao acontece
+# por acaso - e o preco de um falso positivo e so a escrita ficar bloqueada
+# ate a proxima releitura limpa.
+JANELA_ESPELHO = 60.0
+SALTOS_P_SUSPEITA = 4
+# ... mas uma RAJADA nao conta como quatro. Ligar o modo ON dispara recarregar,
+# ler_kit e ler_fx em sequencia; o playhead sai de fase durante essas leituras e
+# o resync corrige varias vezes em poucos segundos - o que enchia a cota e
+# acusava espelho errado numa partida perfeitamente normal (visto em 16/08).
+# Contando no maximo um salto a cada 8 s, a rajada de partida vale 1 e o
+# problema cronico (medido: ~5 por minuto, sem parar) continua sendo pego.
+INTERVALO_MIN_SALTO = 8.0
+
+# Quantas leituras seguidas precisam apontar o MESMO SENTIDO de erro antes de o
+# playhead ser corrigido. Ver Motor._ressincronizar: o alvo vem da maquina com
+# atraso variavel, e medindo 103 amostras o erro aparente cobriu -5..+6 de forma
+# uniforme. Exigir tres do mesmo sinal separa deriva real de ruido de medicao.
+ERROS_P_CORRIGIR = 3
+
 # Ajuste fino do playhead, em PULSOS de clock (6 pulsos = 1 step). Positivo
 # adianta o grid, negativo atrasa. Existe porque sobra uma latencia que nao da
 # pra medir de dentro: o LED do Launchpad acende alguns milissegundos depois do
@@ -517,6 +593,15 @@ TOLERANCIA_SYNC = 1
 #    longo dos compassos, o problema e outro, e quem cuida disso e o
 #    _ressincronizar - aumentar este numero so disfarcaria a deriva.
 AJUSTE_PLAYHEAD = 2
+
+# Quantas linhas o INST UP/DOWN anda por toque (nos Launchpad e na tela).
+#
+# 3 por padrao porque e o que faltava: sao 11 instrumentos e a janela mostra 8,
+# entao de BD-CH um unico toque leva a MT-RC e o resto (OH, CC, RC) aparece
+# inteiro. Com passo 1 era preciso tocar tres vezes pra ver a ultima linha.
+# Passo 1 continua disponivel pra quem quiser deslizar de um em um.
+PASSO_INST_PADRAO = 3
+PASSO_INST_MAX = 8
 
 # Botoes, por CC. Em programmer mode:
 #   fileira de funcao (▲▼◀▶ Session Drums Keys User) = CC 91..98
@@ -610,8 +695,27 @@ def enviar_cores(out, pares):
 # (o mido colapsa nomes duplicados - ver docstring do topo)
 # ─────────────────────────────────────────────────────────────
 class EntradaMIDI:
-    """Entrada aberta por indice. Expoe a mesma interface que a do mido."""
-    def __init__(self, idx, nome=None, ignorar_sense=True):
+    """Entrada aberta por indice. Expoe a mesma interface que a do mido.
+
+    MODO CALLBACK (16/08/2026), usado na porta de clock. Por padrao o rtmidi
+    guarda o que chega numa fila de 1024 mensagens e DESCARTA em silencio o
+    que passar disso - o aviso 'MidiInCore: message queue limit reached!!' sai
+    no stderr, fora do log do app (657 deles no log de 15/08). Como a variacao
+    que toca e derivada da CONTAGEM de pulsos, cada pulso descartado virava
+    erro permanente.
+
+    A 86 bpm a TR-8S manda ~34 mensagens/s, entao 1024 e meia hora de folga -
+    exceto que o tick para de drenar durante as leituras longas (recarregar,
+    ler_kit), e com a porta CTRL muda isso passa de 30 s.
+
+    Medido nesta maquina, fila de 2 mensagens e ninguem drenando por 3 s:
+      - polling: 1 mensagem entregue, ~100 avisos no stderr
+      - callback: 104 entregues, zero avisos
+    O callback so faz append num deque ilimitado, entao nao ha o que estourar.
+    (set_error_callback NAO resolve: nao e chamado para este aviso - ele sai de
+    um cerr cru dentro do CoreMIDI. Testado: 0 chamadas.)"""
+
+    def __init__(self, idx, nome=None, ignorar_sense=True, callback=False):
         self._rt = rtmidi.MidiIn()
         self._rt.open_port(idx)
         # mesma config do mido: NAO ignorar sysex nem timing (clock), so active sense.
@@ -623,17 +727,30 @@ class EntradaMIDI:
         self._rt.ignore_types(False, False, ignorar_sense)
         self._parser = mido.Parser()
         self.idx, self.name = idx, nome or "?"
+        self._buf = None
+        if callback:
+            # deque: append de um lado e popleft do outro sao atomicos sob o
+            # GIL, entao a thread do CoreMIDI e a do motor nao brigam
+            self._buf = collections.deque()
+            self._rt.set_callback(lambda par, d=None: self._buf.append(par[0]))
 
     def iter_pending(self):
-        while True:
-            r = self._rt.get_message()
-            if r is None:
-                break
-            self._parser.feed(r[0])
+        if self._buf is not None:
+            while self._buf:
+                self._parser.feed(self._buf.popleft())
+        else:
+            while True:
+                r = self._rt.get_message()
+                if r is None:
+                    break
+                self._parser.feed(r[0])
         return list(self._parser)          # lista, nao generator: drenar e seguro
 
     def close(self):
-        try: self._rt.close_port(); self._rt.delete()
+        try:
+            if self._buf is not None:
+                self._rt.cancel_callback()
+            self._rt.close_port(); self._rt.delete()
         except Exception: pass
 
     def __enter__(self): return self
@@ -805,9 +922,21 @@ def cmd_learn():
     if cfg["esquerdo"]["out_idx"] == cfg["direito"]["out_idx"]:
         print("\n(!) os dois lados ficaram com a MESMA saida - rode 'learn' de novo.")
 
-    # snapshot: se a enumeracao mudar (replug, reboot), os indices nao valem mais
-    cfg["_portas_in"]  = [n for _, n in listar_portas(True)]
-    cfg["_portas_out"] = [n for _, n in listar_portas(False)]
+    # O que de fato identifica o aparelho e a POSICAO dele entre os Launchpad -
+    # o indice global muda toda vez que outro aparelho MIDI entra ou sai (foi o
+    # bug de 16/08: a interface de audio desligada derrubava o app inteiro).
+    # O snapshot continua salvo, mas so como diagnostico e para migrar layouts
+    # antigos; quem manda agora e o ordinal.
+    nomes_in  = [n for _, n in listar_portas(True)]
+    nomes_out = [n for _, n in listar_portas(False)]
+    g_in, g_out = _grupo_lp(nomes_in), _grupo_lp(nomes_out)
+    for lado in ("esquerdo", "direito"):
+        if cfg[lado]["in_idx"] in g_in:
+            cfg[lado]["in_ord"] = g_in.index(cfg[lado]["in_idx"])
+        if cfg[lado]["out_idx"] in g_out:
+            cfg[lado]["out_ord"] = g_out.index(cfg[lado]["out_idx"])
+    cfg["_portas_in"]  = nomes_in
+    cfg["_portas_out"] = nomes_out
 
     with open(LAYOUT_FILE, "w") as f:
         json.dump(cfg, f, indent=2)
@@ -824,22 +953,107 @@ def cmd_learn():
                 f"{c['origem'] + l*c['passo_lin'] + s*c['passo_col']:3}" for s in range(8)))
 
 
-def carregar_layout():
-    if not os.path.exists(LAYOUT_FILE):
-        print("Rode 'learn' primeiro."); sys.exit(1)
-    with open(LAYOUT_FILE) as f:
-        cfg = json.load(f)
+def _grupo_lp(nomes):
+    """Indices das portas Launchpad, na ordem em que o CoreMIDI as lista."""
+    return [i for i, n in enumerate(nomes) if LP_MATCH.lower() in n.lower()]
 
+
+def resolver_layout(cfg, portas_in, portas_out):
+    """Reconfere o layout salvo contra a enumeracao de agora.
+
+    Devolve (cfg_resolvido, [mensagens]) ou (None, [motivos]).
+
+    POR QUE ISTO EXISTE (16/08/2026). A guarda anterior comparava a lista
+    INTEIRA de nomes de porta por igualdade. Como o indice do CoreMIDI e
+    posicional, desligar a interface de audio - que nem faz parte do projeto -
+    empurrava tudo uma casa e derrubava o app com "Aperte Recalibrar". E
+    recalibrar era a acao ERRADA: refazia o learn sem a interface, e religa-la
+    quebrava de novo, no sentido inverso. Um ciclo vicioso.
+
+    O que de fato importa e o GRUPO Launchpad: se ele esta igual (mesmo
+    tamanho, mesma sequencia de nomes), a k-esima porta Launchpad continua
+    sendo o mesmo aparelho, esteja ela no indice 4 ou no 6. Qualquer coisa
+    fora do grupo pode ir e vir a vontade.
+
+    LIMITE HONESTO: os dois Mini MK3 tem nome IDENTICO, entao o ordinal e a
+    unica forma de distingui-los sem o learn. Se o CoreMIDI trocar os dois de
+    posicao entre si, isto aceita e o grid sai espelhado. A guarda antiga
+    tambem nao pegava esse caso (a lista de nomes ficaria identica), entao nao
+    e regressao - mas e o motivo de o 'learn' confirmar acendendo o aparelho,
+    e a unica prova continua sendo o olho."""
+    msgs = []
     if "porta_in" in cfg.get("esquerdo", {}):
-        print("Layout no formato antigo (portas por nome). Rode 'learn' de novo.")
-        sys.exit(1)
+        return None, ["layout no formato antigo (portas por nome) - rode 'learn'"]
 
-    # indices so valem enquanto a enumeracao do CoreMIDI for a mesma
-    if (cfg.get("_portas_in")  != [n for _, n in listar_portas(True)] or
-            cfg.get("_portas_out") != [n for _, n in listar_portas(False)]):
-        print("(!) As portas MIDI mudaram desde o 'learn' (replug? outro aparelho "
-              "ligado?).\n    Os indices salvos podem apontar pro aparelho errado. "
-              "Rode 'learn' de novo.")
+    g_atual_in, g_atual_out = _grupo_lp(portas_in), _grupo_lp(portas_out)
+    snap_in, snap_out = cfg.get("_portas_in"), cfg.get("_portas_out")
+
+    for rot, snap, atual, g_atual in (("entrada", snap_in, portas_in, g_atual_in),
+                                      ("saida", snap_out, portas_out, g_atual_out)):
+        if snap is None:
+            continue
+        g_snap = _grupo_lp(snap)
+        if len(g_snap) != len(g_atual):
+            return None, [f"o conjunto de Launchpad mudou na {rot}: o learn viu "
+                          f"{len(g_snap)} portas, agora ha {len(g_atual)}. "
+                          "Rode 'learn' de novo."]
+        if [snap[i] for i in g_snap] != [atual[i] for i in g_atual]:
+            return None, [f"a ordem das portas Launchpad mudou na {rot}. "
+                          "Rode 'learn' de novo."]
+
+    novo = json.loads(json.dumps(cfg))          # copia funda, nao mexe no salvo
+    for lado in ("esquerdo", "direito"):
+        c = novo.get(lado)
+        if not c:
+            return None, [f"layout sem o lado {lado} - rode 'learn'"]
+        for chave, ordch, grupo, snap in (("in_idx", "in_ord", g_atual_in, snap_in),
+                                          ("out_idx", "out_ord", g_atual_out, snap_out)):
+            ordinal = c.get(ordch)
+            if ordinal is None:
+                # layout anterior a 16/08: o ordinal se deduz do snapshot
+                if snap is None:
+                    return None, ["layout velho demais (sem ordinal e sem "
+                                  "snapshot de portas) - rode 'learn' de novo"]
+                g_snap = _grupo_lp(snap)
+                if c[chave] not in g_snap:
+                    return None, [f"o {chave} salvo do {lado} nao era uma porta "
+                                  "Launchpad - rode 'learn' de novo"]
+                ordinal = g_snap.index(c[chave])
+            if ordinal >= len(grupo):
+                return None, [f"nao ha porta Launchpad numero {ordinal + 1} - "
+                              "rode 'learn' de novo"]
+            antes = c[chave]
+            c[chave], c[ordch] = grupo[ordinal], ordinal
+            if antes != c[chave]:
+                msgs.append(f"porta do {lado} deslocada desde o learn: "
+                            f"{chave} [{antes}] -> [{c[chave]}]")
+
+    if novo["esquerdo"]["out_idx"] == novo["direito"]["out_idx"]:
+        return None, ["os dois lados cairam na MESMA saida - rode 'learn'"]
+    if msgs:
+        msgs.append("(algum aparelho MIDI entrou ou saiu; reresolvi pelo nome "
+                    "e pela posicao entre os Launchpad, sem precisar recalibrar)")
+    return novo, msgs
+
+
+def carregar_layout_resolvido(caminho=LAYOUT_FILE):
+    """(cfg, mensagens) do layout em disco, ja reresolvido. cfg=None se recusado."""
+    if not os.path.exists(caminho):
+        return None, ["nenhum layout salvo - rode 'learn' (ou aperte Recalibrar)"]
+    try:
+        with open(caminho) as f:
+            cfg = json.load(f)
+    except Exception as e:
+        return None, [f"layout ilegivel: {e}"]
+    return resolver_layout(cfg, [n for _, n in listar_portas(True)],
+                           [n for _, n in listar_portas(False)])
+
+
+def carregar_layout():
+    cfg, msgs = carregar_layout_resolvido()
+    for m in msgs:
+        print(("(!) " if cfg is None else "    ") + m)
+    if cfg is None:
         sys.exit(1)
     return cfg
 
@@ -1484,7 +1698,7 @@ def carregar_estado():
     # lido da maquina (addr_mute), que e a autoridade. O que fica aqui e so a
     # escolha de mostrar ou nao as linhas mutadas.
     vazio = {"ultimo_var": {}, "ultimo_track": [None]*len(INSTRUMENTOS),
-             "esconder_mudos": False}
+             "esconder_mudos": False, "passo_inst": PASSO_INST_PADRAO}
     if not os.path.exists(ESTADO_FILE):
         return vazio
     try:
@@ -1511,6 +1725,77 @@ def salvar_estado(e):
             json.dump(e, f, indent=2)
     except Exception:
         pass
+
+
+class CicloVars:
+    """Qual variacao a TR-8S toca, derivada da contagem de passos.
+
+    Pura de proposito - nenhuma porta MIDI, nenhum estado do Motor. E o unico
+    jeito de provar o congelamento e a correcao sem hardware (ver testes.py).
+
+    POR QUE ISTO EXISTE (16/08/2026). A versao anterior era um acumulador com
+    estado escondido: '_ciclo_idx' andava um passo por vez e '_ciclo_limite'
+    so CRESCIA, num 'while passo_abs >= limite'. Bastava passo_abs andar para
+    tras UMA vez - e o _ressincronizar() fazia isso a cada 1,5 s, rebaixando
+    um contador absoluto para o step modular 0..15 da maquina - para o limite
+    virar inalcancavel e a variacao CONGELAR ate o fim da sessao.
+
+    Aqui a variacao e FUNCAO da posicao, entao nao ha o que ficar preso: se
+    passo_abs volta, a resposta volta junto.
+
+    Premissa que continua valendo (e continua deducao, nao medida): as
+    habilitadas ciclam em ordem ascendente e cada uma dura o proprio last
+    step. Ver REFERENCIA 2.3.2."""
+
+    def __init__(self):
+        self.soltar()
+
+    def soltar(self):
+        """Sem ancora = '?'. Melhor que afirmar a variacao errada."""
+        self.ancora = None      # passo_abs em que a PRIMEIRA da lista comecou
+        self.vars = []
+        self.dur = {}
+
+    def ancorado(self):
+        return self.ancora is not None and bool(self.vars)
+
+    def ancorar(self, passo_abs, vars_hab, dur, v, dentro=0):
+        """Fixa que a variacao v esta tocando ha 'dentro' passos, em passo_abs."""
+        if not vars_hab or v not in vars_hab:
+            self.soltar()
+            return
+        self.vars = list(vars_hab)
+        self.dur = dict(dur)
+        antes = sum(self.dur.get(x, 16)
+                    for x in self.vars[:self.vars.index(v)])
+        self.ancora = passo_abs - dentro - antes
+
+    def deslocar(self, passos):
+        """Move a ancora junto com uma correcao de fase do playhead.
+
+        Sem isto, corrigir a fase empurraria o contador para dentro da
+        variacao vizinha - o resync consertaria o playhead e estragaria a
+        variacao, que foi exatamente o bug de 16/08."""
+        if self.ancora is not None:
+            self.ancora += passos
+
+    def total(self):
+        return sum(self.dur.get(v, 16) for v in self.vars)
+
+    def variacao_em(self, passo_abs):
+        """A variacao que toca no passo dado, ou None se nao ha ancora."""
+        if not self.ancorado():
+            return None
+        t = self.total()
+        if t <= 0:
+            return None
+        p = (passo_abs - self.ancora) % t
+        for v in self.vars:
+            d = self.dur.get(v, 16)
+            if p < d:
+                return v
+            p -= d
+        return self.vars[-1]        # so por seguranca; o laco acima cobre
 
 
 class Motor:
@@ -1557,6 +1842,16 @@ class Motor:
         self.alt = False               # flag do ALTERNATE, nao um dos 5 modos
         self.mudo = [False]*len(INSTRUMENTOS)   # lido da maquina, nunca inventado
         self.passo_maquina = None               # step que a TR-8S diz estar tocando
+        self.passo_maquina_t = 0.0              # quando foi lido (envelhece rapido)
+        self.var_pedida = None                  # duplo clique: entra na virada
+        self._ciclo_pedido = None               # ciclo em que o pedido entrou
+        self.var_presumida = False              # ancora por palpite, nao por leitura
+        # ESPELHO SUSPEITO (16/08/2026): quando o no 20 xx nao corresponde ao
+        # pattern que a maquina toca, o grid mostra outro pattern - e escrever
+        # a partir dele DESTROI o que esta na maquina. Ver _conferir_espelho.
+        self.espelho_suspeito = False
+        self._saltos = []                       # carimbos das correcoes grandes
+        self._erros_seguidos = []               # so corrige deriva consistente
         self.variacao_tocando = None            # qual variacao a maquina toca
         self.kit_atual = None                   # offset 0 do perf (01 00 00 00)
         self.kit_trocou = False                 # troca vista no painel
@@ -1568,10 +1863,9 @@ class Motor:
         # toca nao existe em nenhum no SysEx que conhecemos (o watch de 193
         # bytes nao viu nada mudar com A->B->C ciclando) - mas da para contar:
         # ordem ascendente das habilitadas, cada uma dura o SEU last step.
-        # None = ainda nao ancorado (so um start alinha; quem chega com a
-        # maquina ja rodando fica honesto no "?").
-        self._ciclo_idx = None
-        self._ciclo_limite = 0
+        # Sem ancora = honesto no "?" (so um start alinha sozinho; quem chega
+        # com a maquina ja rodando precisa que alguem diga qual e).
+        self.ciclo = CicloVars()
         self.fx_fila = []                       # blocos de FX a reler, aos poucos
         self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
         self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
@@ -1590,6 +1884,10 @@ class Motor:
         self.ultimo_var    = {int(k): v for k, v in e["ultimo_var"].items()}
         self.ultimo_track  = list(e["ultimo_track"])
         self.esconder_mudos = bool(e["esconder_mudos"])
+        try:
+            self.passo_inst = max(1, min(PASSO_INST_MAX, int(e["passo_inst"])))
+        except (KeyError, TypeError, ValueError):
+            self.passo_inst = PASSO_INST_PADRAO
 
         self.modo_geral = MODO_OFF
         self.ondas, self.onda_suja = [], False
@@ -1614,7 +1912,11 @@ class Motor:
             return
         p = _porta_clock()
         if p:
-            self.clk, self.clk_nome = EntradaMIDI(*p), p[1]
+            # callback=True: e a unica porta em que perder mensagem CORROMPE
+            # estado (a variacao que toca e derivada da contagem de pulsos).
+            # A CTRL e os Launchpad seguem em polling - a CTRL porque o
+            # request/response do ler_bloco depende dele, e ja e provado
+            self.clk, self.clk_nome = EntradaMIDI(*p, callback=True), p[1]
 
     def fechar(self):
         with self.lock:
@@ -1669,7 +1971,7 @@ class Motor:
             d = None
             for _ in range(2):                     # a maquina engasga as vezes
                 d = ler_bloco(self.tr_in, self.tr_out,
-                              addr_bloco(i, self.variacao))
+                              addr_bloco_rd(i, self.variacao))
                 if d: break
             if d:
                 self.cache[i] = d
@@ -1685,7 +1987,7 @@ class Motor:
                 self.log(f"(!) leitura do {INSTRUMENTOS[i]} falhou - "
                          "escrita nessa linha bloqueada ate reler")
         cab = ler_bloco(self.tr_in, self.tr_out,
-                        addr_accent(self.variacao), 8) or [0]*8
+                        addr_accent_rd(self.variacao), 8) or [0]*8
         self.acc = nibbles_para_mascara(cab[:4])
         self.ler_last_steps()
         self.ler_mudos()
@@ -1714,14 +2016,14 @@ class Motor:
             self.rodizio_linha = (self.rodizio_linha + 1) % total
             if i == len(INSTRUMENTOS):
                 cab = ler_bloco(self.tr_in, self.tr_out,
-                                addr_accent(self.variacao), 8)
+                                addr_accent_rd(self.variacao), 8)
                 if cab:
                     novo = nibbles_para_mascara(cab[:4])
                     if novo != self.acc:
                         self.acc, mudou = novo, True
                 continue
             d = ler_bloco(self.tr_in, self.tr_out,
-                          addr_bloco(i, self.variacao))
+                          addr_bloco_rd(i, self.variacao))
             if d and d != self.cache[i]:
                 self.cache[i] = d
                 self.cache_invalido.discard(i)
@@ -1734,7 +2036,10 @@ class Motor:
         Chamado tambem periodicamente pelo tick(), senao mexer no [LAST] do painel
         nunca apareceria no grid."""
         self.ultima_leitura = time.time()
-        d = ler_bloco(self.tr_in, self.tr_out, ADDR_PATTERN, 128,
+        # 193 e o tamanho real deste no (o 20 xx tinha 128). O excedente
+        # guarda campos ainda nao decodificados - candidatos ao last step dos
+        # Fill In, que continua desconhecido (REFERENCIA 2.3.1)
+        d = ler_bloco(self.tr_in, self.tr_out, ADDR_PATTERN_RD, 193,
                       timeout=SNAP_TIMEOUT)
         if not d or len(d) < OFF_LAST_TRACK + len(INSTRUMENTOS):
             if not quieto:
@@ -1749,7 +2054,13 @@ class Motor:
         for v in range(1, 9):                       # A-H; fills nao tem slot
             self.ultimo_var[v] = d[OFF_LAST_VAR + v - 1] + 1
         for i in range(len(INSTRUMENTOS)):
-            self.ultimo_track[i] = d[OFF_LAST_TRACK + i] + 1
+            # 0 = o track NAO tem last step proprio, entao segue a variacao.
+            # No no 20 xx (que a gente lia ate 16/08) este campo vinha 15 pra
+            # todos, o que dava 16 e era inofensivo por acidente - min(16, x)
+            # nunca encurtava nada. Na regiao 24 5x ele vem 0 de verdade, e
+            # somar 1 as cegas faria cada instrumento tocar UM step so.
+            bruto = d[OFF_LAST_TRACK + i]
+            self.ultimo_track[i] = (bruto + 1) if bruto else None
         # CORRECAO DE 16/08/2026: a mascara dos offsets 63-66 e das variacoes
         # HABILITADAS para ciclar, nao da que toca agora. Com uma so
         # habilitada as duas coincidem (por isso funcionou ate hoje); com
@@ -1764,9 +2075,9 @@ class Motor:
         # a ancora ja nao vale
         if len(self.vars_habilitadas) == 1:
             self.variacao_tocando = self.vars_habilitadas[0]
-            self._ciclo_idx = None
+            self.ciclo.soltar()
         elif antes_hab != self.vars_habilitadas:
-            self._ciclo_idx = None
+            self.ciclo.soltar()
             self.variacao_tocando = None
         mudou = antes != (dict(self.ultimo_var), list(self.ultimo_track),
                           self.variacao_tocando)
@@ -1822,7 +2133,18 @@ class Motor:
     def _persistir(self):
         salvar_estado({"ultimo_var": {str(k): v for k, v in self.ultimo_var.items()},
                        "ultimo_track": self.ultimo_track,
-                       "esconder_mudos": self.esconder_mudos})
+                       "esconder_mudos": self.esconder_mudos,
+                       "passo_inst": self.passo_inst})
+
+    def definir_passo_inst(self, n):
+        """Quantas linhas o INST UP/DOWN anda por toque."""
+        with self.lock:
+            n = max(1, min(PASSO_INST_MAX, int(n)))
+            if n == self.passo_inst:
+                return
+            self.passo_inst = n
+            self._persistir()
+            self.log(f"INST UP/DOWN anda {n} linha" + ("s" if n > 1 else ""))
 
     # ── mute ────────────────────────────────────────────────
 
@@ -1855,6 +2177,7 @@ class Motor:
         # o step atual vem no mesmo bloco, de graca - guarda para o tick
         # ressincronizar o playhead sem gastar um RQ1 a mais
         self.passo_maquina = d[OFF_STEP_ATUAL] if len(d) > OFF_STEP_ATUAL else None
+        self.passo_maquina_t = time.time()      # carimbo: ele azeda em ~1 step
         # kit e pattern atuais tambem moram aqui (offsets 0-2, mapa do ARIA) -
         # de graca na mesma leitura, nenhum RQ1 novo
         novo_kit = d[OFF_KIT_ATUAL] if len(d) > OFF_KIT_ATUAL else None
@@ -1951,7 +2274,43 @@ class Motor:
         self.log(f"a TR-8S ja estava tocando - playhead entrou no step "
                  f"{self.passo_abs % max(1, self.last_var()) + 1} "
                  f"(compensados {decorridos} pulsos de leitura)")
+        # A FASE da pra adotar; QUAL variacao, nao. O byte que temos
+        # (OFF_STEP_ATUAL) diz onde estamos DENTRO da variacao, nunca qual e
+        # ela - e ancorar em vs[0] as cegas seria cara ou coroa com duas
+        # habilitadas, exatamente o erro que a REFERENCIA 2.3.2 ja pagou caro
+        # pra nao cometer. Fica em "?" ate alguem dizer, e quem sabe e o Luan,
+        # que esta olhando o visor (ver ancorar_variacao)
+        if len(self.vars_habilitadas) > 1 and not self.ciclo.ancorado():
+            self.log("nao da pra saber QUAL variacao ela esta tocando - "
+                     "clique na que aparece no visor pra ancorar")
         return True
+
+    def ancorar_variacao(self, v):
+        """O Luan diz qual variacao esta no visor; a conta se alinha por ela.
+
+        E a saida honesta para o caso normal - quem sobe o app com a maquina
+        ja rodando nunca recebe um start, e sem start nao ha como deduzir a
+        variacao (ela nao existe em no SysEx nenhum, REFERENCIA 2.3.2).
+
+        O passo_maquina diz a que altura da variacao estamos, entao a ancora
+        sai exata, sem esperar a proxima virada."""
+        with self.lock:
+            if not self.vars_habilitadas:
+                self.log("(!) nenhuma variacao habilitada para ciclar")
+                return
+            if v not in self.vars_habilitadas:
+                hab = " ".join(VARIACOES[x-1] for x in self.vars_habilitadas)
+                self.log(f"(!) a variacao {VARIACOES[v-1]} nao esta habilitada "
+                         f"na maquina (habilitadas: {hab})")
+                return
+            dentro = 0
+            if (self.passo_maquina is not None
+                    and time.time() - self.passo_maquina_t <= VALIDADE_PASSO):
+                dentro = self.passo_maquina
+            self._ancorar_ciclo_vars(v, dentro)
+            self._var_seguida = self.variacao_tocando
+            self.log(f"ancorado: a TR-8S esta tocando a "
+                     f"{VARIACOES[v-1]} (step {dentro + 1})")
 
     def definir_mudos(self, mascara):
         """Escreve a mascara de mute. Testado em hardware: silencia de verdade.
@@ -2235,8 +2594,15 @@ class Motor:
         O step de 8 bytes vai inteiro pra maquina, entao os bytes que este
         metodo nao entende (0-2) saem do cache - dai o guarda: cache que nao
         reflete a maquina nao pode ser escrito de volta."""
+        if self.espelho_suspeito:
+            # nao e cache velho, e cache de OUTRO pattern: escrever mandaria os
+            # bytes 0-3 (velocity, sub step, probability) do pattern errado
+            self.log("(!) escrita bloqueada: o grid esta mostrando um pattern "
+                     "diferente do que a maquina toca")
+            return False
         if i in self.cache_invalido:
-            d = ler_bloco(self.tr_in, self.tr_out, addr_bloco(i, self.variacao))
+            d = ler_bloco(self.tr_in, self.tr_out,
+                          addr_bloco_rd(i, self.variacao))
             if not d:
                 self.log(f"(!) {INSTRUMENTOS[i]}: cache invalido e releitura "
                          "falhou - escrita abortada")
@@ -2250,7 +2616,7 @@ class Motor:
         self.cache[i][b+ALT_BYTE] = (ALT_LIGADO if alt else 0) if vel else 0
         if prob is not None and vel:
             self.cache[i][b+PROB_BYTE] = prob_para_byte(prob)
-        self.tr_out.send(dt1(addr_step(i, step, self.variacao),
+        self.tr_out.send(dt1(addr_step_rd(i, step, self.variacao),
                              self.cache[i][b:b+BYTES_P_STEP]))
         return True
 
@@ -2268,7 +2634,7 @@ class Motor:
                 self.escrever_step(i, s, 0, 0)
                 time.sleep(0.002)
         self.acc = 0
-        self.tr_out.send(dt1(addr_accent(self.variacao), mascara_para_nibbles(0)))
+        self.tr_out.send(dt1(addr_accent_rd(self.variacao), mascara_para_nibbles(0)))
         self.log(f"CLEAR variacao {VARIACOES[self.variacao-1]} (11 instrumentos + ACC)")
 
     def copiar_variacao(self):
@@ -2285,11 +2651,11 @@ class Motor:
             for s in range(16):
                 b = s * BYTES_P_STEP
                 self.cache[i][b:b+BYTES_P_STEP] = dados[b:b+BYTES_P_STEP]
-                self.tr_out.send(dt1(addr_step(i, s, self.variacao),
+                self.tr_out.send(dt1(addr_step_rd(i, s, self.variacao),
                                      dados[b:b+BYTES_P_STEP]))
                 time.sleep(0.002)
         self.acc = mascara
-        self.tr_out.send(dt1(addr_accent(self.variacao),
+        self.tr_out.send(dt1(addr_accent_rd(self.variacao),
                              mascara_para_nibbles(mascara)))
         self.log(f"PASTE: {origem} -> {VARIACOES[self.variacao-1]}")
 
@@ -2317,7 +2683,7 @@ class Motor:
                     return False
                 time.sleep(0.002)          # rajada: nao afogar a maquina
         self.acc = accent & 0xFFFF
-        self.tr_out.send(dt1(addr_accent(self.variacao),
+        self.tr_out.send(dt1(addr_accent_rd(self.variacao),
                              mascara_para_nibbles(self.acc)))
         if last_var is not None:
             self.definir_last_var(last_var)
@@ -2395,11 +2761,11 @@ class Motor:
             for s in range(16):
                 b = s * BYTES_P_STEP
                 self.cache[i][b:b+BYTES_P_STEP] = dados_i[b:b+BYTES_P_STEP]
-                self.tr_out.send(dt1(addr_step(i, s, self.variacao),
+                self.tr_out.send(dt1(addr_step_rd(i, s, self.variacao),
                                      dados_i[b:b+BYTES_P_STEP]))
                 time.sleep(0.002)
         self.acc = mascara
-        self.tr_out.send(dt1(addr_accent(self.variacao),
+        self.tr_out.send(dt1(addr_accent_rd(self.variacao),
                              mascara_para_nibbles(mascara)))
         self.pintar()
         return True
@@ -2431,7 +2797,7 @@ class Motor:
             self.armado = None
             if self.eh_acc(linha):
                 self.acc = 0
-                self.tr_out.send(dt1(addr_accent(self.variacao),
+                self.tr_out.send(dt1(addr_accent_rd(self.variacao),
                                      mascara_para_nibbles(0)))
                 self.log("CLEAR ACCENT")
             else:
@@ -2442,7 +2808,7 @@ class Motor:
             return
         if self.eh_acc(linha):
             self.acc ^= (1 << step)
-            self.tr_out.send(dt1(addr_accent(self.variacao),
+            self.tr_out.send(dt1(addr_accent_rd(self.variacao),
                                  mascara_para_nibbles(self.acc)))
             self.log(f"ACC step {step+1:2} -> "
                      f"{'ON ' if self.acc & (1<<step) else 'OFF'}  (0x{self.acc:04X})")
@@ -2475,7 +2841,7 @@ class Motor:
             return
         if i == len(INSTRUMENTOS):
             self.acc ^= (1 << step)
-            self.tr_out.send(dt1(addr_accent(self.variacao),
+            self.tr_out.send(dt1(addr_accent_rd(self.variacao),
                                  mascara_para_nibbles(self.acc)))
             self.log(f"ACC step {step+1:2} -> "
                      f"{'ON ' if self.acc & (1 << step) else 'OFF'}"
@@ -2977,7 +3343,11 @@ class Motor:
             self.modo = arg; self.pintar_botoes()
             self.log(f"modo: {MODOS[self.modo][0]}")
         elif tipo == "rolar":
-            novo = min(self.base_max(), max(0, self.base_inst + arg))
+            # arg e a DIRECAO (-1/+1); quantas linhas ela anda e o passo_inst.
+            # Assim o botao da tela e o pad do Launchpad andam igual, sem cada
+            # um carregar o proprio numero
+            passo = self.passo_inst if abs(arg) == 1 else 1
+            novo = min(self.base_max(), max(0, self.base_inst + arg * passo))
             if novo == self.base_inst: return
             self.base_inst = novo; self.pintar(); self.pintar_botoes()
             self.log(f"linhas: {self.visiveis()}")
@@ -3153,20 +3523,18 @@ class Motor:
         if self.modo_geral != MODO_ON:
             self.clk.iter_pending()    # drena e descarta: senao, ao voltar pro ON,
             return                     # um monte de clock atrasado chutaria o playhead
+        lote = 0            # pulsos consecutivos, aplicados de uma vez so
         for msg in self.clk.iter_pending():
             t = msg.type
             if t == 'clock':
                 # carimbo para o BPM medido (24 ppq); a TR-8S manda clock
                 # mesmo parada, entao o BPM aparece sempre que ha cabo
                 self._clock_ts.append(time.time())
-                if self.tocando:
-                    self.pulsos += 1
-                    self.passo_abs = self.pulsos // PULSOS_P_STEP
-                    self._avancar_ciclo_vars()
-                    # da a volta no last step da variacao, nao em 16 fixo - era
-                    # a causa da dessincronizacao documentada na REFERENCIA 5
-                    self.mover_playhead(self.passo_abs % max(1, self.last_var()))
-            elif t == 'start':
+                lote += 1
+                continue
+            # transporte fecha o lote: aplicar depois inverteria a ordem
+            lote = self._aplicar_pulsos(lote)
+            if t == 'start':
                 self.pulsos, self.passo_abs, self.tocando = 0, 0, True
                 self._ancorar_ciclo_vars()
                 self.mover_playhead(0)
@@ -3175,7 +3543,7 @@ class Motor:
                 # como saber em qual a maquina esta - honesto e "?"
                 self.tocando = True
                 if len(self.vars_habilitadas) > 1:
-                    self._ciclo_idx = None
+                    self.ciclo.soltar()
                     self.variacao_tocando = None
             elif t == 'stop':
                 # repinta o quadro inteiro, nao a coluna: com track curto cada
@@ -3183,6 +3551,104 @@ class Motor:
                 # deixaria as outras com o verde preso na tela
                 self.tocando, self.passo = False, -1
                 self.pintar()
+        self._aplicar_pulsos(lote)
+
+    def _aplicar_pulsos(self, lote):
+        """Aplica N pulsos de clock de uma vez. Devolve 0 (lote zerado).
+
+        Em lote porque, desde que a porta de clock virou modo callback, nada
+        mais e descartado: depois de uma leitura longa (recarregar, ler_kit)
+        chega uma RAJADA de pulsos represados. Pintar um por um varreria o
+        grid inteiro numa piscada, e ninguem veria nada util - o playhead so
+        precisa chegar onde a musica esta."""
+        if lote and self.tocando:
+            self.pulsos += lote
+            self.passo_abs = self.pulsos // PULSOS_P_STEP
+            self._avancar_ciclo_vars()
+            # da a volta no last step da variacao, nao em 16 fixo - era
+            # a causa da dessincronizacao documentada na REFERENCIA 5
+            self.mover_playhead(self.passo_abs % max(1, self.last_var()))
+            self._atender_var_pedida()
+        if lote > PULSOS_P_STEP:
+            # os carimbos do BPM sairiam todos com a hora da DRENAGEM, nao a
+            # da chegada: o BPM daria centenas. Sumir por um instante e honesto
+            self._clock_ts.clear()
+        return 0
+
+    def pedir_variacao(self, v):
+        """Duplo clique numa variacao: ela passa a tocar na proxima virada.
+
+        Diferente do clique simples, que so ABRE a variacao no grid pra editar
+        (e ai o playhead some, porque o grid nao esta no que soa).
+
+        NAO PROVADO EM HARDWARE. A leitura da mascara 63-66 e provada; a
+        ESCRITA nunca foi (REFERENCIA 2.3.2 e 3). Escrevemos um bit so, o que
+        deixa a propria maquina confirmar: se ela obedecer, a releitura de
+        ler_last_steps vai ver uma habilitada so e cravar a variacao tocando
+        com certeza, sem depender de conta de clock nenhuma. Se ela ignorar, a
+        mascara volta como estava e nada muda - o pedido some sem mentir."""
+        with self.lock:
+            if v not in self.vars_habilitadas and len(self.vars_habilitadas) > 1:
+                self.log(f"(!) {VARIACOES[v-1]} nao esta habilitada na maquina")
+                return
+            if not self.tocando:
+                self.var_pedida = None
+                self._escrever_var_mask(v)
+                return
+            self.var_pedida = v
+            self._ciclo_pedido = self.passo_abs // max(1, self.last_var())
+            self.log(f"variacao {VARIACOES[v-1]} pedida - entra na virada")
+
+    def _escrever_var_mask(self, v):
+        if not self.tr_out:
+            self.log("(!) sem porta CTRL - ligue o modo ON")
+            return
+        self.tr_out.send(dt1(addr_soma(ADDR_PATTERN, OFF_VAR_TOCANDO),
+                             mascara_para_nibbles(1 << (v - 1))))
+        self.log(f"pedi a variacao {VARIACOES[v-1]} a maquina "
+                 "(a proxima leitura confirma se ela obedeceu)")
+
+    def alternar_no_ciclo(self, v):
+        """Liga/desliga uma variacao no RODIZIO, sem zerar as outras.
+
+        Existe porque o duplo clique (pedir_variacao) escreve UM bit e por isso
+        desliga o rodizio: quem estava com A+B+C ciclando passava a ouvir so
+        uma, sem caminho de volta pelo app. Aqui a mascara e montada com
+        varios bits - mesmo endereco, cuja escrita foi provada em 16/08/2026.
+
+        Nunca deixa a mascara vazia: zero variacao habilitada e um estado que
+        nao sabemos o que significa para a maquina, e nao e hora de descobrir
+        com a musica tocando."""
+        with self.lock:
+            if not self.tr_out:
+                self.log("(!) sem porta CTRL - ligue o modo ON")
+                return
+            atual = set(self.vars_habilitadas)
+            if v in atual and len(atual) == 1:
+                self.log(f"(!) {VARIACOES[v-1]} e a unica habilitada - "
+                         "ligue outra antes de desligar esta")
+                return
+            atual.symmetric_difference_update({v})
+            m = 0
+            for x in atual:
+                m |= 1 << (x - 1)
+            self.tr_out.send(dt1(addr_soma(ADDR_PATTERN, OFF_VAR_TOCANDO),
+                                 mascara_para_nibbles(m)))
+            nomes = " ".join(VARIACOES[x-1] for x in sorted(atual))
+            self.log(f"rodizio agora: {nomes}"
+                     + ("  (varias habilitadas: a conta da variacao vira "
+                        "deducao de novo - um stop/play reancora)"
+                        if len(atual) > 1 else ""))
+
+    def _atender_var_pedida(self):
+        """Na virada do compasso, manda o pedido guardado pelo duplo clique."""
+        if self.var_pedida is None:
+            return
+        ciclo = self.passo_abs // max(1, self.last_var())
+        if self._ciclo_pedido is not None and ciclo <= self._ciclo_pedido:
+            return                          # ainda nao virou
+        v, self.var_pedida, self._ciclo_pedido = self.var_pedida, None, None
+        self._escrever_var_mask(v)
 
     # ── ciclo de variacoes derivado do clock ────────────────
     # A variacao que TOCA nao existe em nenhum no SysEx conhecido (o watch de
@@ -3193,29 +3659,53 @@ class Motor:
     # for a mais baixa das habilitadas (ex. segurar C e somar A), o comeco
     # desalinha - caso raro, documentado.
 
-    def _ancorar_ciclo_vars(self):
+    def _ancorar_ciclo_vars(self, v=None, dentro=0, presumida=False):
+        """Ancora o ciclo. Sem v, assume a mais baixa das habilitadas - o que
+        so e legitimo no start, onde a maquina realmente comeca por ela."""
         vs = self.vars_habilitadas
+        self.var_presumida = presumida
         if len(vs) > 1:
-            self._ciclo_idx = 0
-            self.variacao_tocando = vs[0]
-            self._ciclo_limite = self.ultimo_var.get(vs[0], 16)
+            self.ciclo.ancorar(self.passo_abs, vs, self.ultimo_var,
+                               v or vs[0], dentro)
+            self.variacao_tocando = self.ciclo.variacao_em(self.passo_abs)
         else:
-            self._ciclo_idx = None
+            self.ciclo.soltar()
+            self.var_presumida = False      # com uma so nao ha o que presumir
             if vs:
                 self.variacao_tocando = vs[0]
+
+    def _reancorar_apos_troca(self):
+        """Trocou de pattern: PRESUME que o rodizio recomecou pela variacao
+        mais baixa habilitada - o mesmo que a maquina faz no start.
+
+        NAO PROVADO em hardware (16/08/2026). Por isso a ancora sai marcada
+        como presumida e a tela desenha o ponto verde VAZADO em vez de solido:
+        o palpite aparece - senao a troca de pattern jogaria tudo em '?' e o
+        grid pararia de seguir - mas nao se disfarca de leitura.
+
+        Se o palpite estiver errado, o erro e CONSTANTE (sempre a mesma
+        defasagem), o que e facil de ver e facil de corrigir com um
+        Shift-clique ou um stop/play."""
+        vs = self.vars_habilitadas
+        if len(vs) <= 1 or not self.tocando:
+            return
+        dentro = 0
+        if (self.passo_maquina is not None
+                and time.time() - self.passo_maquina_t <= VALIDADE_PASSO):
+            dentro = self.passo_maquina
+        self._ancorar_ciclo_vars(vs[0], dentro, presumida=True)
+        self.log(f"pattern novo: SUPUS que o rodizio recomeca pela "
+                 f"{VARIACOES[vs[0]-1]} - confira o LED verde no painel "
+                 "(stop/play ou Shift-clique corrigem)")
 
     def _avancar_ciclo_vars(self):
         vs = self.vars_habilitadas
         if len(vs) <= 1:
             self.variacao_tocando = vs[0] if vs else self.variacao_tocando
             return
-        if self._ciclo_idx is None:
-            return                      # sem ancora (continue/attach): "?"
-        while self.passo_abs >= self._ciclo_limite:
-            self._ciclo_idx = (self._ciclo_idx + 1) % len(vs)
-            v = vs[self._ciclo_idx]
+        v = self.ciclo.variacao_em(self.passo_abs)
+        if v is not None:               # None = sem ancora (continue/attach)
             self.variacao_tocando = v
-            self._ciclo_limite += self.ultimo_var.get(v, 16)
 
     def _bpm_medido(self):
         """BPM derivado do intervalo entre clocks (24 por seminima), ou None.
@@ -3309,6 +3799,11 @@ class Motor:
                     self.log("mute no painel: "
                              + (" ".join(mutados) if mutados else "ninguem")
                              + f"  |  linhas: {self.visiveis()}")
+                # AQUI, colado no ler_mudos, porque e ele quem grava o
+                # passo_maquina. La embaixo (onde isto ficava) ja passaram o
+                # ler_kit, a fila de FX e o rodizio - o alvo chegava velho e o
+                # proprio guarda de validade o descartaria
+                self._ressincronizar()
                 # a releitura do kit anda DEPOIS da dos mutes, que e quem
                 # levanta a bandeira. Ela e CARA - nome + 11 tones + 26 blocos
                 # de efeito - e num tick so ela atropelava a releitura do
@@ -3328,12 +3823,12 @@ class Motor:
                                                None)):
                     self.pattern_trocou = False
                     self.recarregar()
+                    self._reancorar_apos_troca()
                     self.pintar()
                 # e as notas: sem isto, ligar um step no painel da TR-8S
                 # nunca chegaria ao grid nem aos Launchpad
                 if self._reler_pattern_rodizio():
                     self.pintar()
-                self._ressincronizar()
             if self.modo_geral == MODO_ON and self.chain:
                 try:
                     self.chain.tick(self)
@@ -3353,7 +3848,26 @@ class Motor:
         So corrige com folga de mais de um step: a propria leitura leva algumas
         dezenas de ms, e a 120 bpm um step e 125 ms, entao uma divergencia de um
         step e latencia de medicao, nao erro - corrigi-la faria o playhead
-        tremer pra frente e pra tras sem parar."""
+        tremer pra frente e pra tras sem parar.
+
+        CORRIGIDO EM 16/08/2026 - ele era a causa do 'grid nao espelha o que
+        toca'. Duas coisas estavam erradas:
+
+        1. Reatribuia passo_abs (contador ABSOLUTO, cresce sem fim) com o step
+           da maquina (MODULAR, 0..15). Como o ciclo de variacoes e o free-run
+           do track curto contam no absoluto, a variacao CONGELAVA. Agora a
+           correcao e por DELTA: a fase anda, a contagem continua.
+        2. Usava um passo_maquina que podia ter dezenas de steps de idade -
+           ele e gravado no ler_mudos() e so consumido bem depois, com
+           leituras caras no meio. Corrigir por um alvo velho gera flap
+           sozinho. Agora ha prazo de validade."""
+        # a janela expira sozinha; se ela esvaziou, o espelho voltou a bater e
+        # a escrita e liberada. Fica aqui, antes dos returns, pra rodar sempre
+        agora = time.time()
+        self._saltos = [t for t in self._saltos if agora - t <= JANELA_ESPELHO]
+        if self.espelho_suspeito and not self._saltos:
+            self.espelho_suspeito = False
+            self.log("o grid voltou a bater com a maquina - escrita liberada")
         if not (self.tocando and TOLERANCIA_SYNC is not None):
             return
         # So faz sentido quando o grid esta NA variacao que toca. Divergindo, o
@@ -3375,14 +3889,84 @@ class Motor:
         alvo = self.passo_maquina
         if alvo is None:
             return
+        # o alvo veio de um round-trip de SysEx e envelhece rapido: a 86 bpm um
+        # step dura 0,17 s. Entre gravar (ler_mudos) e usar (aqui) passam
+        # ler_kit, a fila de FX e o rodizio - facil dar mais de um step
+        if time.time() - self.passo_maquina_t > VALIDADE_PASSO:
+            return
         lim = max(1, self.last_var())
         atual = self.passo_abs % lim
         erro = (alvo - atual) % lim
         if min(erro, lim - erro) <= TOLERANCIA_SYNC:
+            self._erros_seguidos = []
             return
-        self.pulsos = alvo * PULSOS_P_STEP
-        self.passo_abs = alvo
-        self.mover_playhead(alvo % lim)
+        # delta com sinal (-lim/2 .. +lim/2): o caminho mais curto ate o alvo
+        delta = erro if erro <= lim - erro else erro - lim
+        # SO CORRIGE ERRO CONSISTENTE (16/08/2026). O alvo vem de um round-trip
+        # de SysEx e a maquina responde com atraso variavel; medindo 103
+        # amostras, o erro aparente se espalhou UNIFORMEMENTE de -5 a +6 steps,
+        # com media +0,12 - ou seja, ruido de medicao, nao deriva. Corrigir por
+        # ruido fazia o playhead saltar do step 1 pro 8 e voltar pro 2.
+        #
+        # Deriva de verdade (pulso perdido) da erro do MESMO sinal, leitura
+        # apos leitura. Desde que a porta de clock virou callback nada se
+        # perde, entao este caminho quase nunca dispara - e e assim que tem
+        # que ser: a contagem de clock e exata, quem chega velho e o alvo.
+        self._erros_seguidos.append(delta)
+        del self._erros_seguidos[:-ERROS_P_CORRIGIR]
+        if len(self._erros_seguidos) < ERROS_P_CORRIGIR:
+            return
+        if not (all(d > 0 for d in self._erros_seguidos)
+                or all(d < 0 for d in self._erros_seguidos)):
+            return                      # sinais misturados = ruido, nao deriva
+        delta = min(self._erros_seguidos, key=abs)   # o mais conservador
+        self._erros_seguidos = []
+        self.pulsos += delta * PULSOS_P_STEP
+        self.passo_abs = self.pulsos // PULSOS_P_STEP
+        # a fronteira entre as variacoes anda JUNTO com a fase, senao consertar
+        # o playhead empurraria a contagem para dentro da variacao vizinha
+        self.ciclo.deslocar(delta)
+        if abs(delta) > SALTO_SOLTA_ANCORA:
+            # desvio grande = pulsos perdidos de verdade. A fase da pra
+            # consertar; QUAL variacao, nao - e "?" e melhor que errado
+            self.ciclo.soltar()
+            self.variacao_tocando = None
+            agora = time.time()
+            # uma rajada de correcoes vale UMA: ver INTERVALO_MIN_SALTO. O
+            # mesmo intervalo silencia o log - senao uma rajada enche a tela
+            # de linhas iguais e esconde o diagnostico que vem depois dela
+            if not self._saltos or agora - self._saltos[-1] >= INTERVALO_MIN_SALTO:
+                self._saltos.append(agora)
+                self.log(f"(!) playhead estava {delta:+d} steps fora - corrigi, "
+                         "mas perdi a conta da variacao.")
+            self._conferir_espelho()
+        self.mover_playhead(self.passo_abs % lim)
+
+    def _conferir_espelho(self):
+        """Desvio grande e REPETIDO significa que o comprimento da variacao que
+        usamos nao e o da maquina - e o comprimento vem do no 20 xx.
+
+        Descoberto em 16/08/2026: esse no pode nao corresponder ao pattern que
+        a maquina toca (ver REFERENCIA). Quando isso acontece o grid mostra
+        OUTRO pattern, e escrever a partir dele manda velocity, sub step e
+        probability do pattern errado por cima do certo - destroi o trabalho
+        do usuario em silencio. Entao aqui a escrita e bloqueada.
+
+        Conta por JANELA DE TEMPO, nao por saltos consecutivos: a divergencia
+        cresce, e corrigida, cresce de novo, e no meio caem correcoes pequenas
+        que zeravam um contador de consecutivos. Medido no aparelho: com o
+        espelho errado saem ~5 saltos por minuto; com ele certo, nenhum."""
+        agora = time.time()
+        self._saltos = [t for t in self._saltos if agora - t <= JANELA_ESPELHO]
+        if self.espelho_suspeito or len(self._saltos) < SALTOS_P_SUSPEITA:
+            return
+        self.espelho_suspeito = True
+        self.log("(!) o playhead nao para de divergir "
+                 f"({len(self._saltos)} correcoes grandes em "
+                 f"{JANELA_ESPELHO:.0f}s), sinal de que o last step daqui nao e "
+                 "o da maquina. ESCRITA BLOQUEADA por precaucao. Causa mais "
+                 "provavel: outro programa na porta CTRL (TR-EDITOR aberto?) - "
+                 "as respostas se misturam e a leitura sai errada.")
 
     # ── espelho pra UI ──────────────────────────────────────
     def estado(self, bloquear=False):
@@ -3399,6 +3983,8 @@ class Motor:
                 "velocidade": VELOCIDADES[self.vel_idx],
                 "modo": MODOS[self.modo][0],
                 "base_inst": self.base_inst,
+                "passo_inst": self.passo_inst,
+                "passo_inst_max": PASSO_INST_MAX,
                 "visiveis": self.visiveis(),
                 # a JANELA dos Launchpads como lista de indices (a moldura da
                 # tela usa; "visiveis" e string para logs e nao serve de dado)
@@ -3418,6 +4004,25 @@ class Motor:
                     VARIACOES[self.variacao_tocando - 1]
                     if self.variacao_tocando else None),
                 "vars_habilitadas": self.vars_habilitadas,
+                # pedida pelo duplo clique e ainda esperando a virada
+                "var_pedida": self.var_pedida,
+                # True = ha varias habilitadas e a conta esta SOLTA, entao nao
+                # sabemos qual toca e da pra fazer algo a respeito (Shift-clique
+                # na do visor). Com uma habilitada so nao ha incerteza nenhuma,
+                # mesmo o ciclo estando solto - por isso nao e so 'not ancorado'
+                "var_incerta": (len(self.vars_habilitadas) > 1
+                                and not self.ciclo.ancorado()),
+                # a ancora veio de palpite (troca de pattern), nao de leitura
+                # nem de start: a tela desenha o ponto verde vazado
+                "var_presumida": self.var_presumida,
+                # o no 20 xx nao corresponde ao pattern que a maquina toca:
+                # o grid mostra outro pattern e a escrita esta bloqueada
+                "espelho_suspeito": self.espelho_suspeito,
+                # o step que a MAQUINA diz estar tocando (perf 01 00 00 07).
+                # Exposto para diagnostico: comparar a volta dele com a nossa
+                # contagem de clock e o unico jeito de flagrar PULSOS_P_STEP
+                # errado (scale diferente de semicolcheia, REFERENCIA 2.4)
+                "passo_maquina": self.passo_maquina,
                 "playhead_visivel": self.playhead_visivel(),
                 "lista_visivel": self.lista_visivel(),
                 "tem_clock": self.clk is not None,

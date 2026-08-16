@@ -1228,6 +1228,7 @@ Três consequências que o patch teve de resolver:
 2. **Índices são voláteis** (replug, reboot, outro aparelho ligado). O layout salvo
    guarda um snapshot da enumeração; se mudar, `carregar_layout` recusa e manda
    rodar `learn` de novo em vez de escrever no aparelho errado.
+   **Revisado em 16/08/2026 — a recusa era grosseira demais, ver 7.3.**
 3. Bug no `learn` antigo: ao detectar pad do aparelho errado, o `continue` pulava o
    pedido em vez de repeti-lo e `notas` terminava curta → `IndexError`. Virou retry.
 
@@ -1243,6 +1244,289 @@ o aparelho enumerado primeiro é o da **direita**:
 
 Não hardcodar essa tabela — vale só para aquela enumeração. É o `learn` que amarra
 índice → aparelho, e o snapshot que detecta quando a amarração venceu.
+
+### 7.3 A guarda de portas recusava demais — corrigido em 16/08/2026
+
+**Sintoma: "o app não conecta".** `/estado` devolvia `"ligado": false` e o log
+repetia *"As portas MIDI mudaram desde o 'learn' (replug?). Aperte Recalibrar"*
+— com TR-8S, clock e os dois Launchpad todos presentes e enumerados.
+
+**Causa.** O `learn` de 13/08 01:01 rodou com a **Scarlett 18i8 USB** no índice
+0. Com ela desligada, tudo andou −1 e os índices salvos (6 e 4) deixaram de
+existir. A guarda comparava a **lista inteira** de nomes de porta por
+igualdade, em três cópias (`lp_tr8s.py`, `servidor.py`, `gui.py`), então
+qualquer aparelho MIDI a mais ou a menos — interface de áudio, IAC Driver, um
+teclado, o Ableton criando portas virtuais — invalidava uma calibração boa.
+
+**A mensagem levava à ação errada, e isso é o pior da história.** "Aperte
+Recalibrar" refaria o `learn` *sem* a Scarlett; ao religá-la, quebraria de
+novo, no sentido inverso. Ciclo vicioso. A ação certa era "ligue a Scarlett", e
+o app não tinha como dizer isso.
+
+**Correção.** Uma função só (`resolver_layout`, reusada pelos três) que casa
+por **nome + ordinal dentro do grupo Launchpad**, não por índice global. O
+grupo Launchpad precisa estar idêntico (mesmo tamanho, mesma sequência de
+nomes) para os ordinais valerem; fora do grupo, entra e sai à vontade. A
+decisão é **atômica** — se um lado não resolve, recusa os dois, porque meio
+grid escrevendo no aparelho errado é pior que grid nenhum. O `learn` passou a
+gravar `in_ord`/`out_ord`; layouts antigos migram derivando o ordinal do
+snapshot já salvo.
+
+Sete enumerações verificadas de mesa (`testes.py`, `TesteGuardaDePortas`):
+
+| cenário | antes | agora |
+|---|---|---|
+| Scarlett ligada (= o do `learn`) | aceita | aceita |
+| **Scarlett desligada** | **recusa** | **aceita, reresolve 6→5 e 4→3** |
+| IAC Driver a mais | recusa | aceita |
+| TR-8S também desligada | recusa | aceita |
+| um Launchpad só | recusa | **recusa** (grupo 4→2) |
+| três Launchpad | recusa | **recusa** (grupo 4→6) |
+| Launchpad em ordem trocada | recusa | **recusa** (ordem mudou) |
+
+**Limite honesto, inalterado:** os dois Mini MK3 têm nome idêntico, então o
+ordinal é a única forma de distingui-los sem `learn`. Se o CoreMIDI trocar os
+dois entre si, isto aceita e o grid sai espelhado — a guarda antiga também não
+pegava esse caso (a lista de nomes ficaria idêntica), e a única prova continua
+sendo o olho, que é por que o `learn` confirma acendendo o aparelho.
+
+### 7.4 O nó `20 xx` é MUDO na leitura — medido em 16/08/2026, 12:56
+
+Este é o achado que fecha o "grid não espelha o que toca", e ele **derruba** a
+hipótese que estava aberta desde 15/08.
+
+**O caso, com gabarito.** O Luan pôs a máquina no **pattern 3-06, variação A**, e
+leu no painel: **BD só no step 1**, **last step da variação = 12**. O app, no
+mesmo instante:
+
+| | máquina (painel) | app (SysEx) |
+|---|---|---|
+| número do pattern (`01 00 00 01`) | 3-06 | **37 = 3-06** ✔ |
+| kit (`01 00 00 00`) | Simple Trap | **Simple Trap** ✔ |
+| BD ligados (`20 01 00 08`) | `[1]` | `[5, 13]` �’ |
+| last step da var A (`20 00 00 00`+67) | 12 | `16` ✗ |
+| nome do pattern (`20 00 00 00`+0..15) | — | `'----'` |
+
+Repare que o app leu um step **13**, que nem existe numa variação que termina no
+12. Não é leitura corrompida: é outro pattern.
+
+**O teste que derrubou a hipótese antiga.** Se fosse "o buffer ficou no pattern
+antigo", trocar de pattern deveria mexer nele. Não mexe — nem pelo painel, nem
+remotamente:
+
+```
+estado inicial (troca feita no painel)  BD=[5,13]  last=16  nome='----'
+troca remota para 1-01 (n=0)            BD=[5,13]  last=16  nome='----'
+volta remota para 3-06 (n=37)           BD=[5,13]  last=16  nome='----'
+```
+
+E os dois ressincronizadores previstos no roteiro **falharam**, confirmando a
+desconfiança que já estava anotada:
+
+| tentativa | resultado |
+|---|---|
+| `01 00 00 01` = n (o resync especulativo que já estava no motor) | não resolveu |
+| `01 00 00 02` = n | não resolveu |
+
+**Conclusão.** O nó `20 xx` **não é uma janela para o pattern corrente**. Ele é um
+buffer que, na leitura, devolve sempre o mesmo conteúdo, independente do que a
+máquina carregou ou toca. Enquanto isso o bloco de performance (`01 xx`) está
+**correto e atualizado** — número do pattern e kit acompanham as trocas.
+
+**Mas a ESCRITA nele funciona** — é o que acontece quando se clica num step do
+grid e a máquina muda. Ou seja: **escrita vai para o pattern ativo, leitura vem
+de outro lugar.** É essa assimetria que explica todo o sintoma.
+
+> O que o Luan descrevia como *"tenho que apertar no grid pra sincronizar"* não
+> era sincronização: era ele **copiando à mão** para o app o que via na TR-8S. O
+> grid está cego para o conteúdo real.
+
+**RISCO DE PERDA DE DADOS, e a proteção que entrou.** `escrever_step` manda o
+step de 8 bytes **inteiro**, e os bytes 0–3 (velocity, sub step, probability)
+saem do cache. Com o cache de outro pattern, cada clique gravava valores alheios
+por cima do pattern real. Entrou o guarda `Motor._conferir_espelho`: quatro
+correções grandes de playhead numa janela de 60 s denunciam que o last step
+daqui não é o de lá, e a **escrita é bloqueada** com aviso na tela. Medido no
+aparelho: com o espelho errado saem ~5 correções por minuto, sem parar; com ele
+certo, o resync mal dispara. O detector subiu em 30 s no caso real.
+
+### 7.7 A TR-8S EMPURRA estado sozinha — medido em 16/08/2026
+
+**Isto corrige a seção 3 (método 2), que diz que a máquina é muda.** Ela é muda
+para *gestos de painel* (mexer num knob não sai). Mas ela **transmite DT1
+espontâneo** — sem RQ1, sem ninguém pedir — para uma porção da região de
+performance.
+
+Medido com o **TR-EDITOR fechado**, escuta passiva de 20 s na porta CTRL:
+
+| endereço | o que é | frequência |
+|---|---|---|
+| `01 00 00 07` | **step atual** | **8,6 por segundo** |
+| `01 00 00 09` | ? (valor 0 constante no teste) | 0,75/s |
+| `01 00 00 01` | **pattern atual** | na troca |
+| `01 00 00 00` | kit / pattern / próximo | na troca |
+| `01 00 00 02`, `1B`, `39`, `40`, `08` | ainda não decodificados | na troca |
+
+Na captura de 36 mil mensagens foram **3.635 espontâneas**, 3.199 delas o step.
+
+**A sequência do step vem limpa**, com last step 12:
+
+```
+9, 10, 11, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 0, 1, 2, ...
+```
+
+Sem repetição, sem salto, e já no módulo certo da variação.
+
+**O que isso vale.** Hoje o playhead é derivado da contagem de pulsos de clock,
+com um ressincronizador que compara com uma leitura pedida — foi de onde saíram
+o congelamento da variação, a deriva e o "playhead maluco" desta sessão. Com o
+push, o step vem **pronto e exato**, sem contar nada e sem pedir nada. A troca de
+pattern também chega na hora, em vez de esperar a releitura periódica.
+
+Isso não foi implementado ainda: fica como o caminho natural do playhead e da
+detecção de troca de pattern. Cuidado ao adotar: a leitura passa a ter **duas
+origens** (push e resposta a RQ1) na mesma porta, e o `ler_bloco` atual casa
+resposta por endereço — um DT1 espontâneo do mesmo endereço que se está pedindo
+pode ser confundido com a resposta.
+
+### 7.6 O playhead maluco era da TELA, não do motor (16/08/2026)
+
+Sintoma: a coluna verde invadia o **step 13** numa variação de 12 steps, e ao
+voltar caía no **2** em vez do 1.
+
+Custou três rodadas de medição no motor — todas dando limpo, porque o motor
+sempre mandou `passo` entre 0 e 11. O erro estava no **relógio local da tela**
+(`web/js/comp/grade-steps.mjs`): a página pede estado a cada 250 ms, mas um step
+a 86 bpm dura 174 ms, então ela mede a duração do step e **avança sozinha** entre
+as respostas. Esse relógio ciclava em `% 16` fixo:
+
+```js
+const prox = (passoReal + 1) % 16;   // <- 16 fixo
+```
+
+Com last step 12, ele adivinhava o step 13; e quando o servidor confirmava o
+step 1, o timer já tinha disparado o seguinte e mostrava o 2. Agora o ciclo vem
+de `e.last_var`.
+
+**Dois lugares, o mesmo engano.** A moldura da janela dos Launchpads tinha o
+mesmo 16 fixo e avançava sobre os steps 13–16, que estão fora do pattern. São
+bugs distintos que produziam a mesma queixa.
+
+**Lição de método, que vale mais que o conserto:** o grid tem *duas* fontes de
+verdade sobre o tempo — o motor e o relógio de interpolação da tela. Medir só o
+motor e concluir "está limpo" foi medir o lado errado três vezes seguidas.
+Quando o sintoma é visual e o backend mede limpo, o próximo lugar a olhar é o
+que a tela faz **entre** dois quadros.
+
+### 7.5b CORREÇÃO — `24 5x` também não acompanha a troca de pattern
+
+**A seção 7.5 abaixo está parcialmente errada e não deve ser lida sozinha.** Ela
+foi escrita antes do teste de troca de pattern, que só aconteceu depois. O que
+7.5 provou continua valendo: `24 5x` é onde o TR-EDITOR lê e escreve, e o
+conteúdo dele bateu byte a byte com o painel para o pattern 3-06. O que ela
+concluiu **cedo demais** foi que aquilo era "o pattern corrente".
+
+**Medido em 16/08/2026, trocando o pattern no painel duas vezes:**
+
+| | perf `01 00 00 01` | kit | nó `24 5x` (nome / last / notas) |
+|---|---|---|---|
+| 3-06 → 1-13 | 37 → **12** ✔ | Simple Trap → **Lost Moon** ✔ | **não mudou** ✗ |
+| 1-13 → 1-05 | 12 → **4** ✔ | Lost Moon → **SambaWork** ✔ | **não mudou** ✗ |
+
+E não muda também com troca **remota** (`01 00 00 01` = n), nem com um
+`recarregar()` completo do app. Ficou congelado no `32bars Trap` — que era o
+pattern carregado quando o **GET do TR-EDITOR** rodou.
+
+**O quadro real, então, é este:**
+
+- `20 xx` — buffer congelado, conteúdo de origem desconhecida. Nunca muda.
+- `24 5x` — buffer de **edição**, carregado em algum momento (o GET é o
+  suspeito) e que **não segue** o pattern que toca.
+- `01 xx` (perf) — este sim acompanha tudo: número do pattern e kit, na hora.
+
+Ou seja: **o pattern que TOCA não tem endereço de leitura conhecido.** O grid
+consegue ler e escrever *um* pattern com fidelidade total (provado: 11/11
+instrumentos, e o Luan confirmou de ouvido que editar soa) — mas é o pattern que
+estiver no buffer de edição, não necessariamente o que está soando.
+
+**Isto conversa diretamente com o achado do LED amarelo (seção acima).** A
+máquina separa "a variação que toca" de "a variação que o painel exibe". O mesmo
+provavelmente vale para patterns: `24 5x` seria o pattern **em edição**, e trocar
+o que toca não mexe nele. Se for isso, a pergunta certa deixou de ser "onde está
+o pattern corrente" e passou a ser **"o que faz a máquina carregar um pattern no
+buffer de edição"**.
+
+**Próximos testes, do mais barato ao mais caro:**
+
+1. Trocar o pattern no painel e **depois apertar um step/instrumento no painel**
+   — se a edição manual for o que carrega o buffer, o `24 5x` muda aí.
+2. Trocar de pattern com a máquina **parada** (o teste acima foi todo tocando).
+3. Repetir o GET no TR-EDITOR já em outro pattern e ver se o `24 5x` passa a
+   refletir o novo — isso confirmaria o GET como o gatilho e transformaria a
+   captura dele em obrigatória (aí sim seria preciso achar o comando, que a
+   primeira captura não mostrou: 602 RQ1, 0 DT1 de escrita antes das leituras).
+
+**Enquanto isso não se resolve, o guarda `_conferir_espelho` é a proteção que
+existe** — ele bloqueia a escrita quando o playhead denuncia que o last step
+daqui não é o de lá.
+
+### 7.5 RESOLVIDO — o pattern mora em `24 5x`, não em `20 xx` (16/08/2026)
+
+A captura do GET do TR-EDITOR foi feita, e o achado **não é um comando**: o
+editor não manda nada para "carregar" buffer nenhum. Ele simplesmente **lê outra
+região**, que este projeto nunca tinha visto.
+
+**A tradução é mecânica** — `0x20` → `0x24`, e o segundo byte somado de `0x50`:
+
+| o que é | como líamos (errado) | onde de fato mora |
+|---|---|---|
+| cabeçalho do pattern | `20 00 00 00` (128 B) | `24 50 00 00` (**193 B**) |
+| variação V, instrumento ii | `20 0V ii 08` | `24 5V ii 08` |
+| accent da variação V | `20 0V 00 00` | `24 5V 00 00` |
+| step s | `+ s*8` | igual |
+
+`24 51`…`24 5A` são as **10 variações** (A–H + os dois Fill In), espelhando
+`20 01`…`20 0A`.
+
+**Conferido contra o painel** (pattern 3-06 "32bars Trap", variação A):
+
+| | `20 01 ii 08` | `24 51 ii 08` | painel |
+|---|---|---|---|
+| BD | `[1, 10, 13]` | `[1]` | `[1]` |
+| CH | `[1,3,5,7,9,11,13,15]` | `[1, 4, 7, 10]` | — |
+| last var A–H | `[16, 16, …]` | `[12, 12, …]` | 12 |
+| nome | `'----'` | `'32bars Trap'` | — |
+
+Depois da migração, os **11 instrumentos batem** com a captura e com o painel.
+
+**A ESCRITA vai no mesmo lugar** — segundo sniff, ligando o step 2 do BD no
+editor. Saiu **uma** mensagem:
+
+```
+DT1  24 51 00 10   data=[0, 0, 0, 0, 0, 0, 5, 0]
+```
+
+`24 51` = variação A, `00` = BD, `0x10` = `0x08 + 1*8` = step 2, e os nibbles
+`5,0` são a velocity 80 que o editor exibia. Bate byte a byte com `addr_step()`.
+
+> Ou seja: o `20 xx` estava errado nas **duas** pontas. Escrever nele nunca
+> chegou a mudar a máquina — o que parecia "sincronizar ao clicar no grid" era
+> só o cache local do app se atualizando. O sintoma de 15/08 tinha uma causa
+> única, e não era buffer dessincronizado: era **endereço errado**.
+
+**Armadilha na migração:** o bloco novo tem 193 bytes (não 128) e o campo de
+last step por track (offset 75+) vem **0** em vez de 15. Somar 1 às cegas fazia
+cada instrumento tocar **um step só**; `0` significa "sem last step próprio,
+segue a variação" e tem que virar `None`.
+
+**Ainda aberto nesta região:** os offsets 128–192, que só existem aqui. O trecho
+`[8, 11, 11, 1, 0, 0, 1, 6, 5]` a partir de 128 é candidato natural ao **last
+step dos dois Fill In**, que continua desconhecido (2.3.1).
+
+**Nota sobre o TR-EDITOR:** trocar a variação exibida nele **não gera MIDI** — ele
+lê as 10 variações de uma vez no GET e alterna qual mostra, localmente. E ele
+**não faz uma variação tocar**; isso só pelo painel. O app faz o que o editor não
+faz, escrevendo a máscara 63–66 (provado, ver acima).
 
 ### Onde parou em 15/08/2026, noite (a sessão M2 aconteceu — e rendeu)
 
@@ -1318,6 +1602,8 @@ persistiu. O que já se sabe:
   continuariam caindo no pattern antigo. Há um "resync" especulativo no
   motor (reescrever `01 00 00 01` com o mesmo n ao detectar troca) que
   **pode não fazer nada**.
+  → **DERRUBADA e substituída em 16/08/2026, 12:56. Ver 7.4.** O nó não
+  "fica no pattern antigo": ele **nunca muda**, para nenhum pattern.
 
 **Roteiro do debug com calma (próxima sessão), do isolante ao complexo:**
 
@@ -1335,6 +1621,193 @@ persistiu. O que já se sabe:
    O TR-EDITOR resolve com o botão GET — se nada funcionar, capturar o GET
    dele (1 gesto) e imitar.
 4. Só então revalidar grid/ghosts/click-to-sound.
+
+### 16/08/2026, manhã — duas causas do sintoma acima, ambas provadas de mesa
+
+O bug continua **aberto** (nada abaixo toca no buffer `20 xx`), mas duas causas
+independentes que o mascaravam foram encontradas e corrigidas **sem hardware**.
+Isso muda o roteiro acima: o ramo "imprime → o bug é do motor" era
+inconclusivo, porque o motor errava a variação por conta própria.
+
+**1. `_ressincronizar()` congelava a variação — e travava o Chain junto.**
+Ele reatribuía `passo_abs` (contador **absoluto**, cresce sem fim) com o step
+que a máquina informa (**modular**, 0–15). Três consumidores contam no
+absoluto: `_avancar_ciclo_vars` (`while passo_abs >= _ciclo_limite`, e o
+limite só crescia), o free-run do track curto, e o `ciclo = passo_abs // lim`
+do Chain. Rodando a cada 1,5 s, bastavam dois ciclos para o limite ficar
+inalcançável e a variação **congelar até o fim da sessão**; o Chain contava
+repetições que nunca tocaram.
+
+Simulado com a lógica exata, 12 compassos, A/B/C habilitadas, com perda de
+pulsos. Máquina tocando `A B C A B C…`:
+
+| resync | variação calculada |
+|---|---|
+| sem resync | `A B C A B C A B C A B C` |
+| **como estava** | `A B C A A A A A A A A A` ← congela |
+| delta só nos pulsos | `A B C B C C A B A A B C` ← ainda erra |
+| **delta + fronteira junto** | `A B C A B C A B C A B C` ← certo |
+
+A correção óbvia (delta) **não basta**: mover `passo_abs` faz o contador cruzar
+fronteiras de variação que não deveriam ter sido cruzadas. A fronteira tem que
+andar junto. Está em `CicloVars.deslocar`, e a variação virou **função pura da
+posição** — sem estado acumulado, não há o que ficar preso. Guardado em
+`testes.py` (`TesteResyncNaoCongela`), que falha se o bug voltar.
+
+**2. Pulsos de clock eram descartados de verdade.** 657 ocorrências de
+`MidiInCore: message queue limit reached!!` no log de 15/08. O rtmidi enfileira
+1024 mensagens e joga o resto fora **em silêncio** — o aviso sai num `cerr` cru
+do CoreMIDI, fora do log do app. A 86 bpm são ~34 msg/s, e o tick para de
+drenar durante as leituras longas (`recarregar`, `ler_kit`); com a CTRL muda
+isso passa de 30 s. Como a variação é derivada da **contagem**, cada pulso
+perdido virava erro permanente.
+
+Medido nesta máquina, fila de 2 e ninguém drenando por 3 s:
+
+| modo | entregues | avisos |
+|---|---|---|
+| polling (como estava) | 1 | ~100 |
+| `set_callback` | 104 | 0 |
+
+**`set_error_callback` não resolve** — não é chamado para este aviso (testado:
+0 chamadas). A porta de clock passou a **modo callback**, com deque ilimitado;
+CTRL e Launchpad seguem em polling. Como agora nada se perde, depois de uma
+leitura longa chega uma rajada represada — daí `_aplicar_pulsos` processar em
+**lote**, senão o playhead varreria o grid numa piscada.
+
+**3. Consequência para a variação, e o que ficou honesto.** `adotar_transporte`
+**não** ancora o ciclo, e isso é de propósito: `OFF_STEP_ATUAL` diz onde
+estamos *dentro* da variação, nunca *qual* é ela — ancorar em `vs[0]` às cegas
+seria cara ou coroa com duas habilitadas. Quem sobe o app com a máquina já
+rodando fica em `"?"` até dizer qual está no visor (**Shift-clique** na
+variação → `Motor.ancorar_variacao`, que usa `passo_maquina` para acertar a
+fase na hora). Uma correção de fase maior que 3 steps **solta a âncora**: a
+fase dá para consertar, qual variação não.
+
+Ainda não testado em hardware: se o ordinal de porta é fisicamente o aparelho
+da esquerda.
+
+### A escrita da máscara 63–66 FUNCIONA — provado em 16/08/2026, 12:25
+
+Era a última incógnita da seção 2.3.2 ("leitura provada, escrita é a sessão C —
+round-trip não prova obediência"). **Provada em hardware**, com o Luan na
+máquina, três vezes seguidas, pelo duplo clique do app
+(`Motor.pedir_variacao` → `dt1(20 00 00 00 +63, 1 << (v-1))`):
+
+```
+12:25:27  variacao B pedida - entra na virada
+12:25:30  pedi a variacao B a maquina
+12:25:30  a TR-8S passou a tocar a variacao B     <- obedeceu
+12:25:52  variacao C pedida  ->  12:25:53 passou a tocar a C
+12:26:41  variacao B pedida  ->  12:26:43 passou a tocar a B
+```
+
+A espera pela virada também confere: 3 s entre pedido e envio, e um compasso de
+16 steps a 86 bpm dura 2,79 s.
+
+**O mecanismo é auto-confirmante, e é por isso que ele é bom.** Escrever *um bit
+só* faz a máquina ficar com **uma** variação habilitada; a releitura seguinte de
+`ler_last_steps` vê `len(vars_habilitadas) == 1` e crava `variacao_tocando` com
+**certeza**, sem depender de contagem de clock nenhuma. Ou seja: pedir a
+variação pelo app é o único caminho em que a variação que toca deixa de ser
+dedução e vira leitura.
+
+**Efeito colateral que isso tem, e que é preciso ter em conta:** escrever um bit
+só **desliga o rodízio**. Quem estava com A+B+C ciclando e dá um duplo clique
+passa a ouvir só aquela — não há como pedir "toque a B *e continue ciclando*"
+com uma escrita de bit único.
+
+**A escrita com VÁRIOS bits também funciona** — provada em seguida, no mesmo
+dia, montando o rodízio remotamente e lendo de volta a cada passo:
+
+```
+[D] -> liga A -> [A,D] -> liga B -> [A,B,D] -> liga C -> [A,B,C,D] -> desliga D -> [A,B,C]
+```
+
+Ou seja, **o rodízio inteiro é controlável pelo app** (`Motor.alternar_no_ciclo`,
+clique direito na variação). Nunca deixar a máscara vazia: zero habilitada é um
+estado cujo efeito não conhecemos, e há uma trava no código para não descobrir
+isso com a música tocando.
+
+### Os LEDs de VARIATION separam "toca" de "mostra" — 16/08/2026
+
+**Correção de uma anotação errada feita horas antes nesta mesma seção.** Ao ser
+perguntado qual variação aparecia "no visor", o Luan respondeu *"nenhuma"*, e
+daí saiu a conclusão de que o painel não expunha a variação que toca. **Estava
+errado** — a pergunta é que apontava para o lugar errado (o display numérico).
+Quem mostra são os **LEDs dos botões A–H**, e eles dizem duas coisas ao mesmo
+tempo, em cores diferentes:
+
+| LED | Significado |
+|---|---|
+| **verde piscando, alternando** entre A, B e C | as habilitadas no rodízio; o verde acompanha **a que está tocando** |
+| **amarelo piscando** no D | a variação que o painel está **mostrando/editando** |
+
+Observado com `vars_habilitadas = [A,B,C]` tocando e o **D em amarelo** — ou
+seja, a máquina estava **tocando A→B→C e exibindo a D**.
+
+**A TR-8S tem nativamente a distinção "toca" vs. "edita"**, e sinaliza cada uma
+com uma cor. É exatamente o modelo que o app já usa (ponto verde = o que toca,
+quadrinho destacado = o que está aberto no grid) — o que era projeto nosso
+acabou sendo convergência com o aparelho.
+
+**Como o D foi parar em amarelo:** um duplo clique do app escreveu a máscara com
+o bit do D (`Motor.pedir_variacao`); depois o rodízio A+B+C foi restaurado por
+cima. O painel manteve o D como a variação *em exibição*. Portanto:
+
+> Escrever a máscara 63–66 muda **o que toca**, e não muda **o que o painel
+> mostra**. São dois estados independentes na máquina, e só um deles tem
+> endereço conhecido.
+
+**Consequência prática, e é um risco real:** com o painel mostrando D, um gesto
+no painel edita a **D** — não a que está soando. Quem estiver olhando só para o
+que ouve vai achar que "editar não faz nada".
+
+**Pista para o BUG ABERTO** (o buffer `20 xx`, seção acima): esse segundo estado
+— "variação em exibição no painel" — não foi procurado em nenhum sniff até
+agora, e é candidato natural a explicar edições que não soam. Vale um
+`snapdiff` mudando **só** a variação exibida no painel, sem tocar em mais nada.
+
+O que continua valendo do que foi anotado antes:
+
+- **stop/play reancora a conta**, e agora está **PROVADO** (abaixo).
+- O **duplo clique** transforma dedução em leitura, fixando uma variação só.
+- `Motor.ancorar_variacao` (Shift-clique) volta a ser utilizável, já que o LED
+  verde de fato indica a que toca — com a ressalva de que a janela é curta: um
+  compasso de 16 steps a 86 bpm dura 2,79 s.
+
+### A máquina começa pela mais baixa habilitada — PROVADO em 16/08/2026
+
+Era a premissa de `_ancorar_ciclo_vars()` sem argumento, e o que faz o stop/play
+funcionar. Com A+B+C habilitadas, a máquina rodando e a conta em `"?"`, o Luan
+deu **stop e play**; a partir daí o app acompanhou por 40 s medidos:
+
+```
+A B C A B C A B C A B C A B     (uma virada a cada ~2,8 s, sem repetir, sem "?")
+```
+
+Compare com o mesmo teste antes das correções deste dia, que produzia
+`A A B C A A A B B B B B B B B B C C C C` — a variação congelando por dez
+compassos. É a confirmação em hardware de que o `_ressincronizar` era a causa.
+
+**Referência de UI para troca de pattern/kit — TR-EDITOR, 16/08/2026.** O Luan
+apontou a janela `PATTERN / KIT SELECT` do editor como o modelo a seguir para a
+nossa seleção de patterns, ritmos e kits. O que vale copiar dela:
+
+- **Duas abas** no topo — `PATTERN` e `KIT` — no mesmo diálogo, em vez de dois
+  lugares diferentes.
+- **Tudo à vista, em colunas**: os 128 patterns (`1-01`…`8-16`) e os 128 kits
+  (`001`…`128`) numa grade de 4 colunas, sem scroll e sem paginação. Dá para
+  varrer o banco inteiro com o olho.
+- **Número e nome juntos** em cada linha (`3-06: 32bars Trap`, `019: Simple
+  Trap`), com os vazios marcados `----`.
+- **O item corrente em destaque colorido** (amarelo/verde no editor), o que
+  responde "onde eu estou" sem precisar procurar.
+
+Isso conversa direto com o pedido de 15/08 de unir Biblioteca e Chain: a lista
+completa com nome é o que falta para escolher pattern sem decorar número. Os
+nomes dos 128 patterns e dos 128 kits estão legíveis nas capturas de tela de
+16/08 e podem ser transcritos para o `biblioteca.py` sem precisar da máquina.
 
 **Pedidos de interface anotados em 15/08 à noite** (para o plano da reforma):
 

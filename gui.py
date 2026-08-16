@@ -1168,19 +1168,11 @@ class App:
     def _garantir_motor(self):
         if self.motor:
             return True
-        if not os.path.exists(L.LAYOUT_FILE):
-            self.log("(!) Nenhum layout salvo. Aperte Recalibrar."); return False
-        try:
-            with open(L.LAYOUT_FILE) as f:
-                cfg = json.load(f)
-        except Exception as e:
-            self.log(f"(!) layout ilegivel: {e}"); return False
-        atual_in  = [n for _, n in L.listar_portas(True)]
-        atual_out = [n for _, n in L.listar_portas(False)]
-        if cfg.get("_portas_in") != atual_in or cfg.get("_portas_out") != atual_out:
-            self.log("(!) As portas MIDI mudaram desde o 'learn' (replug?). "
-                     "Aperte Recalibrar - escrever agora poderia cair no "
-                     "aparelho errado.")
+        # mesma resolucao do servidor.py, vinda de lp_tr8s (ver resolver_layout)
+        cfg, msgs = L.carregar_layout_resolvido()
+        for m in msgs:
+            self.log(("(!) " if cfg is None else "") + m)
+        if cfg is None:
             return False
         try:
             L._programmer_mode(True)

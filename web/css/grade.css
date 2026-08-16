@@ -30,6 +30,12 @@
   background:var(--ok); margin:3px auto 0; box-shadow:var(--glow);
   color:var(--ok);
 }
+/* pedida pelo duplo clique, esperando a virada do compasso */
+.vars .bt[data-pedida]{ border-color:var(--ok); animation:varPisca 1s infinite }
+@keyframes varPisca{ 50%{ opacity:.45 } }
+@media (prefers-reduced-motion:reduce){
+  .vars .bt[data-pedida]{ animation:none; border-style:dashed }
+}
 .vars .fill{ grid-column:span 2 }
 
 /* ── a grade ──────────────────────────────────────────── */

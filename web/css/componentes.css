@@ -32,6 +32,22 @@
 .seg-val{ font-size:var(--t-med); font-weight:600 }
 .seg[data-vazio="1"] .seg-val{ color:var(--linha2); text-shadow:none }
 
+/* Largura FIXA nos displays cujo texto muda de tamanho. O playhead passando do
+   step 9 pro 10 fazia a barra inteira tremer 16 vezes por compasso.
+
+   min-width em `ch` sozinho NAO resolve, e por dois motivos: tabular-nums
+   iguala a largura de cada DIGITO mas "8" continua ocupando menos que "16", e
+   o letter-spacing abaixo mete um espaco extra a cada caractere a mais. Por
+   isso os zeros a esquerda entram no JS (segNum) e sao pintados de
+   transparente aqui: ocupam o lugar exato, com a mesma fonte e o mesmo
+   espacamento do resto, e nao ha o que medir. */
+.zero-fantasma{ color:transparent }
+#d-step .seg-val{ text-align:right }
+#d-bpm  .seg-val{ text-align:right }
+#d-ptn  .seg-val{ min-width:4ch; text-align:right }   /* 1-01 .. 8-16 */
+#d-var  .seg-val,
+#d-vedit .seg-val{ min-width:2ch; text-align:center } /* A..H, F1/F2, "?" */
+
 /* O KIT manda em tudo que a aba Efeitos e a Instrumento mostram: um nome
    errado ali (foi o que aconteceu com o "TR-808") faz a tela inteira falar
    de outro kit. Entao ele nao pode ter o mesmo peso de PTN/VAR/STEP. */
