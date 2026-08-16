@@ -55,13 +55,22 @@ python3 lp_tr8s.py ports    # lista as portas MIDI com indice
 python3 lp_tr8s.py learn    # descobre esquerdo/direito e a rotacao de cada um
 python3 lp_tr8s.py run      # o grid ao vivo
 python3 lp_tr8s.py standby  # so as ondas coloridas; nem precisa da TR-8S ligada
+python3 testes.py           # testes de mesa, sem porta MIDI e sem hardware
 ```
 
-`python3 criar_app.py` monta um **`TR-8S Grid.app`** no Desktop, com janela e ícone, no
-lugar do comando no terminal.
+Duas formas de instalar a tela, e elas mantêm **cópias separadas** dos scripts:
 
-Feche o **TR-EDITOR** antes: ele segura a porta `TR-8S CTRL`, e só um processo por vez a
-usa.
+```bash
+python3 instalar_agente.py  # LaunchAgent: sobe no login e responde em 127.0.0.1:8733
+python3 criar_app.py        # TR-8S Grid.app no Desktop, com ícone
+```
+
+Depois de editar o código, rode **os dois** — quem costuma estar no ar é o do
+LaunchAgent, e atualizar só o `.app` deixa a versão velha respondendo.
+
+Feche o **TR-EDITOR** antes. O CoreMIDI deixa os dois abrirem a porta `TR-8S CTRL` ao
+mesmo tempo, mas aí ambos mandam RQ1 nela e cada um pega a resposta do outro — as
+leituras saem trocadas, sem erro nenhum aparecendo.
 
 ### Engenharia reversa
 
@@ -96,6 +105,8 @@ ocorrência, então os dois Launchpad viram um só. Por isso a enumeração e a 
 | `gen_tones.py` → `tones.py` | Preset Tone List da Roland como dados, para a aba Instrumento (trocar o tone de cada track) |
 | `ferramentas.py` | Chain de patterns e ferramenta estocástica (probabilidade, densidade, humanize, ghosts) |
 | `criar_app.py` | Monta o `.app` do Desktop |
+| `instalar_agente.py` | Instala o LaunchAgent que sobe o servidor no login — é a cópia que costuma estar no ar |
+| `testes.py` | Testes de mesa (`unittest`, sem porta MIDI): a contagem da variação que toca e a resolução de portas do `learn`. Guardam as duas regressões de 16/08 |
 | `apc_tr8s.py` | Versão anterior, para APC40 mkII — funcionando |
 | `tr8s_sysex.py` | Parser/diff de capturas do MIDI Monitor |
 | `gen_layout.py` → `layout.html` | Referência visual do mapeamento dos botões |
