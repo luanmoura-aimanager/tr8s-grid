@@ -291,6 +291,20 @@ PAINEIS = [
         p("waveform", None, 1, ["SIN", "TRI", "SAW", "SQR", "S&H"]),
         p("temposync", None, 1, ["OFF", "ON"]), p("rate")]},
 
+    # EXT IN - bloco 04, contiguo, medido knob a knob em 15/08/2026 a noite.
+    # O side chain e o que faz o EXT IN "bombar" junto com um instrumento.
+    {"id": "extin", "rotulo": "EXT IN", "escopo": "kit", "familia": "EXTIN",
+     "bloco": "extin",
+     "gesto": "SHIFT + [KIT] -> EXT IN", "seletor": None, "tipos": [],
+     "comuns": [
+        p("side chn source", None, 1,
+          ["BD", "SD", "LT", "MT", "HT", "RS", "HC", "CH", "OH", "CC", "RC",
+           "?"]),
+        p("side chn type", 7, 1),
+        p("side chn depth"), p("gain", 161, 2, None, False, DB),
+        p("pan", 255, 2, None, True),
+        p("reverb send"), p("delay send")]},
+
     {"id": "kit", "rotulo": "KIT", "escopo": "kit", "familia": "KIT",
      "bloco": "kit",
      "gesto": "SHIFT + [KIT]", "seletor": None, "tipos": [], "comuns": [
@@ -474,6 +488,24 @@ PARAMS_FIXOS = {
     "mfx noise direction":  {"bloco": "mfx", "tipo": "kit", "off": 0x2B,
                              "bytes": 2, "opcoes_do_catalogo": True},
 
+    # --- EXT IN: bloco 10 KK 04 00, contiguo -------------------------
+    # source 0-11 na ordem BD..RC (11 medido como ultimo; o rotulo do 11 nao
+    # foi lido no visor). gain com a mesma escala 0-161 do gain de inst.
+    "extin side chn source": {"bloco": "extin", "tipo": "kit", "off": 0x00,
+                              "bytes": 1, "opcoes_do_catalogo": True},
+    "extin side chn type":   {"bloco": "extin", "tipo": "kit", "off": 0x01,
+                              "bytes": 1},
+    "extin side chn depth":  {"bloco": "extin", "tipo": "kit", "off": 0x02,
+                              "bytes": 2},
+    "extin gain":            {"bloco": "extin", "tipo": "kit", "off": 0x04,
+                              "bytes": 2},
+    "extin pan":             {"bloco": "extin", "tipo": "kit", "off": 0x06,
+                              "bytes": 2},
+    "extin reverb send":     {"bloco": "extin", "tipo": "kit", "off": 0x08,
+                              "bytes": 2},
+    "extin delay send":      {"bloco": "extin", "tipo": "kit", "off": 0x0A,
+                              "bytes": 2},
+
     # --- LFO do kit: bloco 10 KK 05 00 ------------------------------
     "lfo waveform":  {"bloco": "lfo", "tipo": "kit", "off": 0x00, "bytes": 1,
                       "opcoes": {"0": "SIN", "1": "TRI", "2": "SAW",
@@ -545,15 +577,23 @@ CORES_INST = ["RED", "ORANGE", "YELLOW", "LIME", "GREEN", "SKYBLUE",
 # CTRL POR INSTRUMENTO - bloco 06, um byte por instrumento a partir de 0x01
 # (BD=0x01, SD=0x02 - sequencial provado em 15/08/2026). Codigos 0..5 fixos:
 #     0 OFF   1 Pan   2 ReverbSend   3 DelaySend   4 LFO Depth   5 InstFX
-# Do 6 em diante e O PARAMETRO DO TONE, e nem todo instrumento tem um
-# (menus lidos no TR-EDITOR em 15/08/2026 com o kit TR-707):
-#     BD: Attack (6, medido)   SD: Snappy (7, medido)
-#     LT/MT/HT: Color (codigo NAO medido)   RS..RC: so os 6 fixos
-# O rotulo do ultimo codigo depende do tone carregado - como no TR-EDITOR.
-# O offset 0x00 do bloco e o SELECT global ("kit ctrl select" no mapa).
+# Do 6 em diante sao PARAMETROS DE TONE num espaco de codigos GLOBAL e
+# estavel: cada tone so mostra os que ele expoe, mas o codigo de cada nome
+# nao muda. Medido em 15/08/2026 em dois kits: o LT do kit 089 (sample)
+# percorreu 0-5 e depois 9-23 - o pulo 6/7/8 e exatamente Attack/Snappy/
+# Color dos ACB do TR-707 (6 e 7 medidos direto; 8=Color fecha por
+# eliminacao, unico nome restante da faixa). "Morph" (tones FM) segue sem
+# codigo medido. O offset 0x00 do bloco e o SELECT global.
 CTRL_OFF_BASE = 0x01
 CTRL_FIXOS = {0: "OFF", 1: "Pan", 2: "ReverbSend", 3: "DelaySend",
               4: "LFO Depth", 5: "InstFX"}
+CTRL_TONE_PARAMS = {
+    6: "Attack", 7: "Snappy", 8: "Color", 9: "Coarse", 10: "Rate",
+    11: "Spread", 12: "BitReduce", 13: "Attack", 14: "HoldMode",
+    15: "HoldTime", 16: "HoldStep", 17: "FltType", 18: "FltCutoff",
+    19: "FltReso", 20: "FltEnvAtk", 21: "FltEnvDecay", 22: "FltEnvDepth",
+    23: "FltVelo",
+}
 
 # ─────────────────────────────────────────────────────────────
 # DERIVADOS DE UMA REGRA MEDIDA (nao de um gesto proprio)

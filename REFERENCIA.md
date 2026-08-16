@@ -1284,7 +1284,18 @@ três caminhos).
 6. ~~Troca remota de pattern~~ — **PROVADA tocando** (A1→A2→A1→A2→B1):
    escrever o "próximo pattern" (`01 00 00 02`) troca **na virada**, como no
    painel. É o mecanismo certo para o chain. A variante `now` (offset 1)
-   segue não exercitada.
+   **corta no meio do compasso** (B1↔B2 tocando, confirmado em duas passadas
+   com BPM baixo) — corte seco, para performance. O chain ganha dois modos
+   musicais: na virada (`próximo`) e imediato (`now`).
+
+E os arremates da mesma noite: **CTRL dos toms** fechou por eliminação
+(espaço de códigos global — LT sample percorreu 0–5 e 9–23, o pulo 6/7/8 é
+Attack/Snappy/**Color**; tabela em `efeitos.CTRL_TONE_PARAMS`), **EXT IN
+completo** (bloco 04 contíguo: source, type 0–7, depth, gain 0–161, pan,
+sends — painel próprio no catálogo, **252/252 mapeados**), e uma descoberta
+de graça: **a TR-8S transmite sozinha o step atual** (`DT1 01 00 00 07`)
+enquanto toca — é como o TR-EDITOR anima o playhead sem polling; upgrade
+futuro para o nosso.
 
 Capturas de tudo em `capturas/*-2026-08-15.mmon`.
 
