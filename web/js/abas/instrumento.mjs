@@ -100,9 +100,9 @@ export default {
       h(
         "p.aviso",
         {},
-        "id → nome é HIPÓTESE (posição na Preset Tone List); " +
-          "a escrita nunca foi testada — toque o pad e confira o som e o visor. " +
-          "CTRL e INST FX ainda não foram decodificados.",
+        "os ids vêm da tabela do próprio TR-EDITOR e foram conferidos " +
+          "contra os 22 tones dos kits TR-808 e TR-707 desta máquina. " +
+          "Trocar o tone funciona — confira o nome no visor da TR-8S.",
       ),
       corpo,
     );

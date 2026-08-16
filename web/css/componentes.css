@@ -32,6 +32,15 @@
 .seg-val{ font-size:var(--t-med); font-weight:600 }
 .seg[data-vazio="1"] .seg-val{ color:var(--linha2); text-shadow:none }
 
+/* O KIT manda em tudo que a aba Efeitos e a Instrumento mostram: um nome
+   errado ali (foi o que aconteceu com o "TR-808") faz a tela inteira falar
+   de outro kit. Entao ele nao pode ter o mesmo peso de PTN/VAR/STEP. */
+#d-kit{ border-color:var(--linha2); background:#120e0a;
+        padding-right:var(--e3) }
+#d-kit .seg-val{ font-size:var(--t-gr); letter-spacing:.02em }
+#d-kit:not([data-vazio]) .seg-val{ color:#ffd08a;
+                                   text-shadow:0 0 12px #ffb45477 }
+
 /* ── chips ────────────────────────────────────────────── */
 .chip{
   display:inline-flex; align-items:center; gap:var(--e1);

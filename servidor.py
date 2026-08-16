@@ -55,15 +55,19 @@ ARQ_SERVIDOR = os.path.expanduser("~/.lp_tr8s_servidor.json")
 # O Python 3.9 nao conhece .mjs: sem isto o navegador RECUSA o modulo ES com
 # "disallowed MIME type" e a pagina nao carrega nada.
 mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("application/manifest+json", ".webmanifest")
 
 # Token da sessao. Sem ele, qualquer pagina aberta no navegador poderia mandar
 # POST em 127.0.0.1:8733/acao e disparar um WRITE na TR-8S - o servidor e local,
 # mas nao e privado. Ver _autorizado().
 TOKEN = secrets.token_urlsafe(24)
 
+# manifest-src e obrigatorio para o "Adicionar a Dock" do Safari: com
+# default-src 'none' o navegador recusa o .webmanifest calado, e o app da
+# Dock nasce sem nome nem icone.
 CSP = ("default-src 'none'; script-src 'self'; style-src 'self'; "
-       "img-src 'self' data:; connect-src 'self'; base-uri 'none'; "
-       "form-action 'none'")
+       "img-src 'self' data:; connect-src 'self'; manifest-src 'self'; "
+       "base-uri 'none'; form-action 'none'")
 LIMITE_CORPO = 256 * 1024
 
 
@@ -385,8 +389,10 @@ def dados_estaticos():
                        for p in B.PATTERNS],
         "catalogo_fx": E.CATALOGO,
         "paineis_fx": E.paineis_para_tela(),
-        "tones": [{"id": T.tone_id(pos), "cat": c, "nome": n, "tipo": t}
-                  for pos, (c, n, t) in enumerate(T.TONES)],
+        # o id vem NA tupla: os ids da Roland tem buracos, e supor
+        # "id = posicao" foi o que carregou o tone errado em 15/08/2026
+        "tones": [{"id": i, "cat": c, "nome": n, "tipo": t, "maquina": m}
+                  for i, c, n, t, m in T.TONES],
         # as cores saem do Python para a tela e o LED nunca divergirem
         "cores": L.paleta_da_tela(),
         "build": time.strftime("%d/%m %H:%M", time.localtime(
@@ -453,10 +459,23 @@ class Handler(http.server.BaseHTTPRequestHandler):
 
     # ── GET ─────────────────────────────────────────────────
     def _servir_pagina(self):
-        # o token chega por ?t= (o navegador foi aberto assim) e vira cookie
-        q = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+        """Serve a pagina e ENTREGA A SESSAO a quem abriu esta URL.
+
+        Antes o cookie so vinha com ?t=<token> na query - o jeito como o .app
+        abre o navegador. Isso trancava dois casos legitimos: abrir a pagina
+        noutro navegador, e o app de "Adicionar a Dock" do Safari, que guarda
+        uma URL fixa enquanto o token muda a cada vez que o servidor sobe.
+
+        Por que dar a sessao a qualquer um que peca / e seguro: o servidor so
+        escuta em 127.0.0.1, entao quem chega aqui ja esta nesta maquina; uma
+        pagina de outro site consegue ate NAVEGAR para ca, mas nao consegue
+        LER a resposta (cross-origin) nem alcancar o cookie (HttpOnly), e
+        SameSite=Strict impede o cookie de viajar numa requisicao dela. A
+        defesa do POST continua sendo Host + Origin + header proprio, que e
+        onde ela sempre esteve. O _host_ok() aqui fecha DNS rebinding, que e
+        o unico jeito de um site externo virar "mesma origem" que nos."""
         extra = {"Content-Security-Policy": CSP}
-        if secrets.compare_digest((q.get("t") or [""])[0], TOKEN):
+        if self._host_ok():
             extra["Set-Cookie"] = (f"tr8s={TOKEN}; Path=/; SameSite=Strict; "
                                    "HttpOnly; Max-Age=86400")
         alvo = os.path.join(WEB, "index.html")
@@ -479,7 +498,8 @@ class Handler(http.server.BaseHTTPRequestHandler):
                 os.path.realpath(WEB):
             return self._erro("fora do diretorio web", 403)
         if os.path.splitext(alvo)[1] not in (".css", ".mjs", ".js", ".svg",
-                                             ".png", ".woff2", ".html"):
+                                             ".png", ".woff2", ".html",
+                                             ".webmanifest"):
             return self._erro("extensao nao servida", 403)
         try:
             with open(alvo, "rb") as f:

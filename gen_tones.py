@@ -1,107 +1,129 @@
 #!/usr/bin/env python3
 """
-gen_tones.py - extrai a Preset INST Tone List do PDF da Roland e gera tones.py.
+gen_tones.py - gera o tones.py a partir da tabela do proprio TR-EDITOR.
 
-Uso:  python3 gen_tones.py          (precisa do TR-8S_PresetToneList_eng04_W.pdf
-                                     na pasta e do fitz/PyMuPDF no PYTHONPATH)
+POR QUE NAO SAI MAIS DO PDF
+A primeira versao lia a "Preset INST Tone List" do PDF e supunha
+id = posicao na lista. O PDF agrupa por CATEGORIA (todos os BD, depois todos
+os SD...), e a maquina NAO numera assim - ela numera por maquina de origem,
+com buracos. O erro so apareceu em hardware, em 15/08/2026: o Luan escolheu
+"707 Bass1/2" (posicao 8 na lista do PDF) e a TR-8S carregou "808 High Tom".
 
-O PDF nao tem coluna de numero. A HIPOTESE de id (registrada em tones.py e na
-REFERENCIA 2.9) e que o id do tone e a posicao nesta lista, porque o mapa do
-ARIA diz que os tones de usuario ocupam 624-1023 - sobrando o comeco para os
-presets, e a Roland lista na ordem do indice em toda documentacao dela. Se a
-sessao de hardware mostrar offset (0-based vs 1-based ou buracos), o ajuste e
-um numero so: BASE_ID em tones.py.
+A tabela certa estava dentro do TR-EDITOR o tempo todo:
+    /Applications/Roland/TR Editor.app/Contents/Resources/Script/
+        ToneDetailsConfigTable.dat
+E um CSV com NUMBER, CATEGORY, TYPE, NAME e a maquina de origem.
 
-Tres linhas do PDF vem quebradas pelo extrator de texto (nome colado no tipo,
-nome partido em duas linhas, rodape de copyright); o parser trata as tres.
+    id SysEx = NUMBER - 1
+
+Provado contra 22 tone ids lidos da propria maquina (os 11 instrumentos do
+kit 001 TR-808 e os 11 do kit 003 TR-707): 22/22. Ver REFERENCIA 2.9.
+
+    python3 gen_tones.py            gera o tones.py
+    python3 gen_tones.py --conferir so valida, nao escreve
 """
+import csv
+import io
 import os
-import re
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import fitz
+FONTE = ("/Applications/Roland/TR Editor.app/Contents/Resources/Script/"
+         "ToneDetailsConfigTable.dat")
+COPIA = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "capturas", "ToneDetailsConfigTable.dat")
+SAIDA = os.path.join(os.path.dirname(os.path.abspath(__file__)), "tones.py")
 
-PDF = "TR-8S_PresetToneList_eng04_W.pdf"
-TIPOS = {"ACB", "FM", "SAMPLE"}
-LIXO = {"Category", "Name", "Type"}
+# tone ids lidos da maquina, para o gerador se auto-conferir
+CONFERENCIA = {
+    "TR-808": [1, 5, 6, 7, 8, 15, 17, 21, 22, 23, 25],
+    "TR-707": [42, 44, 46, 47, 48, 49, 51, 53, 54, 55, 56],
+}
+
+CABECALHO = '''"""
+tones.py - a lista de tones da TR-8S, gerada por gen_tones.py.
+
+NAO EDITAR NA MAO.
+
+Fonte: ToneDetailsConfigTable.dat, de dentro do TR-EDITOR. O id de SysEx e o
+NUMBER da tabela MENOS UM - provado contra os 22 tone ids lidos dos kits
+TR-808 e TR-707 da maquina do Luan (REFERENCIA 2.9).
+
+Os ids NAO sao contiguos: a Roland deixa buracos entre as familias. Por isso
+isto e uma lista de tuplas com o id dentro, e nao uma lista indexada por
+posicao - foi confundir as duas coisas que carregou o tone errado em
+15/08/2026.
+
+    (id, categoria, nome, tipo, maquina)
+"""
+
+'''
 
 
-def extrair():
-    d = fitz.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), PDF))
-    toks = []
-    for p in d:
-        for linha in p.get_text().splitlines():
-            t = linha.strip()
-            if (not t or t in LIXO or t.isdigit()
-                    or "Preset INST Tone List" in t or "ROLAND" in t):
-                continue
-            toks.append(t)
-
-    tones, i = [], 0
-    while i < len(toks):
-        cat = toks[i]
-        # caso normal: cat / nome / tipo em tres tokens
-        if i + 2 < len(toks) and toks[i+2] in TIPOS:
-            tones.append((cat, toks[i+1].rstrip(), toks[i+2]))
-            i += 3
+def ler():
+    caminho = FONTE if os.path.exists(FONTE) else COPIA
+    if not os.path.exists(caminho):
+        print(f"(!) nao achei a tabela nem em {FONTE}\n    nem em {COPIA}")
+        return None, None
+    with open(caminho, encoding="utf-8-sig") as f:
+        linhas = list(csv.DictReader(io.StringIO(f.read())))
+    saida = []
+    for l in linhas:
+        try:
+            num = int(l["NUMBER"])
+        except (KeyError, ValueError):
             continue
-        # nome com o tipo colado na mesma linha ("... OHC ACB")
-        m = re.match(r"(.+)\s+(ACB|FM|SAMPLE)$", toks[i+1] if i + 1 < len(toks)
-                     else "")
-        if m:
-            tones.append((cat, m.group(1).rstrip(), m.group(2)))
-            i += 2
-            continue
-        # nome partido em duas linhas ("727OpHiConga/" + "MHC" + "ACB")
-        if i + 3 < len(toks) and toks[i+3] in TIPOS:
-            tones.append((cat, (toks[i+1] + toks[i+2]).rstrip(), toks[i+3]))
-            i += 4
-            continue
-        raise SystemExit(f"token fora do padrao na posicao {i}: {toks[i:i+4]}")
-    return tones
+        saida.append((num - 1, l["CATEGORY"].strip(), l["NAME"].strip(),
+                      l["TYPE"].strip(), (l.get("DESCRIPTION1") or "").strip()))
+    return sorted(saida), caminho
+
+
+def conferir(tones):
+    porid = {t[0]: t for t in tones}
+    tudo_ok = True
+    for maquina, ids in CONFERENCIA.items():
+        erros = [i for i in ids
+                 if not (porid.get(i) and porid[i][4] == maquina)]
+        ok = len(ids) - len(erros)
+        print(f"  {maquina}: {ok}/{len(ids)} tone ids batem com a maquina")
+        if erros:
+            tudo_ok = False
+            for i in erros:
+                e = porid.get(i)
+                print(f"    (!) id {i} -> {e[2] if e else 'inexistente'} "
+                      f"({e[4] if e else '?'})")
+    return tudo_ok
 
 
 def escrever(tones):
-    caminho = os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                           "tones.py")
-    with open(caminho, "w", encoding="utf-8") as f:
-        f.write('"""\n'
-                "tones.py - Preset INST Tone List da TR-8S (Ver.3.00), "
-                "gerado por gen_tones.py.\n\n"
-                "NAO EDITAR NA MAO - regenerar com python3 gen_tones.py.\n\n"
-                "ID = BASE_ID + posicao na lista. E HIPOTESE (REFERENCIA 2.9):\n"
-                "o PDF nao numera; a base veio de o ARIA reservar 624-1023 aos\n"
-                "tones de usuario. A sessao de hardware confirma ou corrige -\n"
-                "se houver offset, mexer SO em BASE_ID.\n"
-                '"""\n\n'
-                "BASE_ID = 0     # hipotese: primeiro preset = id 0\n\n"
-                "TONES = [\n")
-        for cat, nome, tipo in tones:
-            f.write(f"    ({cat!r}, {nome!r}, {tipo!r}),\n")
-        f.write("]\n\n\n"
-                "def tone_id(pos):\n"
-                "    return BASE_ID + pos\n\n\n"
-                "def nome_do_id(tid):\n"
-                '    """Nome pela hipotese de id, ou None se fora da lista."""\n'
-                "    pos = tid - BASE_ID\n"
-                "    if 0 <= pos < len(TONES):\n"
-                "        cat, nome, tipo = TONES[pos]\n"
-                "        return f\"{nome} ({cat} {tipo})\"\n"
-                "    return None\n\n\n"
-                "def por_categoria():\n"
-                "    grupos = {}\n"
-                "    for pos, (cat, nome, tipo) in enumerate(TONES):\n"
-                "        grupos.setdefault(cat, []).append((pos, nome, tipo))\n"
-                "    return grupos\n")
-    return caminho
+    with open(SAIDA, "w") as f:
+        f.write(CABECALHO)
+        f.write("TONES = [\n")
+        for t in tones:
+            f.write(f"    ({t[0]}, {t[1]!r}, {t[2]!r}, {t[3]!r}, {t[4]!r}),\n")
+        f.write("]\n\n")
+        f.write("POR_ID = {t[0]: t for t in TONES}\n\n\n")
+        f.write("def nome(tone_id):\n")
+        f.write('    """Nome do tone, ou None se o id nao existe."""\n')
+        f.write("    t = POR_ID.get(tone_id)\n")
+        f.write("    return t[2] if t else None\n")
+    print(f"escrito: {SAIDA}  ({len(tones)} tones)")
 
 
 if __name__ == "__main__":
-    tones = extrair()
-    cats = {}
-    for c, _, _ in tones:
-        cats[c] = cats.get(c, 0) + 1
-    caminho = escrever(tones)
-    print(f"{len(tones)} tones em {len(cats)} categorias -> {caminho}")
-    print("categorias:", ", ".join(f"{c}({n})" for c, n in cats.items()))
+    tones, caminho = ler()
+    if not tones:
+        sys.exit(1)
+    print(f"lido de {caminho}: {len(tones)} tones, "
+          f"ids {tones[0][0]}..{tones[-1][0]}")
+    ok = conferir(tones)
+    if not ok:
+        print("(!) a conferencia falhou - NAO vou escrever com a regra errada")
+        sys.exit(1)
+    if "--conferir" in sys.argv:
+        sys.exit(0)
+    os.makedirs(os.path.dirname(COPIA), exist_ok=True)
+    if caminho == FONTE:
+        import shutil
+        shutil.copy2(FONTE, COPIA)
+        print(f"copia guardada em {COPIA}")
+    escrever(tones)

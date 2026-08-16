@@ -197,6 +197,7 @@ export default {
   },
 
   atualizar(e, D) {
+    ultimoEstado = e;
     grade.pintar(e, pendentes);
 
     // variacoes: aberta (borda) e a que soa (ponto verde)
@@ -268,6 +269,10 @@ const IDX = {
 const corIndice = (i) => IDX[i] || "#1a1a1a";
 
 // ── menu do step ─────────────────────────────────────────
+// O ultimo estado, guardado so para o menu: sem ele os chips nasciam todos
+// iguais e nao dava para saber em que velocity/modo/probability o step ja
+// estava - o menu perguntava sem nunca responder.
+let ultimoEstado = null;
 let menuAberto = null;
 function fecharMenu() {
   if (menuAberto) {
@@ -283,10 +288,23 @@ function abrirMenu(l, s, cel, D) {
   const r = cel.getBoundingClientRect();
   const linha = (rot, filhos) => h("div", {}, h("h4", {}, rot), filhos);
 
-  const chips = (itens, aoEscolher) => {
+  // valores que a maquina diz que este step tem agora
+  const E = ultimoEstado || {};
+  const vAtual = ((E.pattern || [])[inst] || [])[s];
+  const subAtual = ((E.subs || [])[inst] || [])[s];
+  const probAtual = ((E.probs || [])[inst] || [])[s];
+
+  const chips = (itens, aoEscolher, atual) => {
     const cx = h("div.chips");
     itens.forEach(([rot, val]) => {
-      const b = h("button.bt.bt-peq", { type: "button" }, rot);
+      const b = h(
+        "button.bt.bt-peq",
+        {
+          type: "button",
+          "aria-pressed": val === atual ? "true" : "false",
+        },
+        rot,
+      );
       b.onclick = () => {
         aoEscolher(val);
         fecharMenu();
@@ -305,6 +323,7 @@ function abrirMenu(l, s, cel, D) {
       chips(
         D.velocidades.map((v) => [String(v), v]),
         (v) => agir({ acao: "step_set", inst, step: s, vel: v }),
+        vAtual,
       ),
     ),
     linha(
@@ -312,6 +331,7 @@ function abrirMenu(l, s, cel, D) {
       chips(
         D.modos_step.map((m, i) => [m.replace("SUB ", ""), i]),
         (i) => agir({ acao: "step_set", inst, step: s, vel: 80, sub: i }),
+        subAtual,
       ),
     ),
     linha(
@@ -319,6 +339,7 @@ function abrirMenu(l, s, cel, D) {
       chips(
         [100, 90, 80, 70, 60, 50, 40, 30, 20, 10].map((p) => [p + "%", p]),
         (p) => agir({ acao: "prob_step", inst, step: s, pct: p }),
+        probAtual,
       ),
     ),
     h(

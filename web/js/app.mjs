@@ -182,6 +182,23 @@ function trocar(id, focar) {
 
 // ── pintura do chrome ────────────────────────────────────
 let ultimoLog = 0;
+
+// "maquina ocupada" e um estado que PISCA: o motor fica indisponivel por
+// fracoes de segundo a cada releitura. Mostrar isso na fita fazia a fita
+// aparecer e sumir varias vezes por segundo, e como a fita esta no fluxo,
+// a pagina inteira subia e descia junto. Agora: (a) so conta como ocupado
+// depois de PACIENCIA ms seguidos, e (b) vira chip, e a linha de chips tem
+// altura reservada no CSS - entra e sai sem mover nada.
+const PACIENCIA = 2000;
+let ocupadoDesde = 0;
+function ocupadoDeVerdade(fresco) {
+  if (fresco !== false) {
+    ocupadoDesde = 0;
+    return false;
+  }
+  if (!ocupadoDesde) ocupadoDesde = performance.now();
+  return performance.now() - ocupadoDesde > PACIENCIA;
+}
 function pintar(e, dados) {
   const seg = (id, v, vazio) => {
     const el = $(id);
@@ -230,6 +247,8 @@ function pintar(e, dados) {
   if (e.alt) quer.push(["alt", "chip", "ALT ligado"]);
   if (e.armado) quer.push(["arm", "chip", "CLEAR armado"]);
   if (e.polirritmia) quer.push(["poli", "chip", "polirritmia"]);
+  if (ocupadoDeVerdade(e.fresco))
+    quer.push(["ocup", "chip", "lendo a máquina…"]);
   const chave = quer.map((q) => q[0] + q[2]).join("|");
   if (chips.dataset.chave !== chave) {
     chips.dataset.chave = chave;
@@ -248,8 +267,6 @@ function pintar(e, dados) {
   else if (e.modo_geral !== "on")
     aviso = ["", "fora do modo ON: a TR-8S não é tocada"];
   else if (!e.carregado) aviso = ["", "lendo a máquina…"];
-  else if (e.fresco === false)
-    aviso = ["", "a máquina está ocupada — mostrando o último quadro"];
   else if ((e.cache_invalido || []).length)
     aviso = [
       "erro",

@@ -34,6 +34,37 @@ import os
 ARQ_FX = os.path.expanduser("~/.lp_tr8s_fx.json")
 
 # ─────────────────────────────────────────────────────────────
+# ONDE CADA COISA MORA (sniff do TR-EDITOR, 15/08/2026)
+#
+# O kit nao e um bloco so: e uma familia de blocos sob 10 KK xx 00, onde
+# KK = numero do kit menos 1 (o kit "003 TR-707" do Luan respondeu em 10 02).
+# O TR-EDITOR le exatamente estes na abertura, com estes tamanhos - e ler o
+# que o editor oficial le e a unica defesa barata contra a armadilha 3.1
+# (RQ1 em endereco invalido mata a porta CTRL).
+#
+#   10 KK 00 00   16 + 105 B   nome do kit (ASCII nos 16 primeiros) e comuns
+#   10 KK 01 00        75 B    REVERB
+#   10 KK 02 00        92 B    DELAY
+#   10 KK 03 00   38 + 49 B    MASTER FX
+#   10 KK 04..08 00            78/70/115/12/13 B - LFO, OUTPUT, CTRL, MUTE,
+#                              EXT IN (quais sao quais: nao verificado)
+#   10 KK 10..1A 00  53 + 48 B os 11 instrumentos, BD..RC, layout identico
+#   10 KK 20..2A 00   7 + 50 B tone + INST FX dos 11 instrumentos
+#
+# offset_base: o segundo byte do endereco de bloco. 'por_inst' diz que o
+# bloco tem uma copia por instrumento (soma o indice 0..10 ao offset_base).
+BLOCOS = {
+    "kit":    {"base": 0x00, "por_inst": False, "tam": 105},
+    "reverb": {"base": 0x01, "por_inst": False, "tam": 75},
+    "delay":  {"base": 0x02, "por_inst": False, "tam": 92},
+    "mfx":    {"base": 0x03, "por_inst": False, "tam": 87},
+    "lfo":    {"base": 0x05, "por_inst": False, "tam": 70},
+    "ctrl":   {"base": 0x06, "por_inst": False, "tam": 115},
+    "inst":   {"base": 0x10, "por_inst": True,  "tam": 101},
+    "ifx":    {"base": 0x20, "por_inst": True,  "tam": 57},
+}
+
+# ─────────────────────────────────────────────────────────────
 # Vocabulario compacto para descrever parametro.
 #   p(rot, max, bytes)          -> fader
 #   p(rot, None, 1, opcoes=[])  -> lista
@@ -56,15 +87,17 @@ FREQ_CUT_BAIXA = ["FLAT", "20Hz", "25Hz", "31.5Hz", "40Hz", "50Hz", "63Hz",
 RATIO = ["1:1.00", "1:1.12", "1:1.25", "1:1.40", "1:1.60", "1:1.80", "1:2.00",
          "1:2.50", "1:3.20", "1:4.00", "1:5.60", "1:8.00", "1:16.0", "1:INF"]
 KNEE = ["HARD"] + [f"SOFT{i}" for i in range(1, 10)]
+# type e clipper do LPF/HPF vieram com DOIS bytes na captura, apesar de terem
+# 3 e 2 opcoes - no MASTER FX o espacamento de 2 parece valer para tudo
 TIPO_FILTRO = ["-24dB", "-18dB", "-12dB"]
 SYNC_RATE = ["64.00", "48.00", "32.00", "24.00", "16.00", "12.00", "8.00",
              "6.00", "4.00", "3.00", "2.00", "1.50", "1.00", "0.75", "0.50",
              "0.25"]
 
 # ── blocos que se repetem entre MASTER FX e INST FX ──
-_FILTRO = [p("depth"), p("resonance"), p("type", None, 1, TIPO_FILTRO),
+_FILTRO = [p("depth"), p("resonance"), p("type", 2, 2, TIPO_FILTRO),
            p("gain", 255, 2, None, True, DB),
-           p("clipper", None, 1, ["OFF", "ON"])]
+           p("clipper", 1, 2, ["OFF", "ON"])]
 _BOOST = [p("boost"), p("frequency"), p("gain", 255, 2, None, True, DB)]
 _ISOLATOR = [p("balance"), p("low", 255, 2, None, False, DB),
              p("mid", 255, 2, None, False, DB),
@@ -82,8 +115,12 @@ _DRIVE = [p("balance"), p("drive"), p("level"), p("hpfreq"), p("preeqfreq"),
           p("posteqh", 255, 2, None, False, DB)]
 _DIST = [p("balance"), p("drive"), p("tone"), p("level")]
 _CRUSHER = [p("balance"), p("samplerate"), p("filter")]
-_MOD = [p("balance"), p("temposync", None, 1, ["OFF", "ON"]), p("rate"),
-        p("depth"), p("resonance"), p("manual")]
+# A ORDEM AQUI VIROU DADO, nao so rotulo: no MASTER FX o offset de cada
+# parametro sai da POSICAO dele na lista (0x27 + 2*i). Esta e a ordem do
+# PAINEL do TR-EDITOR, que foi a que se confirmou no LPF/HPF - e nela o
+# temposync vem DEPOIS, nao em segundo como o manual lista.
+_MOD = [p("balance"), p("rate"), p("depth"), p("resonance"), p("manual")]
+_TEMPOSYNC = p("temposync", None, 1, ["OFF", "ON"])
 
 # ─────────────────────────────────────────────────────────────
 # Os tipos de cada familia (Reference p. 24-37)
@@ -113,9 +150,10 @@ _MFX_POR_TIPO = {
     "COMPRESSOR": _COMPRESSOR, "DRIVE": _DRIVE,
     "OVERDRIVE": _DIST, "DISTORTION": _DIST, "FUZZ": _DIST,
     "CRUSHER": _CRUSHER,
-    "PHASER": _MOD + [p("type", None, 1, ["4ST", "8ST", "12ST", "BI-PHASE"])],
+    "PHASER": _MOD + [p("type", None, 1, ["4ST", "8ST", "12ST", "BI-PHASE"]),
+                      _TEMPOSYNC],
     "FLANGER": _MOD + [p("locutf", None, 1, FREQ_CUT_BAIXA),
-                       p("mode", None, 1, ["MONO", "STEREO"])],
+                       p("mode", None, 1, ["MONO", "STEREO"]), _TEMPOSYNC],
     "SBF": [p("balance"), p("bandintrvl"), p("bandwidth"),
             p("type", None, 1, [f"SBF{i}" for i in range(1, 7)]),
             p("gain", 255, 2, None, False, DB)],
@@ -166,18 +204,20 @@ _IFX_POR_TIPO = {
 }
 
 _DELAY_POR_TIPO = {
+    # h/l damp sao 1 byte ate 81 - medido em 15/08/2026, contra a deducao de
+    # 2 bytes que o manual sugeria
     "DLY": [p("highcut", None, 1, FREQ_CUT_ALTA),
-            p("h damp", 255, 2, None, False, DB),
+            p("h damp", 81, 1, None, False, DB),
             p("h dampf", None, 1, FREQ_CUT_ALTA[:-1]),
-            p("l damp", 255, 2, None, False, DB),
+            p("l damp", 81, 1, None, False, DB),
             p("l dampf", None, 1, ["80Hz", "100Hz", "125Hz", "160Hz", "200Hz",
                                    "250Hz", "315Hz", "400Hz", "500Hz",
                                    "630Hz", "800Hz"])],
     "PAN": [p("tap time", 100, 1, None, False, "%")],
     "TAPE ECHO": [p("mode", None, 1, ["S", "M", "L", "S+M", "S+L", "M+L",
                                       "S+M+L"]),
-                  p("bass", 255, 2, None, True, DB),
-                  p("treble", 255, 2, None, True, DB),
+                  p("bass", 30, 1, None, True, DB),   # medido: 1 byte, 0-30
+                  p("treble", 30, 1, None, True, DB),  # medido: 1 byte, 0-30
                   p("pan s", 255, 2, None, True), p("pan m", 255, 2, None, True),
                   p("pan l", 255, 2, None, True), p("tape dist", 8, 1),
                   p("wf rate"), p("wf depth")],
@@ -191,19 +231,30 @@ _DELAY_POR_TIPO = {
 # ─────────────────────────────────────────────────────────────
 PAINEIS = [
     {"id": "inst", "rotulo": "INSTRUMENT", "escopo": "inst", "familia": "INST",
+     "bloco": "inst",
      "gesto": "SHIFT + [INST]", "seletor": None, "tipos": [], "comuns": [
-        p("tune", 255, 2, None, True), p("decay"), p("level"),
+        # attack: o TR-EDITOR mostra numa coluna propria da aba INST; e
+        # parametro do tone, entao nem todo tone o expoe no painel fisico
+        p("tune", 255, 2, None, True), p("decay"), p("attack"), p("level"),
         p("gain", 255, 2, None, True, DB), p("pan", 255, 2, None, True),
         p("reverb send"), p("delay send"),
+        # "Attack" so aparece no TR-EDITOR; o manual lista sete destinos
         p("lfo destino", None, 1, ["Tune", "Decay", "Level", "Pan",
-                                   "ReverbSend", "DelaySend", "InstFX"]),
+                                   "ReverbSend", "DelaySend", "InstFX",
+                                   "Attack"]),
         p("lfo depth", 255, 2, None, True)]},
 
+    # 'amount' e o knob rotulado INST FX no TR-EDITOR (fica na coluna do
+    # instrumento, mas escreve no bloco do INST FX - foi assim que se
+    # descobriu que nao era o ATTACK, 15/08/2026).
     {"id": "ifx", "rotulo": "INST FX", "escopo": "inst", "familia": "IFX",
+     "bloco": "ifx",
      "gesto": "SHIFT + [INST] -> InstFX", "seletor": "ifx tipo",
-     "tipos": TIPOS_IFX, "comuns": [], "por_tipo": _IFX_POR_TIPO},
+     "tipos": TIPOS_IFX, "comuns": [p("amount")],
+     "por_tipo": _IFX_POR_TIPO},
 
     {"id": "reverb", "rotulo": "REVERB", "escopo": "kit", "familia": "REVERB",
+     "bloco": "reverb",
      "gesto": "SHIFT + [KIT] -> REVERB", "seletor": "reverb tipo",
      "tipos": TIPOS_REVERB, "comuns": [
         p("level"), p("time"), p("predelay", 100, 1, None, False, "ms"),
@@ -211,24 +262,29 @@ PAINEIS = [
         p("highcut", None, 1, FREQ_CUT_ALTA), p("density", 10, 1)]},
 
     {"id": "delay", "rotulo": "DELAY", "escopo": "kit", "familia": "DELAY",
+     "bloco": "delay",
      "gesto": "SHIFT + [KIT] -> DELAY", "seletor": "delay tipo",
      "tipos": TIPOS_DELAY, "comuns": [
         p("temposync", None, 1, ["OFF", "ON"]), p("level"), p("time"),
         p("feedback"), p("reverb send")], "por_tipo": _DELAY_POR_TIPO},
 
     {"id": "mfx", "rotulo": "MASTER FX", "escopo": "kit", "familia": "MFX",
+     "bloco": "mfx",
      "gesto": "SHIFT + [KIT] -> MASTER FX", "seletor": "mfx tipo",
      "tipos": TIPOS_MFX, "comuns": [p("sw", None, 1, ["OFF", "ON"])],
      "por_tipo": _MFX_POR_TIPO},
 
+    # bloco 05, achado em 15/08/2026 pelo gesto do RATE (10 02 05 01)
     {"id": "lfo", "rotulo": "LFO", "escopo": "kit", "familia": "LFO",
+     "bloco": "lfo",
      "gesto": "SHIFT + [KIT] -> LFO", "seletor": None, "tipos": [], "comuns": [
         p("waveform", None, 1, ["SIN", "TRI", "SAW", "SQR", "S&H"]),
         p("temposync", None, 1, ["OFF", "ON"]), p("rate")]},
 
     {"id": "kit", "rotulo": "KIT", "escopo": "kit", "familia": "KIT",
+     "bloco": "kit",
      "gesto": "SHIFT + [KIT]", "seletor": None, "tipos": [], "comuns": [
-        p("level", 255, 2, None, False, DB),
+        p("level", 127, 1, None, False, DB),
         p("ctrl select", None, 1, ["OFF", "Pan", "ReverbSend", "DelaySend",
                                    "LFO Depth", "InstFX", "User"])]},
 ]
@@ -247,6 +303,7 @@ def _entrada(painel, param, tipo=None):
     e["nome"] = _nome(painel, param, tipo)
     e["grupo"] = painel["rotulo"]
     e["painel"] = painel["id"]
+    e["bloco"] = painel.get("bloco")
     e["escopo"] = painel["escopo"]
     e["tipo_fx"] = tipo
     e["min"] = 0
@@ -271,9 +328,239 @@ def _montar_catalogo():
 CATALOGO = _montar_catalogo()
 POR_NOME = {e["nome"]: e for e in CATALOGO}
 
-# Entradas provadas por sniff do TR-EDITOR (sessao M2), com data e captura de
-# origem no comentario. Vazio ate a primeira sessao.
-PARAMS_FIXOS = {}
+# ─────────────────────────────────────────────────────────────
+# PROVADO EM HARDWARE - sniff do TR-EDITOR, 15/08/2026 (REFERENCIA 7.2, M2).
+#
+# Cada linha saiu de UM gesto isolado do Luan no TR-EDITOR, com o MIDI Monitor
+# em spy: mexer o controle de ponta a ponta e ver que endereco o editor
+# escreve. Captura em capturas/*.mmon; reproduzivel com
+#     python3 tr8s_sysex.py fx capturas/<arquivo>.mmon
+#
+# A faixa "medida" e o que o gesto de fato varreu. Onde ela bate com o manual
+# (predelay 0-100, density 0-10) as duas fontes se confirmam; onde nao bate
+# (gain parou em 161) vale o medido, e esta anotado.
+#
+# NAO RENOMEAR as chaves: elas sao o que fica gravado no ~/.lp_tr8s_fx.json.
+PARAMS_FIXOS = {
+    # --- REVERB: bloco 10 KK 01 00, painel inteiro fechado -----------
+    # A ordem interna NAO e a do painel: TIME vem antes de LEVEL.
+    "reverb tipo":     {"bloco": "reverb", "tipo": "kit",  "off": 0x00, "bytes": 1},
+    "reverb time":     {"bloco": "reverb", "tipo": "kit",  "off": 0x01, "bytes": 2},
+    "reverb level":    {"bloco": "reverb", "tipo": "kit",  "off": 0x03, "bytes": 2},
+    "reverb predelay": {"bloco": "reverb", "tipo": "kit",  "off": 0x05, "bytes": 1},
+    "reverb lowcut":   {"bloco": "reverb", "tipo": "kit",  "off": 0x06, "bytes": 1},
+    "reverb highcut":  {"bloco": "reverb", "tipo": "kit",  "off": 0x07, "bytes": 1},
+    "reverb density":  {"bloco": "reverb", "tipo": "kit",  "off": 0x08, "bytes": 1},
+
+    # --- DELAY: bloco 10 KK 02 00 -----------------------------------
+    # Tres faixas medidas fecharam com listas do manual, o que confirma as
+    # duas fontes de uma vez: highcut 0-14 = FREQ_CUT_ALTA (15 itens),
+    # h dampf 0-13 = FREQ_CUT_ALTA sem o FLAT (14), l dampf 0-10 (11).
+    # ao contrario do INST FX, aqui o codigo SEGUE a ordem do menu
+    "delay tipo":        {"bloco": "delay", "tipo": "kit", "off": 0x00,
+                          "bytes": 1, "opcoes": {
+                              "0": "DLY", "1": "PAN", "2": "TAPE ECHO",
+                              "3": "PITCH SHFT"}},
+    "delay temposync":   {"bloco": "delay", "tipo": "kit", "off": 0x01,
+                          "bytes": 1, "opcoes": {"0": "OFF", "1": "ON"}},
+    "delay level":       {"bloco": "delay", "tipo": "kit", "off": 0x02, "bytes": 2},
+    "delay time":        {"bloco": "delay", "tipo": "kit", "off": 0x04, "bytes": 2},
+    "delay feedback":    {"bloco": "delay", "tipo": "kit", "off": 0x06, "bytes": 2},
+    "delay dly highcut": {"bloco": "delay", "tipo": "kit", "off": 0x08, "bytes": 1},
+    # h/l damp: o catalogo os deduzia com 2 bytes em dB; o gesto mostrou UM
+    # byte indo ate 81. Vale o medido.
+    "delay dly h damp":  {"bloco": "delay", "tipo": "kit", "off": 0x09, "bytes": 1},
+    "delay dly h dampf": {"bloco": "delay", "tipo": "kit", "off": 0x0A, "bytes": 1},
+    "delay dly l damp":  {"bloco": "delay", "tipo": "kit", "off": 0x0B, "bytes": 1},
+    "delay dly l dampf": {"bloco": "delay", "tipo": "kit", "off": 0x0C, "bytes": 1},
+    # o quanto do delay volta para o reverb (ultimo knob da fileira DELAY
+    # SEND, depois do EXT IN). Longe dos outros: offset 0x1C.
+    "delay reverb send": {"bloco": "delay", "tipo": "kit", "off": 0x1C, "bytes": 2},
+
+    # Cada TIPO de delay tem area propria - aqui NAO vale a regra de regiao
+    # compartilhada do MASTER FX/INST FX, e os tamanhos variam (bass e 1
+    # byte, coarse e 2). Por isso os do TAPE ECHO ficam por medir.
+    "delay pan tap time":    {"bloco": "delay", "tipo": "kit", "off": 0x0D,
+                              "bytes": 1},
+    # TAPE ECHO: contiguo de 0x0E a 0x1B, misturando 1 e 2 bytes
+    "delay tapeecho mode":   {"bloco": "delay", "tipo": "kit", "off": 0x0E,
+                              "bytes": 1, "opcoes": {
+                                  "0": "S", "1": "M", "2": "L", "3": "S+M",
+                                  "4": "S+L", "5": "M+L", "6": "S+M+L"}},
+    "delay tapeecho bass":   {"bloco": "delay", "tipo": "kit", "off": 0x0F,
+                              "bytes": 1},
+    "delay tapeecho treble": {"bloco": "delay", "tipo": "kit", "off": 0x10,
+                              "bytes": 1},
+    "delay tapeecho pan s":  {"bloco": "delay", "tipo": "kit", "off": 0x11,
+                              "bytes": 2},
+    "delay tapeecho pan m":  {"bloco": "delay", "tipo": "kit", "off": 0x13,
+                              "bytes": 2},
+    "delay tapeecho pan l":  {"bloco": "delay", "tipo": "kit", "off": 0x15,
+                              "bytes": 2},
+    "delay tapeecho tape dist": {"bloco": "delay", "tipo": "kit", "off": 0x17,
+                                 "bytes": 1},
+    "delay tapeecho wf rate":   {"bloco": "delay", "tipo": "kit", "off": 0x18,
+                                 "bytes": 2},
+    "delay tapeecho wf depth":  {"bloco": "delay", "tipo": "kit", "off": 0x1A,
+                                 "bytes": 2},
+    "delay pitchshft coarse": {"bloco": "delay", "tipo": "kit", "off": 0x1E,
+                               "bytes": 2},
+    "delay pitchshft fine":  {"bloco": "delay", "tipo": "kit", "off": 0x20,
+                              "bytes": 2},
+
+    # --- MASTER FX: bloco 10 KK 03 00 -------------------------------
+    # Codigos embaralhados de novo (a 1a opcao do menu, HPF, e o codigo 11).
+    # Confirmado pelo dump do boot: estava 0x0C e o editor mostrava LPF/HPF.
+    "mfx tipo":  {"bloco": "mfx", "tipo": "kit", "off": 0x00, "bytes": 1,
+                  "opcoes": {
+                      "0": "COMPRESSOR", "1": "DRIVE", "2": "OVERDRIVE",
+                      "3": "DISTORTION", "4": "FUZZ", "5": "CRUSHER",
+                      "6": "PHASER", "7": "FLANGER", "8": "TRANSIENT",
+                      "9": "TRANSIENT2", "10": "LPF", "11": "HPF",
+                      "12": "LPF/HPF", "13": "L BOOST", "14": "H BOOST",
+                      "15": "L/H BOOST", "16": "ISOLATOR", "17": "SBF",
+                      "18": "NOISE", "19": "FATTENER", "20": "VINYL SIM"}},
+    "mfx sw":    {"bloco": "mfx", "tipo": "kit", "off": 0x01, "bytes": 1,
+                  "opcoes": {"0": "OFF", "1": "ON"}},
+
+    # Os parametros DO TIPO ATIVO comecam em 0x27 e andam de 2 em 2, na ordem
+    # em que o TR-EDITOR os desenha. Medido para LPF/HPF; se a regra valer
+    # para os outros 20 tipos, os ~150 restantes caem sem gesto - mas isso
+    # ainda e HIPOTESE, entao so o LPF/HPF esta aqui.
+    # Note que type e clipper sao 2 bytes apesar de terem 3 e 2 opcoes.
+    "mfx lpfhpf depth":     {"bloco": "mfx", "tipo": "kit", "off": 0x27, "bytes": 2},
+    "mfx lpfhpf resonance": {"bloco": "mfx", "tipo": "kit", "off": 0x29, "bytes": 2},
+    "mfx lpfhpf type":      {"bloco": "mfx", "tipo": "kit", "off": 0x2B, "bytes": 2,
+                             "opcoes": {"0": "-24dB", "1": "-18dB", "2": "-12dB"}},
+    "mfx lpfhpf gain":      {"bloco": "mfx", "tipo": "kit", "off": 0x2D, "bytes": 2},
+    "mfx lpfhpf clipper":   {"bloco": "mfx", "tipo": "kit", "off": 0x2F, "bytes": 2,
+                             "opcoes": {"0": "OFF", "1": "ON"}},
+    # os dois gestos que provaram que a regiao e compartilhada
+    "mfx compressor balance":  {"bloco": "mfx", "tipo": "kit", "off": 0x27,
+                                "bytes": 2},
+    "mfx vinylsim compressor": {"bloco": "mfx", "tipo": "kit", "off": 0x27,
+                                "bytes": 2},
+
+    # --- LFO do kit: bloco 10 KK 05 00 ------------------------------
+    "lfo waveform":  {"bloco": "lfo", "tipo": "kit", "off": 0x00, "bytes": 1,
+                      "opcoes": {"0": "SIN", "1": "TRI", "2": "SAW",
+                                 "3": "SQR", "4": "S&H"}},
+    "lfo rate":      {"bloco": "lfo", "tipo": "kit", "off": 0x01, "bytes": 2},
+    "lfo temposync": {"bloco": "lfo", "tipo": "kit", "off": 0x03, "bytes": 1,
+                      "opcoes": {"0": "OFF", "1": "ON"}},
+
+    # --- KIT ---------------------------------------------------------
+    # level e UM byte ate 127, nao dois como o catalogo deduzia
+    "kit level":       {"bloco": "kit",  "tipo": "kit", "off": 0x10, "bytes": 1},
+    # o CTRL mora em bloco proprio (06), nao no no do kit
+    "kit ctrl select": {"bloco": "ctrl", "tipo": "kit", "off": 0x00, "bytes": 1,
+                        "opcoes": {"0": "OFF", "1": "Pan", "2": "ReverbSend",
+                                   "3": "DelaySend", "4": "LFO Depth",
+                                   "5": "InstFX", "6": "User"}},
+
+    # --- INSTRUMENTO: bloco 10 KK 1I 00, um por instrumento ----------
+    # Os 11 blocos (BD..RC) tem layout identico: mapear o BD mapeou todos.
+    "inst tune":        {"bloco": "inst", "tipo": "inst", "off": 0x04, "bytes": 2},
+    "inst decay":       {"bloco": "inst", "tipo": "inst", "off": 0x06, "bytes": 2},
+    "inst level":       {"bloco": "inst", "tipo": "inst", "off": 0x08, "bytes": 2},
+    "inst gain":        {"bloco": "inst", "tipo": "inst", "off": 0x0A, "bytes": 2},
+    "inst pan":         {"bloco": "inst", "tipo": "inst", "off": 0x0C, "bytes": 2},
+    "inst reverb send": {"bloco": "inst", "tipo": "inst", "off": 0x0E, "bytes": 2},
+    "inst delay send":  {"bloco": "inst", "tipo": "inst", "off": 0x10, "bytes": 2},
+    "inst lfo depth":   {"bloco": "inst", "tipo": "inst", "off": 0x14, "bytes": 2},
+    # destinos 1..8 na ordem do menu; o 0 nao aparece no menu do editor
+    # (provavelmente OFF, nao verificado). "Attack" nao estava no manual.
+    "inst lfo destino": {"bloco": "inst", "tipo": "inst", "off": 0x13,
+                         "bytes": 1, "opcoes": {
+                             "1": "Tune", "2": "Decay", "3": "Level",
+                             "4": "Pan", "5": "ReverbSend", "6": "DelaySend",
+                             "7": "InstFX", "8": "Attack"}},
+    # 0x35 = 53: o primeiro byte da SEGUNDA metade do bloco. O instrumento
+    # tem 101 bytes contiguos e o TR-EDITOR le em dois pedacos (53 + 48).
+    "inst attack":      {"bloco": "inst", "tipo": "inst", "off": 0x35, "bytes": 2},
+
+    # --- INST FX -----------------------------------------------------
+    # o knob rotulado "INST FX" no editor; mora no bloco do INST FX, nao no
+    # do instrumento. Nao confundir com o ATTACK, que fica ao lado na tela.
+    "ifx amount":       {"bloco": "ifx",  "tipo": "inst", "off": 0x09, "bytes": 2},
+    # O CODIGO NAO SEGUE A ORDEM DO MENU. A 1a opcao do menu (THRU) e o
+    # codigo 12; a 10a (COMPRESSOR) e o 0. Assumir "menu = codigo" trocaria o
+    # efeito errado em 13 dos 17 casos. Conferido de dois lados: no dump do
+    # boot o BD estava em 03 e o TR-EDITOR mostrava COMP+DRV.
+    "ifx tipo":         {"bloco": "ifx",  "tipo": "inst", "off": 0x00,
+                         "bytes": 1, "opcoes": {
+                             "0": "COMPRESSOR", "1": "DRIVE", "2": "CRUSHER",
+                             "3": "COMP+DRV", "4": "TRANSIENT", "5": "LPF",
+                             "6": "HPF", "7": "LPF/HPF", "8": "L BOOST",
+                             "9": "H BOOST", "10": "L/H BOOST",
+                             "11": "ISOLATOR", "12": "THRU",
+                             "13": "SATURATOR", "14": "FREQ SHIFT",
+                             "15": "RING MOD", "16": "SPREAD"}},
+}
+
+# COLOR do instrumento: mora no bloco do KIT (10 KK 00 00), offset 0x42 para
+# o BD - nao no bloco do instrumento, como seria de esperar. Fica FORA do
+# mapa ate um gesto provar se os outros dez seguem em 0x43, 0x44... Registrar
+# so o BD daria uma chave que mente sobre os outros dez.
+# Pendencia: mexer a COLOR do SD e ver o offset.
+
+# ─────────────────────────────────────────────────────────────
+# DERIVADOS DE UMA REGRA MEDIDA (nao de um gesto proprio)
+#
+# Os parametros do tipo ativo do MASTER FX ficam numa regiao unica que TODOS
+# os 21 tipos reusam, a partir de 0x27, de 2 em 2, na ordem em que o
+# TR-EDITOR desenha os controles. Medido em 15/08/2026:
+#     LPF/HPF    depth->0x27  resonance->0x29  type->0x2B  gain->0x2D
+#                clipper->0x2F
+#     COMPRESSOR balance   -> 0x27
+#     VINYL SIM  compressor-> 0x27
+# COMPRESSOR e VINYL SIM foram escolhidos por serem os extremos da lista de
+# codigos (0 e 20) e terem contagens diferentes de parametros: se a regra
+# sobrevive aos dois, sobrevive aos 21.
+#
+# O que NAO esta provado e a ordem dentro de cada tipo - ela vem das imagens
+# do painel. Por isso estas entradas ficam marcadas com "derivado": um gesto
+# em qualquer tipo confirma ou derruba o bloco inteiro dele.
+# O INST FX tem a MESMA arquitetura, com base 0x09 e um bloco por
+# instrumento. Medido no BD trocando entre COMP+DRV (codigo 3), LPF (5) e
+# SPREAD (16): o primeiro parametro dos tres caiu em 0x09.
+#
+# 0x09 e tambem onde escreve o knob rotulado "INST FX" na coluna do
+# instrumento - ou seja, aquele knob E o primeiro parametro do tipo ativo,
+# mostrado num segundo lugar. Por isso "ifx amount" e o primeiro do tipo
+# convivem no mesmo offset: sao o mesmo controle, como no proprio TR-EDITOR.
+BASE_TIPO = {"mfx": (0x27, "kit"), "ifx": (0x09, "inst")}
+
+
+def _derivados_por_tipo():
+    """Aplica a regra 'base + 2*posicao' aos tipos de MASTER FX e INST FX."""
+    out = {}
+    for pid, (base, escopo) in BASE_TIPO.items():
+        pn = next(x for x in PAINEIS if x["id"] == pid)
+        for tipo, params in (pn.get("por_tipo") or {}).items():
+            for i, param in enumerate(params):
+                nome = _nome(pn, param, tipo)
+                if nome in PARAMS_FIXOS:        # medido vence derivado
+                    continue
+                out[nome] = {"bloco": pid, "tipo": escopo,
+                             "off": base + 2 * i, "bytes": 2,
+                             "derivado": True}
+    return out
+
+
+PARAMS_FIXOS.update(_derivados_por_tipo())
+
+# Faixa que cada gesto varreu de fato (para conferencia futura; o catalogo e
+# quem manda no 'max' da tela). O gain e o unico que discordou do esperado.
+FAIXAS_MEDIDAS = {
+    "reverb time": (0, 255), "reverb level": (0, 255),
+    "reverb predelay": (0, 100), "reverb density": (0, 10),
+    "inst reverb send": (0, 255), "inst delay send": (0, 255),
+    "inst level": (0, 255), "inst tune": (0, 255), "inst decay": (0, 255),
+    "inst pan": (0, 255), "inst lfo depth": (0, 255),
+    "inst gain": (1, 161),   # parou em 161, nao em 255 - medido, nao deduzido
+    "ifx amount": (0, 255),
+}
 
 
 def carregar():
@@ -286,6 +573,11 @@ def carregar():
         pass
     for nome, ent in mapa.items():
         cat = POR_NOME.get(nome, {})
+        # 'bloco' diz em QUAL bloco do kit o offset vive (BLOCOS). Entradas
+        # capturadas antes de 15/08/2026 nao tem o campo; ai vale o do
+        # catalogo, e so por ultimo o palpite pelo escopo.
+        ent.setdefault("bloco", cat.get("bloco")
+                       or ("inst" if ent.get("tipo") == "inst" else "kit"))
         ent.setdefault("bytes", cat.get("bytes", 1))
         ent.setdefault("forma", cat.get("forma", "fader"))
         ent.setdefault("grupo", cat.get("grupo", "OUTROS"))
@@ -313,14 +605,16 @@ def _salvar(capturados):
         json.dump(capturados, f, indent=1, ensure_ascii=False)
 
 
-def registrar(nome, tipo, off, nbytes=None):
+def registrar(nome, tipo, off, nbytes=None, bloco=None):
     """Grava um parametro capturado. 'tipo' aqui e onde ele mora
-    (kit|inst), nao o tipo de efeito."""
+    (kit|inst), nao o tipo de efeito; 'bloco' e qual dos blocos do kit
+    (BLOCOS) - a captura guiada descobre isso sozinha."""
     assert tipo in ("kit", "inst")
     cat = POR_NOME.get(nome, {})
     capturados = _ler_capturados()
     antigo = capturados.get(nome, {})
     entrada = {"tipo": tipo, "off": int(off),
+               "bloco": bloco or cat.get("bloco") or tipo,
                "bytes": int(nbytes or cat.get("bytes", 1)),
                "forma": cat.get("forma", "fader"),
                "grupo": cat.get("grupo", "OUTROS"),

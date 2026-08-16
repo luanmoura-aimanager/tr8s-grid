@@ -93,6 +93,59 @@ export function gradeSteps({
   const playhead = h("div.playhead", { hidden: true });
   raiz.append(playhead);
 
+  // ── playhead que anda sozinho entre dois quadros ──────────
+  // O Launchpad e pintado no instante em que o clock chega; a tela so
+  // saberia no proximo /estado, e a 120 bpm um step dura 125 ms contra 250 ms
+  // de polling - dai o "verde um passo atrasado" que o Luan viu, com o pad
+  // certo e a tela errada.
+  //
+  // Em vez de pedir estado mais vezes (o motor gera o estado sob lock, e
+  // apertar isso competiria com o tick), a tela MEDE quanto dura um step: a
+  // cada passo novo, o intervalo desde o anterior entra numa media que
+  // amortece jitter de rede. Entre um quadro e outro ela avanca sozinha.
+  //
+  // Ela nunca avanca mais de um step alem do ultimo confirmado: se a maquina
+  // parar ou virar a volta, o pior caso e ficar um step adiantada por uma
+  // fracao de segundo - e o quadro seguinte corrige. Adivinhar mais do que
+  // isso daria um playhead fluido e mentiroso.
+  let passoReal = -1,
+    tPasso = 0,
+    durStep = 0,
+    timer = 0;
+
+  function pararRelogio() {
+    if (timer) {
+      clearTimeout(timer);
+      timer = 0;
+    }
+    passoReal = -1;
+  }
+
+  function marcarPasso(p) {
+    if (p !== passoReal) {
+      const agora = performance.now();
+      if (passoReal >= 0 && tPasso) {
+        const dt = (agora - tPasso) / Math.max(1, (p - passoReal + 16) % 16);
+        // 30..2000 ms cobre de 500 bpm a 8 bpm; fora disso e engasgo de rede
+        if (dt > 30 && dt < 2000)
+          durStep = durStep ? durStep * 0.7 + dt * 0.3 : dt;
+      }
+      passoReal = p;
+      tPasso = agora;
+      prop(playhead, "--p", p);
+    }
+    if (timer) clearTimeout(timer);
+    if (!durStep) return;
+    const falta = durStep - (performance.now() - tPasso);
+    timer = setTimeout(
+      () => {
+        timer = 0;
+        if (passoReal >= 0) prop(playhead, "--p", (passoReal + 1) % 16);
+      },
+      Math.max(10, falta),
+    );
+  }
+
   // ── um unico listener para as 208 celulas ──
   let pintandoArrasto = null; // {ligar:bool} decidido pela primeira celula
   raiz.addEventListener("pointerdown", (e) => {
@@ -198,7 +251,8 @@ export function gradeSteps({
       // playhead: so quando a maquina toca E o grid esta na variacao que soa
       const mostra = e.tocando && e.playhead_visivel && e.passo >= 0;
       playhead.hidden = !mostra;
-      if (mostra) prop(playhead, "--p", e.passo);
+      if (mostra) marcarPasso(e.passo);
+      else pararRelogio();
     },
     marcarLinha(l) {
       rotulos.forEach((r, k) => attr(r, "data-sel", k === l ? "" : null));

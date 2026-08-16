@@ -111,8 +111,19 @@ export default {
           c.knob.acender();
         }
       } else {
-        const opts = (ent && ent.opcoes) || {};
-        const chave = Object.keys(opts).sort().join(",");
+        // Opcoes ANOTADAS (codigo lido da maquina + rotulo do visor) valem
+        // mais que as do manual, porque codigo nem sempre segue a ordem do
+        // menu: o INST FX tem a 1a opcao no codigo 12 e a 10a no codigo 0.
+        // Sem anotacao, usa a lista do manual como PRESUMIDA e diz isso com
+        // um "?" - melhor um seletor util e honesto que um vazio.
+        const anot = (ent && ent.opcoes) || {};
+        const presumido =
+          !Object.keys(anot).length && ent && (ent.sugestoes || []).length;
+        const opts = presumido
+          ? Object.fromEntries(ent.sugestoes.map((r, i) => [i, r + " ?"]))
+          : anot;
+        const chave =
+          (presumido ? "p:" : "a:") + Object.keys(opts).sort().join(",");
         if (c.chaveOpcoes !== chave) {
           c.chaveOpcoes = chave;
           c.sel.replaceChildren();
@@ -124,6 +135,9 @@ export default {
           Object.entries(opts)
             .sort((a, b) => a[0] - b[0])
             .forEach(([cod, rot]) => c.sel.append(new Option(rot, cod)));
+          c.sel.title = presumido
+            ? "ordem presumida do manual — confira no visor da TR-8S"
+            : "";
         }
         c.sel.disabled = !ent;
         if (v != null && c.sel.value !== String(v)) c.sel.value = String(v);

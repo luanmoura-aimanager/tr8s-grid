@@ -138,9 +138,24 @@ def addr_bloco(inst, var=None):   return (0x20, var or VARIACAO, inst, 0x08)
 def addr_step(inst, s, var=None): return addr_soma(addr_bloco(inst, var),
                                                    s * BYTES_P_STEP)
 def addr_accent(var=None):        return (0x20, var or VARIACAO, 0x00, 0x00)
-def addr_kit_nome():              return (0x10, 0x00, 0x00, 0x00)
-def addr_kit_tone(inst):          return (0x10, 0x00, 0x10 + inst, 0x00)
-def addr_kit_param(inst):         return (0x10, 0x00, 0x20 + inst, 0x00)
+# NIVEL DE KIT - estrutura levantada no sniff do TR-EDITOR (15/08/2026).
+#
+# O segundo byte e o NUMERO DO KIT, nao um zero fixo: o kit "003 TR-707" do
+# Luan respondeu em 10 02 xx 00. Ate 15/08 estas funcoes fixavam 0x00, ou
+# seja, liam sempre o kit 001 - plausivel o bastante para ninguem notar.
+#
+# O terceiro byte escolhe o bloco (ver efeitos.BLOCOS):
+#   00 nome/comuns   01 REVERB   02 DELAY   03 MASTER FX
+#   10+i instrumento i (BD..RC)  20+i tone e INST FX do instrumento i
+def addr_kit_nome(kit=0):         return (0x10, kit & 0x7F, 0x00, 0x00)
+def addr_kit_tone(inst, kit=0):   return (0x10, kit & 0x7F, 0x10 + inst, 0x00)
+def addr_kit_param(inst, kit=0):  return (0x10, kit & 0x7F, 0x20 + inst, 0x00)
+
+def addr_fx(bloco, kit=0, inst=None):
+    """Endereco base de um bloco de efeito do kit (efeitos.BLOCOS)."""
+    b = efeitos.BLOCOS[bloco]
+    terceiro = b["base"] + (inst or 0 if b["por_inst"] else 0)
+    return (0x10, kit & 0x7F, terceiro & 0x7F, 0x00)
 
 # Nivel de PATTERN, decodificado em 13/08/2026 com snap/snapdiff (REFERENCIA 2.3.1).
 # Os dois LAST STEP moram na mesma tabela de 20 bytes e sao 0-based: o valor 0x0F
@@ -1514,7 +1529,11 @@ class Motor:
         self.mudo = [False]*len(INSTRUMENTOS)   # lido da maquina, nunca inventado
         self.passo_maquina = None               # step que a TR-8S diz estar tocando
         self.variacao_tocando = None            # qual variacao a maquina toca
-        self.kit_atual = None                   # offsets 0-2 do perf (mapa ARIA)
+        self.kit_atual = None                   # offset 0 do perf (01 00 00 00)
+        self.kit_trocou = False                 # troca vista no painel
+        self.fx_fila = []                       # blocos de FX a reler, aos poucos
+        self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
+        self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
         self.pattern_atual = None
         self.kit_nome = None                    # lidos por ler_kit(), sob demanda
         self.tone_ids = [None] * len(INSTRUMENTOS)
@@ -1631,6 +1650,43 @@ class Motor:
         self.ler_mudos()
         self.carregado = True
 
+    # quantas linhas do pattern o tick relê por ciclo. 6 das 12 (11
+    # instrumentos + accent) da a volta em dois ciclos, ~3 s. Reler as 12 de
+    # uma vez atropelava a leitura seguinte e produzia o "BD nao lido".
+    LINHAS_POR_CICLO = 6
+
+    def _reler_pattern_rodizio(self):
+        """Relê parte do pattern, em rodizio, para VER o que o painel muda.
+
+        Ate 15/08/2026 o espelho so andava num sentido: o tick relia os last
+        steps e os mutes, mas nunca as notas. Ligar um step no painel da TR-8S
+        nao aparecia no grid nem nos Launchpad - so "se acertava" quando o
+        Luan clicava naquele step aqui, porque a escrita relê a linha.
+
+        Falha isolada aqui NAO invalida a linha (diferente do recarregar()):
+        aqui e vigilancia de fundo, e marcar a linha como nao lida bloquearia
+        a escrita dela por um engasgo passageiro."""
+        mudou = False
+        total = len(INSTRUMENTOS) + 1          # +1 = a fileira de accent
+        for _ in range(self.LINHAS_POR_CICLO):
+            i = self.rodizio_linha
+            self.rodizio_linha = (self.rodizio_linha + 1) % total
+            if i == len(INSTRUMENTOS):
+                cab = ler_bloco(self.tr_in, self.tr_out,
+                                addr_accent(self.variacao), 8)
+                if cab:
+                    novo = nibbles_para_mascara(cab[:4])
+                    if novo != self.acc:
+                        self.acc, mudou = novo, True
+                continue
+            d = ler_bloco(self.tr_in, self.tr_out,
+                          addr_bloco(i, self.variacao))
+            if d and d != self.cache[i]:
+                self.cache[i] = d
+                self.cache_invalido.discard(i)
+                mudou = True
+        return mudou
+
     def ler_last_steps(self, quieto=False):
         """Le os last steps REAIS da maquina. Devolve True se algo mudou.
 
@@ -1720,15 +1776,39 @@ class Motor:
         painel; o que o grid faz e enxergar."""
         d = ler_bloco(self.tr_in, self.tr_out, ADDR_PERF, 128, timeout=SNAP_TIMEOUT)
         if not d or len(d) < OFF_MUTE + 4:
+            self.leituras_falhas += 1
             if not quieto:
                 self.log("(!) nao consegui ler os mutes da maquina.")
             return False
+        # A TR-8S sumiu e voltou: desligar/ligar a maquina (ou tirar o USB) faz
+        # ela recarregar os patterns do disco, e o cache daqui fica falando de
+        # um estado que nao existe mais. Isso apareceu como steps errados no
+        # grid que "se acertavam" quando o Luan clicava neles - o clique
+        # escrevia e relia aquela linha. Voltar a responder e o sinal de que
+        # tudo precisa ser lido de novo.
+        if self.leituras_falhas >= 2:
+            self.log(f"a TR-8S voltou depois de {self.leituras_falhas} "
+                     "leituras sem resposta - relendo tudo (ela pode ter sido "
+                     "reiniciada, e o cache daqui estaria mentindo)")
+            self.recarregar()
+            self.kit_trocou = True
+        self.leituras_falhas = 0
         # o step atual vem no mesmo bloco, de graca - guarda para o tick
         # ressincronizar o playhead sem gastar um RQ1 a mais
         self.passo_maquina = d[OFF_STEP_ATUAL] if len(d) > OFF_STEP_ATUAL else None
         # kit e pattern atuais tambem moram aqui (offsets 0-2, mapa do ARIA) -
         # de graca na mesma leitura, nenhum RQ1 novo
-        self.kit_atual = d[OFF_KIT_ATUAL] if len(d) > OFF_KIT_ATUAL else None
+        novo_kit = d[OFF_KIT_ATUAL] if len(d) > OFF_KIT_ATUAL else None
+        # Trocar de kit no painel muda TUDO que a aba de efeitos mostra: nome,
+        # tones e os 26 blocos. Sem perceber a troca, a tela segue falando do
+        # kit anterior com ar de certeza - foi o que aconteceu ao passar do
+        # TR-707 para o TR-808. O proprio TR-EDITOR fica relendo este byte de
+        # 2 em 2 segundos pelo mesmo motivo.
+        if novo_kit != self.kit_atual and self.kit_atual is not None:
+            self.kit_trocou = True
+            self.log(f"kit mudou no painel ({self.kit_atual} -> {novo_kit}): "
+                     "relendo nome, tones e efeitos")
+        self.kit_atual = novo_kit
         self.pattern_atual = (d[OFF_PATTERN_ATUAL]
                               if len(d) > OFF_PATTERN_ATUAL else None)
         m = nibbles_para_mascara(d[OFF_MUTE:OFF_MUTE + 4])
@@ -2316,17 +2396,19 @@ class Motor:
 
         Enderecos que o snap ja leu em hardware (10 00 00/1I 00). O toneId e
         uint16 em 4 nibbles no comeco do bloco - formato do mapa do ARIA. O
-        NOME que corresponde a cada id e a hipotese do tones.py (posicao na
-        Preset Tone List); a sessao de tone confirma."""
+        NOME que corresponde a cada id sai da tabela do proprio TR-EDITOR
+        (id = NUMBER - 1), conferida contra os 22 tones dos kits TR-808 e
+        TR-707 desta maquina em 15/08/2026."""
         if self.modo_geral != MODO_ON or not self.tr_out:
             self.log("(!) ler kit so no modo ON")
             return
-        d = ler_bloco(self.tr_in, self.tr_out, addr_kit_nome(), 16,
+        kit = self._fx_kit()
+        d = ler_bloco(self.tr_in, self.tr_out, addr_kit_nome(kit), 16,
                       timeout=SNAP_TIMEOUT)
         self.kit_nome = ("".join(chr(b) for b in d if 32 <= b < 127).strip()
                          if d else None)
         for i in range(len(INSTRUMENTOS)):
-            t = ler_bloco(self.tr_in, self.tr_out, addr_kit_tone(i), 16,
+            t = ler_bloco(self.tr_in, self.tr_out, addr_kit_tone(i, kit), 16,
                           timeout=SNAP_TIMEOUT)
             self.tone_ids[i] = nibbles_para_mascara(t[:4]) if t else None
         self.log(f"kit '{self.kit_nome or '?'}' lido; toneIds: "
@@ -2336,16 +2418,19 @@ class Motor:
     def definir_tone(self, i, tone_id):
         """Troca o tone do instrumento i - o gesto INST do TR-EDITOR.
 
-        Escrita NUNCA testada em hardware (a leitura sim, via snap). DT1 em
-        endereco valido, entao sem risco de porta - o risco e semantico: se a
-        hipotese de id do tones.py estiver deslocada, entra o tone errado.
-        Round-trip nao prova som: OUVIR e conferir o nome no visor."""
+        A ESCRITA FUNCIONA - provada em 15/08/2026, e foi ela que derrubou a
+        tabela antiga: escrever o id 8 ("707 Bass1/2" pela numeracao do PDF)
+        carregou "808 High Tom" na maquina. O id certo vem do tones.py
+        regerado da tabela do TR-EDITOR. Round-trip continua nao provando
+        som: OUVIR e conferir o nome no visor."""
         if self.modo_geral != MODO_ON or not self.tr_out:
             self.log("(!) trocar tone so no modo ON")
             return
-        self.tr_out.send(dt1(addr_kit_tone(i), mascara_para_nibbles(tone_id)))
+        kit = self._fx_kit()
+        self.tr_out.send(dt1(addr_kit_tone(i, kit),
+                             mascara_para_nibbles(tone_id)))
         time.sleep(0.05)
-        t = ler_bloco(self.tr_in, self.tr_out, addr_kit_tone(i), 16,
+        t = ler_bloco(self.tr_in, self.tr_out, addr_kit_tone(i, kit), 16,
                       timeout=SNAP_TIMEOUT)
         lido = nibbles_para_mascara(t[:4]) if t else None
         self.tone_ids[i] = lido
@@ -2355,41 +2440,83 @@ class Motor:
 
     # ── mixer/FX: decodificacao por observacao (efeitos.py) ─
     def _fx_tam_kit(self):
-        return 128 if self.fx_kit_grande else 16
+        """105 bytes: o que o TR-EDITOR pede de 10 KK 00 00 (sniff 15/08)."""
+        return efeitos.BLOCOS["kit"]["tam"]
 
     def ler_fx(self):
-        """Rele os blocos que o mixer vigia: no do kit + 11 blocos de params.
+        """Rele os 26 blocos de efeito do kit atual (efeitos.BLOCOS).
 
-        Os 11 blocos 10 00 2I 00 sao leitura provada (snap). O no do kit so
-        foi lido a 16 B; a primeira chamada tenta 128 (endereco valido - o no
-        de pattern analogo ja foi lido a 128) e, sem resposta, cai para 16 e
-        o kit-level fica para o sniff do TR-EDITOR (sessao M2)."""
+        Ate 15/08/2026 isto sondava o no do kit com 128 bytes para descobrir
+        o tamanho. A sonda morreu com o sniff: o TR-EDITOR le 105, e pedir
+        128 de um bloco de 105 e exatamente a leitura fora da faixa que a
+        3.1 diz envenenar a porta CTRL. Agora todo tamanho vem da tabela do
+        que o editor oficial pede."""
         if self.modo_geral != MODO_ON or not self.tr_out:
             self.log("(!) ler FX so no modo ON")
             return
-        if self.fx_kit_grande is None:
-            d = ler_bloco(self.tr_in, self.tr_out, addr_kit_nome(), 128,
-                          timeout=SNAP_TIMEOUT)
-            self.fx_kit_grande = d is not None
-            if not self.fx_kit_grande:
-                self.log("no do kit nao respondeu a 128 bytes - kit-level "
-                         "fica para o sniff do TR-EDITOR (registrar na "
-                         "REFERENCIA 2.9)")
-        d = ler_bloco(self.tr_in, self.tr_out, addr_kit_nome(),
-                      self._fx_tam_kit(), timeout=SNAP_TIMEOUT)
-        if d:
-            self.fx_blocos["kit"] = list(d)
-        for i in range(len(INSTRUMENTOS)):
-            d = ler_bloco(self.tr_in, self.tr_out, addr_kit_param(i), 128,
+        faltaram = []
+        for chave, addr, tam in self._fx_alvos():
+            d = ler_bloco(self.tr_in, self.tr_out, addr, tam,
                           timeout=SNAP_TIMEOUT)
             if d:
-                self.fx_blocos[i] = list(d)
+                self.fx_blocos[chave] = list(d)
+            else:
+                faltaram.append(chave)
+        if faltaram:
+            self.log(f"(!) {len(faltaram)} bloco(s) de FX sem resposta: "
+                     + ", ".join(faltaram[:6])
+                     + ("..." if len(faltaram) > 6 else ""))
+
+    def _fx_kit(self):
+        """Numero do kit para o endereco. NAO VERIFICADO se o byte lido do
+        no de performance ja e 0-based: o kit "003" do Luan mora em 10 02, e
+        so uma comparacao com o visor fecha isso. Enquanto nao fecha, vale o
+        valor cru - que ao menos acerta o kit 001 como antes."""
+        return self.kit_atual or 0
+
+    def _fx_alvos(self):
+        """Todos os blocos de efeito do kit atual: (chave, endereco, tamanho).
+
+        A chave identifica o bloco no self.fx_blocos ('reverb', 'inst:0'...).
+        Os tamanhos sao os que o TR-EDITOR pede - ler alem do fim de um bloco
+        e justamente o RQ1 invalido que mata a porta CTRL (REFERENCIA 3.1)."""
+        kit = self._fx_kit()
+        alvos = []
+        for nome, b in efeitos.BLOCOS.items():
+            if b["por_inst"]:
+                for i in range(len(INSTRUMENTOS)):
+                    alvos.append((f"{nome}:{i}", addr_fx(nome, kit, i),
+                                  b["tam"]))
+            else:
+                tam = self._fx_tam_kit() if nome == "kit" else b["tam"]
+                alvos.append((nome, addr_fx(nome, kit), tam))
+        return alvos
+
+    # quantos blocos de FX o tick relê por vez. 4 esvazia os 26 em ~7 ciclos
+    # (uns 3 s) sem deixar o pattern sem banda para a sua propria releitura.
+    FX_POR_CICLO = 4
+
+    def _drenar_fx_fila(self):
+        for _ in range(self.FX_POR_CICLO):
+            if not self.fx_fila:
+                return
+            chave, addr, tam = self.fx_fila.pop(0)
+            d = ler_bloco(self.tr_in, self.tr_out, addr, tam,
+                          timeout=SNAP_TIMEOUT)
+            if d:
+                self.fx_blocos[chave] = list(d)
 
     def _fx_alvo(self, ent, inst=None):
         """(chave do bloco, endereco base, tamanho) do parametro."""
-        if ent["tipo"] == "kit":
-            return "kit", addr_kit_nome(), self._fx_tam_kit()
-        return inst, addr_kit_param(inst), 128
+        bloco = ent.get("bloco") or ("inst" if ent["tipo"] == "inst" else "kit")
+        b = efeitos.BLOCOS.get(bloco)
+        if b is None:                       # bloco desconhecido: nao adivinha
+            return None, None, 0
+        kit = self._fx_kit()
+        if b["por_inst"]:
+            return f"{bloco}:{inst}", addr_fx(bloco, kit, inst), b["tam"]
+        tam = self._fx_tam_kit() if bloco == "kit" else b["tam"]
+        return bloco, addr_fx(bloco, kit), tam
 
     @staticmethod
     def _fx_ler_valor(bloco, ent):
@@ -2447,11 +2574,12 @@ class Motor:
         self.log("captura cancelada")
 
     def _fx_fechar_captura(self, c, chave, off, nbytes):
-        tipo = "kit" if chave == "kit" else "inst"
+        bloco, _, idx = chave.partition(":")
+        tipo = "inst" if idx else "kit"
         self.mapa_fx[c["nome"]] = efeitos.registrar(c["nome"], tipo, off,
-                                                    nbytes)
-        onde = ("no do kit" if tipo == "kit"
-                else f"params por instrumento (visto no {INSTRUMENTOS[chave]})")
+                                                    nbytes, bloco)
+        onde = (f"bloco {bloco}" if not idx
+                else f"bloco {bloco} (visto no {INSTRUMENTOS[int(idx)]})")
         self.log(f"CAPTURADO '{c['nome']}': {onde}, offset {off}"
                  + (f" (2 bytes: {off} e {off+1})" if nbytes == 2 else "")
                  + ". Mexa o controle novo na janela e OUCA para confirmar.")
@@ -2462,10 +2590,7 @@ class Motor:
         if not c or time.time() - c["t"] < 0.35:
             return
         c["t"] = time.time()
-        alvos = [("kit", addr_kit_nome(), self._fx_tam_kit())] + \
-                [(i, addr_kit_param(i), 128)
-                 for i in range(len(INSTRUMENTOS))]
-        for chave, addr, tam in alvos:
+        for chave, addr, tam in self._fx_alvos():
             d = ler_bloco(self.tr_in, self.tr_out, addr, tam,
                           timeout=SNAP_TIMEOUT)
             if not d:
@@ -2558,13 +2683,22 @@ class Motor:
                  + "  - o ouvido confirma, nao o round-trip")
 
     def _fx_valores(self):
+        """Valor de cada parametro mapeado. Os por-instrumento viram lista de
+        11 (a tela escolhe pelo instrumento selecionado)."""
         out = {}
         for nome, ent in self.mapa_fx.items():
-            if ent["tipo"] == "kit":
-                out[nome] = self._fx_ler_valor(self.fx_blocos.get("kit"), ent)
+            bloco = ent.get("bloco") or ("inst" if ent["tipo"] == "inst"
+                                         else "kit")
+            b = efeitos.BLOCOS.get(bloco)
+            if b is None:
+                out[nome] = None
+                continue
+            if b["por_inst"]:
+                out[nome] = [
+                    self._fx_ler_valor(self.fx_blocos.get(f"{bloco}:{i}"), ent)
+                    for i in range(len(INSTRUMENTOS))]
             else:
-                out[nome] = [self._fx_ler_valor(self.fx_blocos.get(i), ent)
-                             for i in range(len(INSTRUMENTOS))]
+                out[nome] = self._fx_ler_valor(self.fx_blocos.get(bloco), ent)
         return out
 
     # ── probability por instrumento (fileira PROB do mixer) ─
@@ -2950,6 +3084,21 @@ class Motor:
                     self.log("mute no painel: "
                              + (" ".join(mutados) if mutados else "ninguem")
                              + f"  |  linhas: {self.visiveis()}")
+                # a releitura do kit anda DEPOIS da dos mutes, que e quem
+                # levanta a bandeira. Ela e CARA - nome + 11 tones + 26 blocos
+                # de efeito - e num tick so ela atropelava a releitura do
+                # pattern: a linha do BD caia no timeout e aparecia como
+                # "BD nao lido", com a escrita bloqueada. Por isso os blocos
+                # de FX entram numa fila e saem POUCOS POR CICLO.
+                if self.kit_trocou:
+                    self.kit_trocou = False
+                    self.ler_kit()
+                    self.fx_fila = self._fx_alvos()
+                self._drenar_fx_fila()
+                # e as notas: sem isto, ligar um step no painel da TR-8S
+                # nunca chegaria ao grid nem aos Launchpad
+                if self._reler_pattern_rodizio():
+                    self.pintar()
                 self._ressincronizar()
             if self.modo_geral == MODO_ON and self.chain:
                 try:
