@@ -200,11 +200,11 @@ function pintar(e, dados) {
     texto(el.querySelector(".seg-val"), v);
     attr(el, "data-vazio", vazio ? "1" : null);
   };
-  // Display numérico de largura FIXA. Reservar espaço no CSS (min-width em ch)
-  // não bastou: o .seg tem letter-spacing, então dois dígitos ocupam mais que
+  // Display numerico de largura FIXA. Reservar espaco no CSS (min-width em ch)
+  // nao bastou: o .seg tem letter-spacing, entao dois digitos ocupam mais que
   // 2ch e o "8" virando "16" ainda empurrava a barra 16 vezes por compasso.
-  // Aqui os dígitos que faltam entram como zeros à esquerda pintados da cor do
-  // fundo: ocupam o lugar exato e não se vêem. Ideia do Luan, 16/08/2026.
+  // Aqui os digitos que faltam entram como zeros a esquerda pintados da cor do
+  // fundo: ocupam o lugar exato e nao se veem. Ideia do Luan, 16/08/2026.
   const segNum = (id, v, vazio, largura) => {
     const el = $(id);
     const val = el.querySelector(".seg-val");
@@ -291,8 +291,8 @@ function pintar(e, dados) {
   else if (e.modo_geral !== "on")
     aviso = ["", "fora do modo ON: a TR-8S não é tocada"];
   else if (!e.carregado) aviso = ["", "lendo a máquina…"];
-  // vem antes do cache_invalido: é o problema mais grave que a tela pode ter —
-  // o grid inteiro mostrando outro pattern, não uma linha que falhou
+  // vem antes do cache_invalido: e o problema mais grave que a tela pode ter -
+  // o grid inteiro mostrando outro pattern, nao uma linha que falhou
   else if (e.espelho_suspeito)
     aviso = [
       "erro",
@@ -306,19 +306,20 @@ function pintar(e, dados) {
       "erro",
       "leitura falhou em alguma linha: o que aparece pode estar errado, e a escrita nela está bloqueada",
     ];
-  // a variação que toca não existe em nó SysEx nenhum: é contada a partir do
-  // clock, e sem um start não há de onde ancorar a conta.
+  // a variacao que toca nao existe em no SysEx nenhum: e contada a partir do
+  // clock, e sem um start nao ha de onde ancorar a conta.
   //
-  // O stop/play vem primeiro porque é o único caminho PROVADO e sem pressa de
-  // tempo: a máquina recomeça pela variação mais baixa habilitada (16/08/2026).
-  // O LED verde do painel também indica a que toca, mas a janela é de um
-  // compasso — 2,8 s a 86 bpm — então Shift-clicar nela é apertado
+  // O stop/play vem primeiro porque e o unico caminho PROVADO e sem pressa de
+  // tempo: a maquina recomeca pela variacao mais baixa habilitada (16/08/2026).
+  // O LED verde do painel tambem indica a que toca, mas a janela e de um
+  // compasso - 2,8 s a 86 bpm - entao Shift-clicar nela e apertado
   else if (e.var_incerta)
     aviso = [
       "",
       "não sei qual variação está tocando (várias habilitadas e a máquina já " +
-        "estava rodando) — dê stop/play na TR-8S para eu reancorar, ou duplo " +
-        "clique numa variação para fixá-la",
+        "estava rodando) — dê stop/play na TR-8S, ou Shift-clique na variação " +
+        "cujo LED verde estiver aceso no painel. (Duplo clique também resolve, " +
+        "mas fixa uma variação só e desliga o rodízio.)",
     ];
   if (aviso) {
     fita.hidden = false;

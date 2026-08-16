@@ -223,8 +223,12 @@ OFF_LAST_TRACK = 75    # +0 = BD ... +10 = RC, +11 = TRG
 # Trocar de variacao NAO emite Program Change - escutado por 14 s na porta comum,
 # so clock. Ler este endereco e o unico caminho.
 
-def addr_last_var(var):     return addr_soma(ADDR_PATTERN, OFF_LAST_VAR + var - 1)
-def addr_last_track(inst):  return addr_soma(ADDR_PATTERN, OFF_LAST_TRACK + inst)
+# Somam sobre ADDR_PATTERN_RD (24 50), nao sobre o 20 00 congelado: sao ESCRITA
+# no mesmo cabecalho de onde o ler_last_steps le. Enquanto apontavam pro 20 00,
+# mexer no [LAST] pela tela nao chegava na maquina e o valor voltava sozinho na
+# releitura seguinte, sem erro nenhum aparecendo.
+def addr_last_var(var):     return addr_soma(ADDR_PATTERN_RD, OFF_LAST_VAR + var - 1)
+def addr_last_track(inst):  return addr_soma(ADDR_PATTERN_RD, OFF_LAST_TRACK + inst)
 
 # MUTE DE TRACK - decodificado em 14/08/2026 (REFERENCIA 5.3).
 #
@@ -1851,6 +1855,7 @@ class Motor:
         # a partir dele DESTROI o que esta na maquina. Ver _conferir_espelho.
         self.espelho_suspeito = False
         self._saltos = []                       # carimbos das correcoes grandes
+        self._t_log_bloqueio = 0.0              # throttle do aviso de bloqueio
         self._erros_seguidos = []               # so corrige deriva consistente
         self.variacao_tocando = None            # qual variacao a maquina toca
         self.kit_atual = None                   # offset 0 do perf (01 00 00 00)
@@ -2076,9 +2081,11 @@ class Motor:
         if len(self.vars_habilitadas) == 1:
             self.variacao_tocando = self.vars_habilitadas[0]
             self.ciclo.soltar()
+            self.var_presumida = False   # uma so: e leitura, nao palpite
         elif antes_hab != self.vars_habilitadas:
             self.ciclo.soltar()
             self.variacao_tocando = None
+            self.var_presumida = False
         mudou = antes != (dict(self.ultimo_var), list(self.ultimo_track),
                           self.variacao_tocando)
         if mudou:
@@ -2111,6 +2118,8 @@ class Motor:
 
     def definir_last_var(self, n):
         with self.lock:
+            if self.escrita_bloqueada("last step da variacao"):
+                return
             n = max(1, min(16, int(n)))
             self.ultimo_var[self.variacao] = n
             if self.tr_out and self.variacao <= 8:
@@ -2123,6 +2132,8 @@ class Motor:
 
     def definir_last_track(self, i, n):
         with self.lock:
+            if self.escrita_bloqueada("last step da linha"):
+                return
             n = 16 if n is None else max(1, min(16, int(n)))
             self.ultimo_track[i] = n
             if self.tr_out:
@@ -2282,7 +2293,8 @@ class Motor:
         # que esta olhando o visor (ver ancorar_variacao)
         if len(self.vars_habilitadas) > 1 and not self.ciclo.ancorado():
             self.log("nao da pra saber QUAL variacao ela esta tocando - "
-                     "clique na que aparece no visor pra ancorar")
+                     "de stop/play na maquina, ou SHIFT-clique na variacao "
+                     "cujo LED verde estiver aceso no painel")
         return True
 
     def ancorar_variacao(self, v):
@@ -2293,7 +2305,11 @@ class Motor:
         variacao (ela nao existe em no SysEx nenhum, REFERENCIA 2.3.2).
 
         O passo_maquina diz a que altura da variacao estamos, entao a ancora
-        sai exata, sem esperar a proxima virada."""
+        sai exata - mas SO se ele for fresco. Ele e gravado no ler_mudos, que
+        roda a cada INTERVALO_RELEITURA (1,5 s), e o clique chega num instante
+        qualquer dessa janela: sem reler aqui, o guarda de validade descartava
+        o valor em quase todo clique e a ancora caia como se a variacao tivesse
+        acabado de comecar - ate 8 steps de erro, com o log afirmando 'step 1'."""
         with self.lock:
             if not self.vars_habilitadas:
                 self.log("(!) nenhuma variacao habilitada para ciclar")
@@ -2303,10 +2319,14 @@ class Motor:
                 self.log(f"(!) a variacao {VARIACOES[v-1]} nao esta habilitada "
                          f"na maquina (habilitadas: {hab})")
                 return
+            self.ler_mudos(quieto=True)     # renova o passo_maquina agora
             dentro = 0
             if (self.passo_maquina is not None
                     and time.time() - self.passo_maquina_t <= VALIDADE_PASSO):
                 dentro = self.passo_maquina
+            else:
+                self.log("(!) nao consegui ler o step da maquina agora - "
+                         "ancorei no comeco da variacao, pode sair torto")
             self._ancorar_ciclo_vars(v, dentro)
             self._var_seguida = self.variacao_tocando
             self.log(f"ancorado: a TR-8S esta tocando a "
@@ -2594,11 +2614,7 @@ class Motor:
         O step de 8 bytes vai inteiro pra maquina, entao os bytes que este
         metodo nao entende (0-2) saem do cache - dai o guarda: cache que nao
         reflete a maquina nao pode ser escrito de volta."""
-        if self.espelho_suspeito:
-            # nao e cache velho, e cache de OUTRO pattern: escrever mandaria os
-            # bytes 0-3 (velocity, sub step, probability) do pattern errado
-            self.log("(!) escrita bloqueada: o grid esta mostrando um pattern "
-                     "diferente do que a maquina toca")
+        if self.escrita_bloqueada("step"):
             return False
         if i in self.cache_invalido:
             d = ler_bloco(self.tr_in, self.tr_out,
@@ -2629,6 +2645,8 @@ class Motor:
         self.log(f"CLEAR {INSTRUMENTOS[i]}")
 
     def limpar_variacao(self):
+        if self.escrita_bloqueada("CLEAR"):
+            return
         for i in range(len(INSTRUMENTOS)):
             for s in range(16):
                 self.escrever_step(i, s, 0, 0)
@@ -2646,6 +2664,8 @@ class Motor:
     def colar_variacao(self):
         if not self.copia:
             self.log("COPY: buffer vazio - copie uma variacao primeiro"); return
+        if self.escrita_bloqueada("PASTE"):
+            return
         origem, blocos, mascara = self.copia
         for i, dados in blocos.items():
             for s in range(16):
@@ -2671,6 +2691,8 @@ class Motor:
         - o mesmo formato do buffer de COPY, que ja provou o caminho de volta."""
         if self.modo_geral != MODO_ON or not self.carregado:
             self.log("(!) escrever pattern so no modo ON")
+            return False
+        if self.escrita_bloqueada("escrever pattern"):
             return False
         self.snapshot_escrita(f"escrita '{nome or '?'}'")
         for i in range(len(INSTRUMENTOS)):
@@ -2753,6 +2775,8 @@ class Motor:
 
     def _restaurar_snapshot(self, snap):
         rotulo, var, blocos, mascara = snap
+        if self.escrita_bloqueada("desfazer"):
+            return False
         if var != self.variacao:
             self.log(f"(!) '{rotulo}' e da variacao {VARIACOES[var-1]} - va "
                      "ate ela para desfazer")
@@ -2793,6 +2817,11 @@ class Motor:
         # a linha mutada continua editavel: ela some do grid so quando voce pede,
         # e enquanto esta a vista escrever nela e legitimo - o pattern existe, o
         # que esta desligado e o som. Por isso nao ha desvio aqui.
+        #
+        # O guarda do espelho, esse sim, vale para tudo: as linhas de ACC
+        # mandam DT1 direto, sem passar pelo escrever_step
+        if self.escrita_bloqueada("grid"):
+            return
         if self.armado == "inst":                 # CLEAR armado: limpa a linha
             self.armado = None
             if self.eh_acc(linha):
@@ -2838,6 +2867,9 @@ class Motor:
         enfileirar(), na thread do motor."""
         if self.modo_geral != MODO_ON or not self.carregado:
             self.log("(!) o editor so escreve no modo ON")
+            return
+        # a linha do ACCENT manda DT1 direto, sem passar pelo escrever_step
+        if self.escrita_bloqueada("editor"):
             return
         if i == len(INSTRUMENTOS):
             self.acc ^= (1 << step)
@@ -3545,6 +3577,7 @@ class Motor:
                 if len(self.vars_habilitadas) > 1:
                     self.ciclo.soltar()
                     self.variacao_tocando = None
+                    self.var_presumida = False
             elif t == 'stop':
                 # repinta o quadro inteiro, nao a coluna: com track curto cada
                 # linha tem o playhead numa coluna diferente, e limpar so uma
@@ -3569,9 +3602,11 @@ class Motor:
             # a causa da dessincronizacao documentada na REFERENCIA 5
             self.mover_playhead(self.passo_abs % max(1, self.last_var()))
             self._atender_var_pedida()
-        if lote > PULSOS_P_STEP:
-            # os carimbos do BPM sairiam todos com a hora da DRENAGEM, nao a
-            # da chegada: o BPM daria centenas. Sumir por um instante e honesto
+        if lote > 1:
+            # QUALQUER lote acima de 1 carimba pulsos com a mesma hora - a da
+            # drenagem, nao a da chegada - e encolhe o dt da janela do BPM, que
+            # entao salta (medido: 86 -> ~109 por 0,7 s com lote de 6). Sumir
+            # por um instante e honesto; mentir o andamento, nao
             self._clock_ts.clear()
         return 0
 
@@ -3581,13 +3616,27 @@ class Motor:
         Diferente do clique simples, que so ABRE a variacao no grid pra editar
         (e ai o playhead some, porque o grid nao esta no que soa).
 
-        NAO PROVADO EM HARDWARE. A leitura da mascara 63-66 e provada; a
-        ESCRITA nunca foi (REFERENCIA 2.3.2 e 3). Escrevemos um bit so, o que
-        deixa a propria maquina confirmar: se ela obedecer, a releitura de
-        ler_last_steps vai ver uma habilitada so e cravar a variacao tocando
-        com certeza, sem depender de conta de clock nenhuma. Se ela ignorar, a
-        mascara volta como estava e nada muda - o pedido some sem mentir."""
+        PROVADO EM HARDWARE em 16/08/2026: tres pedidos seguidos, a maquina
+        obedeceu nos tres (log em REFERENCIA, secao da mascara 63-66).
+
+        Escrevemos um bit so, e isso e o que torna o resultado auto-confirmante:
+        a maquina fica com UMA variacao habilitada, entao a releitura seguinte
+        de ler_last_steps ve len(vars_habilitadas)==1 e crava a variacao tocando
+        com CERTEZA, sem depender de conta de clock nenhuma. E o unico caminho
+        em que a variacao que toca deixa de ser deducao e vira leitura.
+
+        Efeito colateral a ter em conta: com um bit so, o rodizio A->B->C morre.
+        Quem quiser o rodizio de volta usa alternar_no_ciclo."""
         with self.lock:
+            # os Fill In (9, 10) NAO tem slot na mascara 63-66: ela so reporta
+            # A-H (REFERENCIA 2.3.2, medido em 14/08). Escrever 1<<8 mandaria um
+            # bit de significado desconhecido e, pior, uma mascara com ZERO
+            # variacao A-H habilitada - estado que ninguem testou, com a caixa
+            # tocando. O botao existe para ABRIR o fill no grid, nao para pedi-lo
+            if v > 8:
+                self.log(f"(!) {VARIACOES[v-1]} e Fill In: pedir que ele toque "
+                         "nao tem endereco conhecido (use o painel)")
+                return
             if v not in self.vars_habilitadas and len(self.vars_habilitadas) > 1:
                 self.log(f"(!) {VARIACOES[v-1]} nao esta habilitada na maquina")
                 return
@@ -3622,6 +3671,14 @@ class Motor:
         with self.lock:
             if not self.tr_out:
                 self.log("(!) sem porta CTRL - ligue o modo ON")
+                return
+            # ver pedir_variacao: a mascara so tem slot para A-H. Sem este
+            # guarda, o Fill In nunca esta em vars_habilitadas (montada com
+            # range(1,9)), entao o symmetric_difference so ADICIONA - cada
+            # clique direito somava 1<<8 de novo, sem caminho de volta
+            if v > 8:
+                self.log(f"(!) {VARIACOES[v-1]} e Fill In: nao entra no rodizio "
+                         "(a mascara 63-66 so reporta A-H)")
                 return
             atual = set(self.vars_habilitadas)
             if v in atual and len(atual) == 1:
@@ -3894,6 +3951,7 @@ class Motor:
         # ler_kit, a fila de FX e o rodizio - facil dar mais de um step
         if time.time() - self.passo_maquina_t > VALIDADE_PASSO:
             return
+        agora_res = time.time()
         lim = max(1, self.last_var())
         atual = self.passo_abs % lim
         erro = (alvo - atual) % lim
@@ -3912,14 +3970,18 @@ class Motor:
         # apos leitura. Desde que a porta de clock virou callback nada se
         # perde, entao este caminho quase nunca dispara - e e assim que tem
         # que ser: a contagem de clock e exata, quem chega velho e o alvo.
-        self._erros_seguidos.append(delta)
+        # com carimbo: sem ele, amostras separadas por minutos (e ate de outro
+        # pattern) se somavam num trio "consistente" e disparavam correcao
+        self._erros_seguidos = [(t, d) for t, d in self._erros_seguidos
+                                if agora_res - t <= JANELA_ESPELHO]
+        self._erros_seguidos.append((agora_res, delta))
         del self._erros_seguidos[:-ERROS_P_CORRIGIR]
         if len(self._erros_seguidos) < ERROS_P_CORRIGIR:
             return
-        if not (all(d > 0 for d in self._erros_seguidos)
-                or all(d < 0 for d in self._erros_seguidos)):
+        ds = [d for _, d in self._erros_seguidos]
+        if not (all(d > 0 for d in ds) or all(d < 0 for d in ds)):
             return                      # sinais misturados = ruido, nao deriva
-        delta = min(self._erros_seguidos, key=abs)   # o mais conservador
+        delta = min(ds, key=abs)                     # o mais conservador
         self._erros_seguidos = []
         self.pulsos += delta * PULSOS_P_STEP
         self.passo_abs = self.pulsos // PULSOS_P_STEP
@@ -3931,6 +3993,7 @@ class Motor:
             # consertar; QUAL variacao, nao - e "?" e melhor que errado
             self.ciclo.soltar()
             self.variacao_tocando = None
+            self.var_presumida = False
             agora = time.time()
             # uma rajada de correcoes vale UMA: ver INTERVALO_MIN_SALTO. O
             # mesmo intervalo silencia o log - senao uma rajada enche a tela
@@ -3941,6 +4004,28 @@ class Motor:
                          "mas perdi a conta da variacao.")
             self._conferir_espelho()
         self.mover_playhead(self.passo_abs % lim)
+
+    def escrita_bloqueada(self, rot=""):
+        """True quando o espelho nao corresponde ao que a maquina toca.
+
+        TODO caminho que manda DT1 de pattern tem que passar por aqui, nao so o
+        escrever_step: colar, limpar, escrever_pattern, o accent e o Chain
+        mandam direto, e enquanto o guarda vivia dentro do escrever_step a tela
+        dizia 'ESCRITA BLOQUEADA' enquanto um PASTE sobrescrevia o pattern real
+        com o cache do pattern errado - exatamente o dano que ele existe para
+        impedir.
+
+        O log sai no maximo uma vez por janela: estes chamadores rodam em laco
+        (11x16 no colar, 11 por step no Chain) e a mesma linha repetida empurra
+        para fora da tela justamente a mensagem que explica a causa."""
+        if not self.espelho_suspeito:
+            return False
+        agora = time.time()
+        if agora - self._t_log_bloqueio > INTERVALO_MIN_SALTO:
+            self._t_log_bloqueio = agora
+            self.log(f"(!) escrita bloqueada{' (' + rot + ')' if rot else ''}: "
+                     "o grid nao corresponde ao pattern que a maquina toca")
+        return True
 
     def _conferir_espelho(self):
         """Desvio grande e REPETIDO significa que o comprimento da variacao que

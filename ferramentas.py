@@ -181,8 +181,11 @@ class Chain:
                 self._fila_escrita = {"passo": 0, "dados": ent["dados"]}
             self._perseguir(motor, tudo=True)
             motor.acc = ent.get("accent", 0) & 0xFFFF
-            motor.tr_out.send(L.dt1(L.addr_accent_rd(motor.variacao),
-                                    L.mascara_para_nibbles(motor.acc)))
+            # o accent vai por DT1 direto, entao consulta o guarda do espelho
+            # aqui: o escrever_step do _perseguir ja se protege sozinho
+            if not motor.escrita_bloqueada("chain: accent"):
+                motor.tr_out.send(L.dt1(L.addr_accent_rd(motor.variacao),
+                                        L.mascara_para_nibbles(motor.acc)))
             motor.pintar()
             self.log(f"chain: '{ent.get('nome', '?')}' no ar "
                      f"({self.reps_restantes}x)")

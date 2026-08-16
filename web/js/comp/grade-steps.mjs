@@ -99,11 +99,11 @@ export function gradeSteps({
   raiz.append(janela);
   let janelaChave = "";
 
-  // ultimoStep = last step da variação (1..16). A moldura pára nele, e não na
-  // coluna 16: com uma variação de 12 steps ela avançava sobre os steps 13-16,
-  // que estão fora do pattern e aparecem apagados — dava a impressão de que o
-  // playhead ia até o 13. O grid dos Launchpads continua tendo 16 colunas
-  // físicas; o que a moldura marca é a área que de fato toca.
+  // ultimoStep = last step da variacao (1..16). A moldura para nele, e nao na
+  // coluna 16: com uma variacao de 12 steps ela avancava sobre os steps 13-16,
+  // que estao fora do pattern e aparecem apagados - dava a impressao de que o
+  // playhead ia ate o 13. O grid dos Launchpads continua tendo 16 colunas
+  // fisicas; o que a moldura marca e a area que de fato toca.
   function marcarJanela(indices, ultimoStep = 16) {
     // linhas nao contiguas (esconder_mudos tirou uma do meio): a moldura
     // mentiria, entao ela some e a marca vai para os rotulos das linhas
@@ -187,11 +187,11 @@ export function gradeSteps({
   // parar ou virar a volta, o pior caso e ficar um step adiantada por uma
   // fracao de segundo - e o quadro seguinte corrige. Adivinhar mais do que
   // isso daria um playhead fluido e mentiroso.
-  // O ciclo é o LAST STEP da variação, não 16. Enquanto isto foi 16 fixo, uma
-  // variação de 12 steps fazia o relógio adivinhar o step 13 (que não existe) e
-  // depois cair no 2 em vez do 1 — o servidor confirmava o step 1, mas o
-  // relógio já tinha disparado o passo seguinte. Era o "playhead maluco" de
-  // 16/08/2026, e não estava no motor: o motor sempre mandou 0..11.
+  // O ciclo e o LAST STEP da variacao, nao 16. Enquanto isto foi 16 fixo, uma
+  // variacao de 12 steps fazia o relogio adivinhar o step 13 (que nao existe) e
+  // depois cair no 2 em vez do 1 - o servidor confirmava o step 1, mas o
+  // relogio ja tinha disparado o passo seguinte. Era o "playhead maluco" de
+  // 16/08/2026, e nao estava no motor: o motor sempre mandou 0..11.
   let passoReal = -1,
     tPasso = 0,
     durStep = 0,

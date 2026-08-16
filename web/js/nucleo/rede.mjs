@@ -102,13 +102,18 @@ export async function acao(corpo, ms = 4000, jaTentou = false) {
   }
 }
 
-export async function sair() {
+export async function sair(jaTentou = false) {
+  // mesmo tratamento de 403 do acao(): sem ele, o botao Sair era justamente o
+  // unico que continuava quebrado depois de o servidor reiniciar - respondia
+  // 403, caia no catch vazio, e a pessoa clicava achando que travou
   try {
-    await fetch("/sair", {
+    const r = await fetch("/sair", {
       method: "POST",
       headers: { "Content-Type": "application/json", "X-TR8S-Token": TOKEN },
       body: "{}",
     });
+    if (r.status === 403 && !jaTentou && (await recuperarSessao()))
+      return sair(true);
   } catch (e) {}
 }
 

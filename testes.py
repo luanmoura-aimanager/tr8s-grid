@@ -17,6 +17,8 @@ aparelho da esquerda, e o bug aberto do buffer de edicao (REFERENCIA 7).
 
 import os
 import sys
+import threading
+import time
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -77,16 +79,95 @@ class TesteCicloVars(unittest.TestCase):
 # ─────────────────────────────────────────────────────────────
 # A REGRESSAO de 16/08/2026: o resync congelava a variacao
 # ─────────────────────────────────────────────────────────────
+def motor_cru(last=12, vars_hab=(1, 2, 3)):
+    """Um Motor SEM __init__: nenhuma porta MIDI aberta, nenhum Launchpad.
+
+    Existe para os testes chamarem os metodos DE VERDADE. A primeira versao
+    destes testes reimplementava o algoritmo do resync inline, e por isso nao
+    guardava nada: dava para reintroduzir 'self.passo_abs = alvo' dentro do
+    _ressincronizar que os 17 testes continuavam verdes, porque nenhum deles
+    executava uma linha daquele metodo. Apontado no review de 16/08."""
+    m = object.__new__(L.Motor)
+    m.log = lambda *a, **k: None
+    m.lock = threading.RLock()
+    m.tocando = True
+    m.pulsos = 0
+    m.passo_abs = 0
+    m.passo = -1
+    m.passo_maquina = None
+    m.passo_maquina_t = 0.0
+    m.variacao = vars_hab[0]
+    m.vars_habilitadas = list(vars_hab)
+    m.ultimo_var = {v: last for v in range(1, 9)}
+    m.ultimo_track = [None] * len(L.INSTRUMENTOS)
+    m.variacao_tocando = vars_hab[0]
+    m.var_presumida = False
+    m.espelho_suspeito = False
+    m._saltos = []
+    m._erros_seguidos = []
+    m._t_log_bloqueio = 0.0
+    m.ciclo = L.CicloVars()
+    m.ciclo.ancorar(0, list(vars_hab), m.ultimo_var, vars_hab[0])
+    m.mover_playhead = lambda p: setattr(m, "passo", p)   # sem LED nenhum
+    return m
+
+
+class TesteResyncReal(unittest.TestCase):
+    """Exercita Motor._ressincronizar DE VERDADE (ver motor_cru)."""
+
+    def test_nunca_reatribui_passo_abs_com_valor_modular(self):
+        """A REGRESSAO de 16/08: passo_abs e ABSOLUTO, o step da maquina e
+        MODULAR (0..11). Reatribuir um pelo outro congelava a variacao."""
+        m = motor_cru()
+        m.pulsos = 5000 * L.PULSOS_P_STEP
+        m.passo_abs = 5000
+        m.passo_maquina = 3                      # a maquina esta no step 4
+        # tres leituras do mesmo sentido, frescas: e o que autoriza corrigir
+        for _ in range(L.ERROS_P_CORRIGIR):
+            m.passo_maquina_t = time.time()
+            m._ressincronizar()
+        self.assertGreater(m.passo_abs, 4000,
+                           "passo_abs despencou para o modulo da maquina - "
+                           "o bug de 16/08 voltou")
+
+    def test_ruido_alternado_nao_corrige(self):
+        """Erro que troca de sinal e ruido de medicao (medido: distribuicao
+        uniforme de -5 a +6). Corrigir por ele fazia o playhead saltar."""
+        m = motor_cru()
+        m.pulsos = 600 * L.PULSOS_P_STEP
+        m.passo_abs = 600
+        antes = m.passo_abs
+        for alvo in (10, 2, 9, 1, 8):            # sinais misturados
+            m.passo_maquina = alvo
+            m.passo_maquina_t = time.time()
+            m._ressincronizar()
+        self.assertEqual(m.passo_abs, antes,
+                         "corrigiu por ruido: o playhead vai saltar")
+
+    def test_alvo_velho_e_descartado(self):
+        m = motor_cru()
+        m.pulsos = 600 * L.PULSOS_P_STEP
+        m.passo_abs = 600
+        m.passo_maquina = 3
+        m.passo_maquina_t = time.time() - (L.VALIDADE_PASSO + 0.5)
+        for _ in range(L.ERROS_P_CORRIGIR + 2):
+            m._ressincronizar()
+        self.assertEqual(m.passo_abs, 600, "corrigiu por um alvo vencido")
+
+    def test_escrita_bloqueada_quando_o_espelho_diverge(self):
+        """O guarda tem que valer para TODO caminho de escrita, nao so o
+        escrever_step - colar, limpar e o chain mandam DT1 direto."""
+        m = motor_cru()
+        self.assertFalse(m.escrita_bloqueada())
+        m.espelho_suspeito = True
+        self.assertTrue(m.escrita_bloqueada("teste"))
+
+
 class TesteResyncNaoCongela(unittest.TestCase):
-    """O bug que fazia o grid nao espelhar o que toca.
-
-    _ressincronizar() reatribuia passo_abs (contador ABSOLUTO) com o step da
-    maquina (MODULAR, 0..15). O ciclo de variacoes conta no absoluto, entao a
-    contagem despencava e a variacao congelava ate o fim da sessao.
-
-    Reproduz o laco real: pulsos de clock, perda de pulsos (a fila do rtmidi
-    estourava - 657 vezes no log de 15/08), e o resync rodando a cada ~1,5 s.
-    """
+    """O mesmo bug, agora no laco completo: pulsos de clock, perda de pulsos
+    (a fila do rtmidi estourava - 657 vezes no log de 15/08) e o resync a cada
+    ~1,5 s. Este modela o algoritmo; quem guarda o codigo enviado e a classe
+    TesteResyncReal acima."""
 
     DUR = {1: 16, 2: 16, 3: 16}
     VS = [1, 2, 3]

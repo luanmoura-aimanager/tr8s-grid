@@ -37,10 +37,10 @@ export default {
       // outra soa e o recurso mais valioso do projeto (REFERENCIA 2.3.2).
       // O duplo clique tem que cancelar o simples, senao abriria o grid junto
       let tSimples = null;
-      // liga/desliga no rodízio, sem zerar as outras — o caminho de volta,
-      // já que o duplo clique deixa UMA habilitada e mata o A→B→C.
-      // Clique direito, não Alt-clique: o teclado do Mac não tem tecla "Alt"
-      // escrita (é a Option), e o resto do app já oferece as duas formas
+      // liga/desliga no rodizio, sem zerar as outras - o caminho de volta,
+      // ja que o duplo clique deixa UMA habilitada e mata o A->B->C.
+      // Clique direito, nao Alt-clique: o teclado do Mac nao tem tecla "Alt"
+      // escrita (e a Option), e o resto do app ja oferece as duas formas
       b.oncontextmenu = (ev) => {
         ev.preventDefault();
         clearTimeout(tSimples);
@@ -184,13 +184,16 @@ export default {
     );
     bBaixo.onclick = () => agir({ acao: "exec", tipo: "rolar", arg: 1 });
 
-    // quantas linhas cada toque anda. 3 por padrão porque é o que falta: são
-    // 11 instrumentos numa janela de 8, então um toque só leva de BD–CH a
-    // MT–RC e o resto aparece inteiro. Vale para os pads do Launchpad também
+    // quantas linhas cada toque anda. 3 por padrao porque e o que falta: sao
+    // 11 instrumentos numa janela de 8, entao um toque so leva de BD-CH a
+    // MT-RC e o resto aparece inteiro. Vale para os pads do Launchpad tambem
     const selPasso = h("select", {
       id: "passo-inst",
       "aria-label": "linhas por toque do INST UP/DOWN",
     });
+    // o teto vem do servidor (PASSO_INST_MAX); 8 e so o palpite ate o
+    // primeiro estado chegar. Fixar 8 aqui deixava a tela oferecer valores que
+    // o servidor grampeia, e o campo ficava se reescrevendo a cada quadro
     for (let i = 1; i <= 8; i++) selPasso.append(new Option(i, i));
     selPasso.onchange = () =>
       agir({ acao: "passo_inst", valor: +selPasso.value });
@@ -292,7 +295,7 @@ export default {
     // de log, e o .map explodia calado e a moldura nunca nascia (16/08).
     // +1 porque a linha 0 do grid e a ACC
     const idx = (e.janela || []).map((i) => i + 1);
-    // a moldura pára no last step da variação: além dele os steps não tocam
+    // a moldura para no last step da variacao: alem dele os steps nao tocam
     grade.marcarJanela(idx, e.last_var || 16);
     const rotJanela = $("#rot-janela");
     if (rotJanela && idx.length) {
@@ -306,8 +309,15 @@ export default {
     attr($("#b-rolar-cima"), "aria-disabled", emCima ? "true" : null);
     attr($("#b-rolar-baixo"), "aria-disabled", emBaixo ? "true" : null);
     const selP = $("#passo-inst");
-    if (selP && e.passo_inst && +selP.value !== e.passo_inst)
-      selP.value = String(e.passo_inst);
+    if (selP) {
+      const teto = e.passo_inst_max || 8;
+      if (selP.options.length !== teto) {
+        selP.replaceChildren();
+        for (let i = 1; i <= teto; i++) selP.append(new Option(i, i));
+      }
+      if (e.passo_inst && +selP.value !== e.passo_inst)
+        selP.value = String(e.passo_inst);
+    }
   },
 };
 

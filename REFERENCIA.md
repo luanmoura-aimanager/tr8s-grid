@@ -533,8 +533,9 @@ tijolar a máquina.
   provados por leitura (2.4), o resto é interpolação. A sessão A (`prob_watch`)
   fecha a tabela. A ESCRITA do byte 3 nunca foi tentada — o `definir_prob` da
   janela avisa isso no log.
-- A **escrita da máscara de variação** (offsets 63–66): leitura provada (2.3.2),
-  escrita é a sessão C — round-trip não prova obediência.
+- ~~A **escrita da máscara de variação** (offsets 63–66)~~ — **PROVADA em
+  16/08/2026**, três trocas seguidas obedecidas, e também com vários bits
+  (montando o rodízio A+B+C remotamente). Ver a seção da máscara 63–66 em 7.
 
 **Desconhecido:**
 - Bytes 0, 1 e 2 de cada step — os três últimos sem nome, agora que o 4 fechou
