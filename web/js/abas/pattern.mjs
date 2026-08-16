@@ -274,10 +274,21 @@ const corIndice = (i) => IDX[i] || "#1a1a1a";
 // estava - o menu perguntava sem nunca responder.
 let ultimoEstado = null;
 let menuAberto = null;
+let desligarFecho = null; // remove os listeners de "clique fora"/Esc
+
+// Os listeners de fechar TEM que morrer junto com o menu. A versao anterior
+// registrava um pointerdown {once:true} por menu e nunca o removia: o
+// listener orfao do menu ANTERIOR nao reconhecia o menu novo e o fechava no
+// pointerdown - antes de o clique completar. Resultado: a partir do segundo
+// menu, nenhum chip funcionava (velocity, modo, probability, nada).
 function fecharMenu() {
   if (menuAberto) {
     menuAberto.remove();
     menuAberto = null;
+  }
+  if (desligarFecho) {
+    desligarFecho();
+    desligarFecho = null;
   }
 }
 
@@ -337,7 +348,8 @@ function abrirMenu(l, s, cel, D) {
     linha(
       "probability",
       chips(
-        [100, 90, 80, 70, 60, 50, 40, 30, 20, 10].map((p) => [p + "%", p]),
+        // 0% existe (sniff 15/08): o step fica gravado mas nunca toca
+        [100, 90, 80, 70, 60, 50, 40, 30, 20, 10, 0].map((p) => [p + "%", p]),
         (p) => agir({ acao: "prob_step", inst, step: s, pct: p }),
         probAtual,
       ),
@@ -380,17 +392,21 @@ function abrirMenu(l, s, cel, D) {
       ? r.bottom + 6
       : r.top - m.height - 6) + "px";
   menuAberto = menu;
-  setTimeout(() => {
-    document.addEventListener("pointerdown", umaVez, { once: true });
-    document.addEventListener("keydown", esc);
-  }, 0);
-  function umaVez(ev) {
+  function fora(ev) {
     if (!menu.contains(ev.target)) fecharMenu();
   }
   function esc(ev) {
-    if (ev.key === "Escape") {
-      fecharMenu();
-      document.removeEventListener("keydown", esc);
-    }
+    if (ev.key === "Escape") fecharMenu();
   }
+  desligarFecho = () => {
+    document.removeEventListener("pointerdown", fora);
+    document.removeEventListener("keydown", esc);
+  };
+  // adiado um tique para o pointerdown que ABRIU o menu nao fecha-lo
+  setTimeout(() => {
+    if (menuAberto === menu) {
+      document.addEventListener("pointerdown", fora);
+      document.addEventListener("keydown", esc);
+    }
+  }, 0);
 }

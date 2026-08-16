@@ -253,7 +253,7 @@ class Estocastica:
                 mexidos += 1
         motor.pintar()
         motor.log(f"densidade x{fator:.2f}: {mexidos} steps "
-                  "(probability nativa - confira de ouvido, nao testada)")
+                  "(probability nativa da maquina)")
 
     def humanize_vel(self, motor, alcance):
         """Velocity +- alcance, sorteado por step ativo. Nunca desliga (>=1)."""

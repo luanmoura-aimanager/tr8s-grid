@@ -1260,28 +1260,33 @@ carregou "808 High Tom", não "707 Bass1/2") e o offset 0 do perf como kit
 atual em `10 xx` (o kit atual mora em `01 00 00 00`, 1 byte, confirmado por
 três caminhos).
 
-**Sniffs que ainda faltam** (nenhum bloqueia o uso diário):
+**Os seis sniffs pendentes foram TODOS feitos na mesma noite (15/08):**
 
-1. **PROBABILITY (M2b) — o mais importante.** `PROB_BYTE=3` e a fórmula
-   `(100−pct)÷10` seguem sendo hipótese, e a observação da noite aponta que
-   estão **erradas**: escrever probability por step não aparece nem na tela
-   nem no painel. O TR-EDITOR tem PROBABILITY no painel MOTION → um gesto
-   percorrendo os valores dá o byte e a escala. Sem isso, metade da
-   estocástica (densidade, ghosts) escreve num byte que pode ser outra coisa.
-2. **Opções com `?`** — dropdowns cujo offset foi medido mas cuja
-   correspondência número→nome não: LOW CUT/HIGH CUT do reverb, h/l dampf do
-   delay, type do phaser/flanger/SBF, mode do flanger, direction do NOISE,
-   ratio/knee do compressor. Percorrer cada dropdown no TR-EDITOR uma vez.
-3. **COLOR do SD** (1 gesto) — prova se as 11 cores são sequenciais a partir
-   de `10 KK 00 42`.
-4. **Blocos `04`, `07`, `08` do kit** — ainda sem nome (candidatos: OUTPUT,
-   MUTE choke, GROUP, EXT IN). A aba KIT do TR-EDITOR tem tudo isso em
-   dropdowns por instrumento; uma sessão de ~10 gestos fecha.
-5. **CTRL por instrumento** — o bloco `06` tem o SELECT global no offset 0;
-   os destinos por instrumento (BD=Attack, SD=Snappy...) devem ser os bytes
-   seguintes. Não medido.
-6. **`pattern B2` tocando** — troca remota de pattern, destrava o chain de
-   verdade. Independente de efeitos.
+1. ~~PROBABILITY~~ — **a hipótese estava certa**: byte 3 do step, mesmo
+   endereço do grid, `byte = (100−pct)÷10`. O que a observação tinha pego era
+   um bug do *menu* da tela (listener órfão fechava o menu antes do clique
+   completar), não do protocolo. Bônus: existe o byte **10 = 0%**, step que
+   nunca toca. O "não fica" do painel segue por conferir com o menu já
+   consertado.
+2. ~~Opções com `?`~~ — os 10 dropdowns percorridos. **Todos** com código =
+   posição na lista do catálogo, e os seis do MASTER FX caíram exatamente
+   onde a regra `0x27+2i` previa — seis provas independentes da regra.
+3. ~~COLOR~~ — sequencial confirmado (BD=0x42, SD=0x43), códigos 0–11 na
+   ordem do menu: RED, ORANGE, YELLOW, LIME, GREEN, SKYBLUE, LIGHTBLUE,
+   BLUE, PURPLE, MAGENTA, PINK, WHITE (`efeitos.CORES_INST`).
+4. ~~Blocos 04/07/08~~ — nomeados: **04 = EXT IN** (side chain 0x00, gain
+   0x04), **07 = OUTPUT** (1 byte/inst), **08 = MUTE/choke** (1 byte/inst).
+   GROUP master no bloco do kit, offset 0x11. Mapa de blocos **completo**.
+5. ~~CTRL por instrumento~~ — bloco 06, 1 byte/inst a partir de 0x01.
+   Códigos 0–5 fixos (OFF, Pan, ReverbSend, DelaySend, LFO Depth, InstFX);
+   do 6 em diante é o parâmetro do tone (6=Attack BD, 7=Snappy SD; LT/MT/HT
+   têm "Color" não medido; RS–RC não têm nenhum).
+6. ~~Troca remota de pattern~~ — **PROVADA tocando** (A1→A2→A1→A2→B1):
+   escrever o "próximo pattern" (`01 00 00 02`) troca **na virada**, como no
+   painel. É o mecanismo certo para o chain. A variante `now` (offset 1)
+   segue não exercitada.
+
+Capturas de tudo em `capturas/*-2026-08-15.mmon`.
 
 **Pedidos de interface anotados em 15/08 à noite** (para o plano da reforma):
 

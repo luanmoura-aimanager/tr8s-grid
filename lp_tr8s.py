@@ -89,11 +89,15 @@ VEL_HI, VEL_LO = 6, 7
 # (cmd_prob_watch) transforma isto numa tabela. 100% = 0x00.
 PROB_BYTE = 3
 
+# PROVADO em 15/08/2026 (sniff M2b): o TR-EDITOR escreve a probability no
+# byte 3 do step, no MESMO endereco que o grid usa, com byte = (100-pct)/10 -
+# o gesto varreu 0..10 monotonico, ida e volta. O 10 e novidade: 0%, um step
+# que NUNCA toca (a formula antiga capava em 9 achando que o piso era 10%).
 def prob_para_byte(pct):
-    return max(0, min(9, (100 - int(pct)) // 10))
+    return max(0, min(10, (100 - int(pct)) // 10))
 
 def byte_para_prob(b):
-    return 100 - 10 * max(0, min(9, b))
+    return 100 - 10 * max(0, min(10, b))
 
 # ALTERNATE: o valor e 0x08, nao 0x01 (REFERENCIA 2.4). Por que o bit 3, ninguem
 # sabe - provavelmente ha outras flags no mesmo byte. Guardado como VALOR, nao
@@ -2387,8 +2391,7 @@ class Motor:
         if self.escrever_step(i, step, self.ler_vel(i, step),
                               self.ler_sub(i, step), self.ler_alt(i, step),
                               prob=pct):
-            self.log(f"{INSTRUMENTOS[i]:3} step {step+1:2} -> prob {pct}%"
-                     "  (nao testado em hardware ainda: confira de ouvido)")
+            self.log(f"{INSTRUMENTOS[i]:3} step {step+1:2} -> prob {pct}%")
 
     # ── kit: nome e tones (enderecos ja provados pelo snap) ─
     def ler_kit(self):
@@ -2721,8 +2724,7 @@ class Motor:
                     return
                 time.sleep(0.002)
                 n += 1
-        self.log(f"{INSTRUMENTOS[i]:3}: prob {pct}% em {n} steps ativos "
-                 "(nao testada em hardware - confira de ouvido)")
+        self.log(f"{INSTRUMENTOS[i]:3}: prob {pct}% em {n} steps ativos")
 
     # ── utility (bloco 50 00 00 xx, NAO testado em hardware) ─
     def _util_pronto(self):
@@ -3387,14 +3389,12 @@ def cmd_pattern(argv):
     """Sessao B: troca remota de pattern via DT1 (mapa oficial do ARIA).
 
     uso: pattern <A1..H16 | 0-127> [now]
-      sem 'now' -> escreve o PROXIMO pattern (01 00 00 02): a hipotese e que a
-                   maquina enfileira a troca pra virada, como no painel;
+      sem 'now' -> escreve o PROXIMO pattern (01 00 00 02)
       com 'now' -> escreve o pattern ATUAL (01 00 00 01): troca imediata?
 
-    NUNCA exercitado na nossa maquina. E DT1 em endereco da tabela oficial
-    (visto no fio nas capturas do ARIA) - nao e RQ1, nao envenena a CTRL.
-    Observar: trocou? na hora ou na virada? o visor mudou? Registrar na
-    REFERENCIA o resultado, positivo OU negativo."""
+    PROVADO em 15/08/2026 (A1->A2, A2->A1, A1->A2, A2->B1, maquina tocando):
+    o modo 'proximo' troca NA VIRADA do pattern, como no painel - e o
+    mecanismo certo para o chain. A variante 'now' segue nao exercitada."""
     if not argv:
         print("uso: pattern <A1..H16 | 0-127> [now]"); return
     n = _num_pattern(argv[0])

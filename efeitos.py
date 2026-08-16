@@ -42,12 +42,16 @@ ARQ_FX = os.path.expanduser("~/.lp_tr8s_fx.json")
 # que o editor oficial le e a unica defesa barata contra a armadilha 3.1
 # (RQ1 em endereco invalido mata a porta CTRL).
 #
-#   10 KK 00 00   16 + 105 B   nome do kit (ASCII nos 16 primeiros) e comuns
+#   10 KK 00 00   16 + 105 B   nome do kit (16 ASCII) e comuns - level 0x10,
+#                              GROUP master 0x11, COLOR por inst 0x42+i
 #   10 KK 01 00        75 B    REVERB
 #   10 KK 02 00        92 B    DELAY
 #   10 KK 03 00   38 + 49 B    MASTER FX
-#   10 KK 04..08 00            78/70/115/12/13 B - LFO, OUTPUT, CTRL, MUTE,
-#                              EXT IN (quais sao quais: nao verificado)
+#   10 KK 04 00        78 B    EXT IN (side chain 0x00, gain 0x04...)
+#   10 KK 05 00        70 B    LFO
+#   10 KK 06 00       115 B    CTRL (select global 0x00)
+#   10 KK 07 00        12 B    OUTPUT, um byte por instrumento (BD=0x00)
+#   10 KK 08 00        13 B    MUTE/choke, um byte por instrumento (BD=0x00)
 #   10 KK 10..1A 00  53 + 48 B os 11 instrumentos, BD..RC, layout identico
 #   10 KK 20..2A 00   7 + 50 B tone + INST FX dos 11 instrumentos
 #
@@ -58,8 +62,14 @@ BLOCOS = {
     "reverb": {"base": 0x01, "por_inst": False, "tam": 75},
     "delay":  {"base": 0x02, "por_inst": False, "tam": 92},
     "mfx":    {"base": 0x03, "por_inst": False, "tam": 87},
+    "extin":  {"base": 0x04, "por_inst": False, "tam": 78},
     "lfo":    {"base": 0x05, "por_inst": False, "tam": 70},
     "ctrl":   {"base": 0x06, "por_inst": False, "tam": 115},
+    # OUTPUT e MUTE/choke: um byte por instrumento DENTRO de um bloco unico
+    # (offset = indice do instrumento), como a COLOR - nao sao blocos por
+    # instrumento como inst/ifx
+    "output": {"base": 0x07, "por_inst": False, "tam": 12},
+    "mute":   {"base": 0x08, "por_inst": False, "tam": 13},
     "inst":   {"base": 0x10, "por_inst": True,  "tam": 101},
     "ifx":    {"base": 0x20, "por_inst": True,  "tam": 57},
 }
@@ -348,8 +358,11 @@ PARAMS_FIXOS = {
     "reverb time":     {"bloco": "reverb", "tipo": "kit",  "off": 0x01, "bytes": 2},
     "reverb level":    {"bloco": "reverb", "tipo": "kit",  "off": 0x03, "bytes": 2},
     "reverb predelay": {"bloco": "reverb", "tipo": "kit",  "off": 0x05, "bytes": 1},
-    "reverb lowcut":   {"bloco": "reverb", "tipo": "kit",  "off": 0x06, "bytes": 1},
-    "reverb highcut":  {"bloco": "reverb", "tipo": "kit",  "off": 0x07, "bytes": 1},
+    # dropdowns percorridos um a um (sniff 2b): codigo = posicao na lista
+    "reverb lowcut":   {"bloco": "reverb", "tipo": "kit",  "off": 0x06,
+                        "bytes": 1, "opcoes_do_catalogo": True},
+    "reverb highcut":  {"bloco": "reverb", "tipo": "kit",  "off": 0x07,
+                        "bytes": 1, "opcoes_do_catalogo": True},
     "reverb density":  {"bloco": "reverb", "tipo": "kit",  "off": 0x08, "bytes": 1},
 
     # --- DELAY: bloco 10 KK 02 00 -----------------------------------
@@ -370,9 +383,11 @@ PARAMS_FIXOS = {
     # h/l damp: o catalogo os deduzia com 2 bytes em dB; o gesto mostrou UM
     # byte indo ate 81. Vale o medido.
     "delay dly h damp":  {"bloco": "delay", "tipo": "kit", "off": 0x09, "bytes": 1},
-    "delay dly h dampf": {"bloco": "delay", "tipo": "kit", "off": 0x0A, "bytes": 1},
+    "delay dly h dampf": {"bloco": "delay", "tipo": "kit", "off": 0x0A,
+                          "bytes": 1, "opcoes_do_catalogo": True},
     "delay dly l damp":  {"bloco": "delay", "tipo": "kit", "off": 0x0B, "bytes": 1},
-    "delay dly l dampf": {"bloco": "delay", "tipo": "kit", "off": 0x0C, "bytes": 1},
+    "delay dly l dampf": {"bloco": "delay", "tipo": "kit", "off": 0x0C,
+                          "bytes": 1, "opcoes_do_catalogo": True},
     # o quanto do delay volta para o reverb (ultimo knob da fileira DELAY
     # SEND, depois do EXT IN). Longe dos outros: offset 0x1C.
     "delay reverb send": {"bloco": "delay", "tipo": "kit", "off": 0x1C, "bytes": 2},
@@ -441,6 +456,24 @@ PARAMS_FIXOS = {
     "mfx vinylsim compressor": {"bloco": "mfx", "tipo": "kit", "off": 0x27,
                                 "bytes": 2},
 
+    # Enums do MASTER FX percorridos um a um no sniff 2 (15/08/2026 a noite):
+    # os seis cairam EXATAMENTE onde a regra 0x27+2i previa (seis provas
+    # independentes da regra), e em todos o codigo segue a ordem da lista do
+    # catalogo - 'opcoes_do_catalogo' manda o carregar() montar o mapa
+    # numero->nome a partir dela, sem o "?" de nao verificado.
+    "mfx compressor ratio": {"bloco": "mfx", "tipo": "kit", "off": 0x31,
+                             "bytes": 2, "opcoes_do_catalogo": True},
+    "mfx compressor knee":  {"bloco": "mfx", "tipo": "kit", "off": 0x33,
+                             "bytes": 2, "opcoes_do_catalogo": True},
+    "mfx phaser type":      {"bloco": "mfx", "tipo": "kit", "off": 0x31,
+                             "bytes": 2, "opcoes_do_catalogo": True},
+    "mfx flanger mode":     {"bloco": "mfx", "tipo": "kit", "off": 0x33,
+                             "bytes": 2, "opcoes_do_catalogo": True},
+    "mfx sbf type":         {"bloco": "mfx", "tipo": "kit", "off": 0x2D,
+                             "bytes": 2, "opcoes_do_catalogo": True},
+    "mfx noise direction":  {"bloco": "mfx", "tipo": "kit", "off": 0x2B,
+                             "bytes": 2, "opcoes_do_catalogo": True},
+
     # --- LFO do kit: bloco 10 KK 05 00 ------------------------------
     "lfo waveform":  {"bloco": "lfo", "tipo": "kit", "off": 0x00, "bytes": 1,
                       "opcoes": {"0": "SIN", "1": "TRI", "2": "SAW",
@@ -498,11 +531,29 @@ PARAMS_FIXOS = {
                              "15": "RING MOD", "16": "SPREAD"}},
 }
 
-# COLOR do instrumento: mora no bloco do KIT (10 KK 00 00), offset 0x42 para
-# o BD - nao no bloco do instrumento, como seria de esperar. Fica FORA do
-# mapa ate um gesto provar se os outros dez seguem em 0x43, 0x44... Registrar
-# so o BD daria uma chave que mente sobre os outros dez.
-# Pendencia: mexer a COLOR do SD e ver o offset.
+# COLOR do instrumento: mora no bloco do KIT (10 KK 00 00), UM BYTE POR
+# INSTRUMENTO a partir de 0x42 (BD=0x42, SD=0x43 - sequencial provado em
+# 15/08/2026; o SD percorreu os codigos 0..11 na ordem do menu, entao
+# RED=0, ORANGE=1, ...). E o unico parametro por-instrumento que vive num
+# bloco de kit; o modelo BLOCOS nao cobre isso ainda, entao fica registrado
+# aqui ate a interface precisar: offset = 0x42 + indice do instrumento.
+COLOR_OFF_BASE = 0x42
+# na ordem do menu do TR-EDITOR = ordem dos codigos (o SD percorreu 0..11)
+CORES_INST = ["RED", "ORANGE", "YELLOW", "LIME", "GREEN", "SKYBLUE",
+              "LIGHTBLUE", "BLUE", "PURPLE", "MAGENTA", "PINK", "WHITE"]
+
+# CTRL POR INSTRUMENTO - bloco 06, um byte por instrumento a partir de 0x01
+# (BD=0x01, SD=0x02 - sequencial provado em 15/08/2026). Codigos 0..5 fixos:
+#     0 OFF   1 Pan   2 ReverbSend   3 DelaySend   4 LFO Depth   5 InstFX
+# Do 6 em diante e O PARAMETRO DO TONE, e nem todo instrumento tem um
+# (menus lidos no TR-EDITOR em 15/08/2026 com o kit TR-707):
+#     BD: Attack (6, medido)   SD: Snappy (7, medido)
+#     LT/MT/HT: Color (codigo NAO medido)   RS..RC: so os 6 fixos
+# O rotulo do ultimo codigo depende do tone carregado - como no TR-EDITOR.
+# O offset 0x00 do bloco e o SELECT global ("kit ctrl select" no mapa).
+CTRL_OFF_BASE = 0x01
+CTRL_FIXOS = {0: "OFF", 1: "Pan", 2: "ReverbSend", 3: "DelaySend",
+              4: "LFO Depth", 5: "InstFX"}
 
 # ─────────────────────────────────────────────────────────────
 # DERIVADOS DE UMA REGRA MEDIDA (nao de um gesto proprio)
@@ -584,6 +635,11 @@ def carregar():
         ent.setdefault("min", 0)
         ent.setdefault("max", cat.get("max", 255 if ent["bytes"] == 2 else 127))
         ent.setdefault("bipolar", cat.get("bipolar", False))
+        # enums cuja ordem codigo=posicao foi VERIFICADA em hardware: as
+        # opcoes vem da lista do catalogo, sem precisar anotar uma a uma
+        if ent.get("opcoes_do_catalogo") and cat.get("opcoes"):
+            ent.setdefault("opcoes",
+                           {str(i): r for i, r in enumerate(cat["opcoes"])})
         ent.setdefault("opcoes", {})
         ent["sugestoes"] = cat.get("opcoes", [])
         ent["rot"] = cat.get("rot", nome)

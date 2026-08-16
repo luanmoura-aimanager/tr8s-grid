@@ -153,7 +153,10 @@ export function gradeSteps({
     if (!c) return;
     const l = +c.dataset.l,
       s = +c.dataset.s;
-    if (e.altKey || e.button === 2) {
+    // botao direito: so NAO pintar - o menu vem uma vez so, no contextmenu
+    // (abrir aqui tambem criava o menu em dobro a cada clique direito)
+    if (e.button === 2) return;
+    if (e.altKey) {
       aoMenuCelula && aoMenuCelula(l, s, c);
       return;
     }
