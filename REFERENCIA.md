@@ -1244,25 +1244,60 @@ o aparelho enumerado primeiro é o da **direita**:
 Não hardcodar essa tabela — vale só para aquela enumeração. É o `learn` que amarra
 índice → aparelho, e o snapshot que detecta quando a amarração venceu.
 
-### Onde parou em 15/08/2026 (fim da sessão da interface)
+### Onde parou em 15/08/2026, noite (a sessão M2 aconteceu — e rendeu)
 
-A tela saiu do Tkinter e virou página web (ver §4). Estão no ar e **validados**:
-o grid da aba Pattern conferido contra os Launchpads, a barra de estado, o
-seletor BD–RC, a biblioteca, o chain, a estocástica e a aba Avançado.
+A sessão de sniff do TR-EDITOR foi feita. Resultado: **245/245 parâmetros de
+efeito mapeados** (56 medidos por gesto do Luan, 189 derivados de duas regras
+medidas), escrita de efeito **provada de ouvido** (reverb level, reverb send
+por instrumento), tone **trocado e conferido no visor**. Capturas versionadas
+em `capturas/`; método e achados no commit `13f0324`. Os blocos do kit, as
+duas regras de região compartilhada e a regra dos tones (id = NUMBER − 1 da
+tabela do próprio TR-EDITOR) estão documentados no `efeitos.py` e no
+`gen_tones.py`.
 
-O catálogo de efeitos está completo — **243 parâmetros** do Reference p. 24–37
-(INST 9 · INST FX 97 · REVERB 7 · DELAY 23 · MASTER FX 102 · LFO 3 · KIT 2) —
-e a aba Efeitos desenha todos, **todos apagados**, porque nenhum offset é
-conhecido.
+O que a sessão **derrubou**: a numeração de tones por posição no PDF (o id 8
+carregou "808 High Tom", não "707 Bass1/2") e o offset 0 do perf como kit
+atual em `10 xx` (o kit atual mora em `01 00 00 00`, 1 byte, confirmado por
+três caminhos).
 
-**O próximo passo é a sessão de sniff do TR-EDITOR (M2)**, que é o que
-transforma esses 243 knobs apagados em controles de verdade. A ferramenta de
-decodificação já existe: `python3 tr8s_sysex.py fx <captura.mmon>` lista as
-mudanças em ordem cronológica e marca as de 2 bytes. Roteiro em 7.2, item 6.
+**Sniffs que ainda faltam** (nenhum bloqueia o uso diário):
 
-Continuam de pé, e não dependem da interface: `prob_watch` (fecha a tabela de
-probability), `pattern B2` (troca remota — destrava o chain de verdade) e
-conferir o nome do tone da aba Instrumento contra o visor.
+1. **PROBABILITY (M2b) — o mais importante.** `PROB_BYTE=3` e a fórmula
+   `(100−pct)÷10` seguem sendo hipótese, e a observação da noite aponta que
+   estão **erradas**: escrever probability por step não aparece nem na tela
+   nem no painel. O TR-EDITOR tem PROBABILITY no painel MOTION → um gesto
+   percorrendo os valores dá o byte e a escala. Sem isso, metade da
+   estocástica (densidade, ghosts) escreve num byte que pode ser outra coisa.
+2. **Opções com `?`** — dropdowns cujo offset foi medido mas cuja
+   correspondência número→nome não: LOW CUT/HIGH CUT do reverb, h/l dampf do
+   delay, type do phaser/flanger/SBF, mode do flanger, direction do NOISE,
+   ratio/knee do compressor. Percorrer cada dropdown no TR-EDITOR uma vez.
+3. **COLOR do SD** (1 gesto) — prova se as 11 cores são sequenciais a partir
+   de `10 KK 00 42`.
+4. **Blocos `04`, `07`, `08` do kit** — ainda sem nome (candidatos: OUTPUT,
+   MUTE choke, GROUP, EXT IN). A aba KIT do TR-EDITOR tem tudo isso em
+   dropdowns por instrumento; uma sessão de ~10 gestos fecha.
+5. **CTRL por instrumento** — o bloco `06` tem o SELECT global no offset 0;
+   os destinos por instrumento (BD=Attack, SD=Snappy...) devem ser os bytes
+   seguintes. Não medido.
+6. **`pattern B2` tocando** — troca remota de pattern, destrava o chain de
+   verdade. Independente de efeitos.
+
+**Pedidos de interface anotados em 15/08 à noite** (para o plano da reforma):
+
+- Biblioteca: clicar no estilo já muda BPM e kit (ou botão ali mesmo);
+  pesquisar mais patterns por estilo; **unir Biblioteca e Chain numa aba só**,
+  repensando como os patterns encadeados são visualizados.
+- Estocástica: fileira BD–RC clicável em vez de dropdown; multi-seleção de
+  instrumentos, cada um com sua linha de faders; **Reverter por edição** ao
+  lado de cada Aplicar, não só o global.
+- Grid: no lugar do "espelho dos LEDs", **moldura verde 8×16 sobre o próprio
+  grid** mostrando a janela dos Launchpads, acompanhando INST UP/DOWN; e o
+  playhead marcando as notas da coluna (verde forte onde tem nota, fraco onde
+  não), não só a moldura da coluna.
+- Efeitos: painel geral de sends (linha de reverb/delay send por instrumento
+  como no TR-EDITOR); separar visualmente o que é por instrumento do que é
+  master; reforma geral da UI usando os prints do TR-EDITOR como referência.
 
 ### Onde parou antes disso
 
