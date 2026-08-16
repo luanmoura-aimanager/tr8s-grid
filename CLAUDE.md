@@ -45,8 +45,16 @@ trabalho é entregue:
 
 ## Depois de editar
 
-- Mexeu em `gui.py` ou `lp_tr8s.py` → rodar `python3 criar_app.py`. O `.app` do Desktop
-  carrega uma **cópia** dos scripts; sem isso ele segue rodando a versão velha
+- Mexeu em `servidor.py`, `lp_tr8s.py`, `ferramentas.py`, `efeitos.py`, `biblioteca.py`,
+  `tones.py` ou em `web/` → rodar **os dois**:
+  `python3 instalar_agente.py` **e** `python3 criar_app.py`.
+  Cada um mantém uma **cópia** dos scripts, e são cópias diferentes: o
+  `instalar_agente.py` atualiza `~/Library/Application Support/tr8s-grid/`, que é de
+  onde o LaunchAgent (quem responde em `127.0.0.1:8733`) roda; o `criar_app.py`
+  atualiza o bundle do Desktop. Rodar só um deixa o outro na versão velha —
+  e o que está no ar costuma ser o do LaunchAgent
+- `gui.py` (Tk) **não é copiado por nenhum dos dois** — é legado; a tela viva é a web
+- Rodar os testes de mesa: `python3 testes.py` (sem porta MIDI, sem hardware)
 - Mexeu em `gen_layout.py` ou `gen_adesivo.py` → regerar. O adesivo precisa da
   compensação de impressora: `python3 gen_adesivo.py --medido 93`
 - Só um processo por vez pode usar a porta CTRL. Um `run` esquecido em background impede

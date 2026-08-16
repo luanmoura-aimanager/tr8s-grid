@@ -1,0 +1,62 @@
+/* tokens.css - as decisoes visuais num lugar so.
+ *
+ * As cores FUNCIONAIS (nota, flam, sub, ALT, accent, playhead) NAO estao aqui:
+ * vem do Python em /dados -> paleta.mjs escreve como --c-*. E a mesma tabela
+ * que pinta os LEDs do Launchpad, entao a tela e o aparelho nunca divergem.
+ * O que esta aqui e a superficie: fundo, papel, tinta, foco, sombra, tempo. */
+:root{
+  color-scheme: dark;
+
+  /* espaco - escala de 4 */
+  --e0:2px; --e1:4px; --e2:8px; --e3:12px; --e4:16px; --e5:24px; --e6:32px;
+
+  /* raio */
+  --r1:4px; --r2:8px; --r3:12px; --r-pill:999px;
+
+  /* tipografia */
+  --f-ui:-apple-system,BlinkMacSystemFont,"Helvetica Neue",Helvetica,sans-serif;
+  --f-mono:ui-monospace,SFMono-Regular,Menlo,monospace;
+  --t-micro:10px; --t-min:11px; --t-peq:12px; --t-base:13px;
+  --t-med:15px; --t-gr:20px; --t-xg:28px;
+  --peso-rot:600; --esp-rot:.08em;
+
+  /* superficie - tres niveis de profundidade: fundo < corpo do painel <
+     cabecalho/elemento ativo (reforma 2, direcao TR-EDITOR) */
+  --fundo:#0f0d0b; --painel:#1e1b18; --painel2:#242019; --linha:#33302c;
+  --linha2:#413c36;
+  --painel-cab:#211c15;         /* faixa de titulo dos paineis */
+  --tinta:#ece8e2; --tinta2:#b9b2a8;
+  --fraco:#a8a199;              /* 5.4:1 sobre --fundo (AA em texto pequeno) */
+
+  /* acento - o ambar dos displays 7-seg, promovido a identidade da pagina */
+  --acento:#ffb454; --acento-esc:#8a5a20;
+
+  /* estado */
+  --ok:#4ade80; --erro:#f87171; --aviso:#fbbf24; --roxo:#a855f7;
+  --info:#7dd3fc; --foco:#7dd3fc;
+
+  /* profundidade */
+  --sombra1:0 1px 2px #0008;
+  --sombra2:0 8px 24px #000a;
+  --glow:0 0 6px currentColor, 0 0 14px color-mix(in srgb, currentColor 45%, transparent);
+
+  /* tempo */
+  --rapida:90ms; --media:160ms; --lenta:280ms;
+  --saida:cubic-bezier(.2,.7,.3,1);
+
+  /* densidade da grade de steps */
+  --cel:30px; --cel-h:24px; --gap:3px; --rot-l:52px;
+}
+
+:root[data-densidade="compacto"]{
+  --cel:22px; --cel-h:18px; --gap:2px; --rot-l:44px;
+  --t-base:12px; --e4:12px; --e5:16px;
+}
+
+/* quem pediu menos movimento leva menos movimento - inclusive o playhead */
+@media (prefers-reduced-motion: reduce){
+  :root{ --rapida:0ms; --media:0ms; --lenta:0ms; }
+  *,*::before,*::after{ animation-duration:.001ms !important;
+                        animation-iteration-count:1 !important;
+                        transition-duration:.001ms !important; }
+}

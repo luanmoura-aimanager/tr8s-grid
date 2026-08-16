@@ -1,0 +1,671 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>TR-8S Grid</title>
+<style>
+:root{
+  --bg:#141210; --card:#1e1b18; --linha:#33302c; --ink:#ece8e2; --mudo:#9a938a;
+  --verde:#4ade80; --verm:#f87171; --amar:#fbbf24; --roxo:#a855f7;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
+     font:14px -apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif}
+header{display:flex;align-items:center;gap:18px;padding:12px 16px 6px}
+.leds{display:flex;gap:14px;font-size:12px;color:var(--mudo)}
+.led{display:flex;align-items:center;gap:5px}
+.pt{width:9px;height:9px;border-radius:50%;background:var(--verm)}
+.pt.on{background:var(--verde)}
+.modos{display:flex;gap:8px;padding:0 16px 8px}
+button{font:inherit;color:var(--mudo);background:var(--card);border:1px solid var(--linha);
+       border-radius:8px;padding:8px 14px;cursor:pointer}
+button:hover{border-color:var(--ink);color:var(--ink)}
+.modo{min-width:96px;padding:12px 14px;font-size:15px;font-weight:600}
+.modo.ativo{color:#0b0b0b;border-color:transparent}
+.modo.ativo.on{background:var(--verde)} .modo.ativo.off{background:#6b7280}
+.modo.ativo.sb{background:var(--roxo)}
+.estado{padding:0 16px 8px;color:var(--mudo);font-size:12px;min-height:16px}
+nav{display:flex;gap:4px;padding:0 12px;border-bottom:1px solid var(--linha)}
+nav button{border:0;border-radius:8px 8px 0 0;background:transparent;padding:9px 14px}
+nav button.sel{background:var(--card);color:var(--ink)}
+main{padding:14px 16px 60px}
+.aba{display:none} .aba.sel{display:block}
+h3{margin:16px 0 6px;font-size:12px;letter-spacing:.08em;text-transform:uppercase;
+   color:var(--mudo);font-weight:600}
+h3:first-child{margin-top:0}
+.aviso{color:var(--amar);font-size:12px;line-height:1.5;margin:6px 0}
+.dica{color:var(--mudo);font-size:12px;line-height:1.5;margin:4px 0}
+.linha{display:flex;align-items:center;gap:10px;margin:6px 0;flex-wrap:wrap}
+label{font-size:12px;color:var(--mudo)}
+select,input[type=text],input[type=number]{background:var(--card);color:var(--ink);
+  border:1px solid var(--linha);border-radius:6px;padding:6px 8px;font:inherit}
+/* fileira de faders verticais por instrumento */
+.fila{display:flex;align-items:flex-end;gap:6px;margin:4px 0 12px}
+.fila .rot{width:110px;font-weight:600;font-size:13px;color:var(--ink);
+           padding-bottom:20px}
+.cel{display:flex;flex-direction:column;align-items:center;gap:3px;width:42px}
+.cel .val{font:11px ui-monospace,Menlo,monospace;color:var(--mudo)}
+.cel .nome{font:11px ui-monospace,Menlo,monospace;color:var(--mudo)}
+input[type=range].v{writing-mode:vertical-lr;direction:rtl;width:22px;height:88px;
+  accent-color:var(--verde);background:transparent;cursor:pointer}
+input[type=range].v:disabled{opacity:.25;cursor:default}
+input[type=range].h{width:280px;accent-color:var(--verde);cursor:pointer}
+table{border-collapse:collapse;font-size:13px}
+td,th{padding:4px 10px;text-align:left;border-bottom:1px solid var(--linha)}
+th{color:var(--mudo);font-weight:600;font-size:11px;text-transform:uppercase}
+tr.sel td{background:var(--card)}
+tbody tr{cursor:pointer}
+.lista{max-height:300px;overflow:auto;border:1px solid var(--linha);border-radius:8px}
+.grade{display:grid;grid-template-columns:repeat(16,16px);gap:2px}
+.grade .c{width:16px;height:14px;border-radius:2px;background:#26221e}
+.grade .lbl{font:10px ui-monospace,Menlo,monospace;color:var(--mudo);
+            grid-column:1/-1;margin-top:4px}
+.previewlinha{display:flex;align-items:center;gap:6px;margin:2px 0}
+.previewlinha .n{width:30px;font:11px ui-monospace,Menlo,monospace;color:var(--mudo)}
+.cols{display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap}
+footer{position:fixed;bottom:0;left:0;right:0;background:#0f0d0c;
+  border-top:1px solid var(--linha);padding:6px 16px;display:flex;gap:12px;
+  align-items:center;font:11px ui-monospace,Menlo,monospace;color:var(--mudo)}
+footer .msg{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.logbox{max-height:160px;overflow:auto;background:#0f0d0c;border:1px solid var(--linha);
+  border-radius:8px;padding:8px;font:11px ui-monospace,Menlo,monospace;
+  color:var(--mudo);white-space:pre-wrap}
+.pill{background:var(--card);border:1px solid var(--linha);border-radius:999px;
+      padding:2px 10px;font-size:11px;color:var(--mudo)}
+.perigo{border-color:#7f1d1d;color:#fca5a5}
+.perigo:hover{border-color:var(--verm);color:var(--verm)}
+</style>
+</head>
+<body>
+<header>
+  <div class="leds">
+    <div class="led"><span class="pt" id="pt-ctrl"></span>TR-8S CTRL</div>
+    <div class="led"><span class="pt" id="pt-lp"></span>Launchpad</div>
+    <div class="led"><span class="pt" id="pt-clock"></span>clock</div>
+  </div>
+  <span class="pill" id="pill-kit">kit —</span>
+  <span class="pill" id="pill-ptn">pattern —</span>
+</header>
+
+<div class="modos">
+  <button class="modo on" data-modo="on">ON</button>
+  <button class="modo off" data-modo="off">off</button>
+  <button class="modo sb" data-modo="standby" data-estilo="chuva">standby</button>
+  <button class="modo sb" data-modo="standby" data-estilo="ambiente">ambiente</button>
+  <button id="b-recal">Recalibrar</button>
+  <button id="b-blackout">Apagar e soltar os pads</button>
+</div>
+<div class="estado" id="estado">—</div>
+
+<nav id="nav"></nav>
+<main>
+  <section class="aba sel" id="aba-mixer">
+    <h3>Probability por instrumento</h3>
+    <div class="dica">Solte o fader para escrever em todos os steps ligados do
+      instrumento. “—” quer dizer que os steps têm valores diferentes.</div>
+    <div class="fila" id="fila-prob"></div>
+    <div id="fx-mapeados"></div>
+
+    <h3>Mapear parâmetro novo</h3>
+    <div class="dica">Nenhum offset de send, FX ou LFO é documentado pela
+      Roland. Escolha o parâmetro, clique <b>Capturar</b> e mexa <b>só nesse
+      controle</b> no painel da TR-8S — o app acha o byte que mudou e o fader
+      nasce aqui. Nos de 2 bytes, gire de ponta a ponta.</div>
+    <div class="linha">
+      <select id="sel-cat"></select>
+      <button id="b-capturar">Capturar</button>
+      <span class="dica" id="dica-cat"></span>
+    </div>
+    <div class="linha">
+      <label>anotar opção de lista</label>
+      <select id="sel-enum"></select>
+      <select id="sel-rotulo"></select>
+      <button id="b-anotar">Anotar</button>
+      <span class="dica">ponha a opção no visor da TR-8S e clique</span>
+    </div>
+    <div class="linha">
+      <label>instrumento das listas</label>
+      <select id="sel-inst-fx"></select>
+      <button id="b-lerfx">Reler valores</button>
+    </div>
+  </section>
+
+  <section class="aba" id="aba-inst">
+    <div class="linha">
+      <label>instrumento</label><select id="sel-inst-tone"></select>
+      <label>categoria</label><select id="sel-cat-tone"></select>
+      <button id="b-lerkit">Reler kit</button>
+    </div>
+    <div class="dica" id="tone-atual">—</div>
+    <div class="aviso">id → nome é <b>hipótese</b> (posição na Preset Tone
+      List); a escrita nunca foi testada — toque o pad e confira o som e o
+      visor. CTRL e INST FX ainda não foram decodificados.</div>
+    <div class="lista"><table><tbody id="tab-tones"></tbody></table></div>
+  </section>
+
+  <section class="aba" id="aba-bib">
+    <div class="cols">
+      <div>
+        <div class="lista" style="width:320px"><table><tbody id="tab-bib"></tbody></table></div>
+      </div>
+      <div>
+        <div id="bib-nome" style="font-size:15px;font-weight:600">escolha um pattern</div>
+        <div class="dica" id="bib-info"></div>
+        <div class="aviso" id="bib-obs"></div>
+        <div id="bib-preview"></div>
+        <div class="linha">
+          <button id="b-escrever" class="perigo">Escrever na TR-8S</button>
+          <button id="b-desfazer">Desfazer última escrita</button>
+        </div>
+        <div class="dica" id="bib-alvo"></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="aba" id="aba-chain">
+    <div class="linha">
+      <label>modo</label>
+      <select id="sel-chain-modo">
+        <option value="reescrita">biblioteca (reescrita — funciona hoje)</option>
+        <option value="variacao">variação A-H (requer sessão C)</option>
+        <option value="pattern">pattern da máquina (requer sessão B)</option>
+        <option value="pc">program change (requer sessão B)</option>
+      </select>
+      <select id="sel-chain-alvo"></select>
+      <label>repetições</label><input type="number" id="in-reps" value="2" min="1" max="16" style="width:70px">
+      <button id="b-add">Adicionar</button>
+    </div>
+    <table><thead><tr><th>entrada</th><th>reps</th><th></th></tr></thead>
+      <tbody id="tab-chain"></tbody></table>
+    <div class="linha">
+      <button id="b-armar">Armar</button><button id="b-parar">Parar</button>
+      <span class="dica" id="chain-estado">chain desarmado</span>
+    </div>
+  </section>
+
+  <section class="aba" id="aba-estoc">
+    <div class="dica">Opera na variação aberta; o primeiro uso guarda um
+      snapshot — Reverter volta tudo. Probability é nativa da TR-8S: a máquina
+      sorteia a cada volta.</div>
+    <div class="linha"><label>seed</label>
+      <input type="number" id="in-seed" value="1" style="width:90px">
+      <span class="dica">mesma seed sobre o mesmo pattern = mesmo resultado</span>
+    </div>
+    <div id="estoc-controles"></div>
+    <div class="linha"><button id="b-reverter" class="perigo">Reverter tudo</button></div>
+    <h3>Probability por step</h3>
+    <div class="linha"><label>instrumento</label><select id="sel-inst-prob"></select></div>
+    <div class="fila" id="fila-prob-step"></div>
+  </section>
+
+  <section class="aba" id="aba-avanc">
+    <div class="aviso">Comandos do mapa oficial da Roland (achados nas capturas
+      do ARIA). <b>Nenhum foi testado nesta máquina</b>: cada botão é uma
+      mini-sessão — observe a TR-8S e o resultado vai para a REFERENCIA.</div>
+    <div class="linha">
+      <button data-util="playing">Está tocando?</button>
+      <button data-util="versao">Versão do firmware</button>
+    </div>
+    <div class="linha">
+      <input type="text" id="in-visor" value="TR-8S GRID" maxlength="32" style="width:260px">
+      <button data-util="visor">Escrever no visor</button>
+    </div>
+    <div class="linha">
+      <button data-util="write" class="perigo">WRITE (salvar pattern)</button>
+      <span class="dica">grava o pattern atual na memória — o teste de verdade
+        é religar a máquina depois</span>
+    </div>
+    <h3>Log</h3>
+    <div class="logbox" id="logbox"></div>
+  </section>
+</main>
+
+<footer>
+  <span class="msg" id="msg">—</span>
+  <span id="build"></span>
+  <button id="b-sair" style="padding:3px 10px">Encerrar</button>
+</footer>
+
+<script>
+const $ = s => document.querySelector(s);
+const el = (t, cls, txt) => { const e = document.createElement(t);
+  if (cls) e.className = cls; if (txt !== undefined) e.textContent = txt; return e; };
+let D = null;          // dados estaticos
+let S = {};            // ultimo estado
+let arrastando = false;
+let escolhido = { bib: null, tone: null };
+let chain = [];
+
+let TOKEN = "";
+async function acao(corpo) {
+  const r = await fetch("/acao", {method: "POST",
+    headers: {"Content-Type": "application/json", "X-TR8S-Token": TOKEN},
+    body: JSON.stringify(corpo)});
+  if (!r.ok) {
+    let msg = r.status;
+    try { msg = (await r.json()).erro || msg; } catch (e) {}
+    $("#msg").textContent = "erro: " + msg;
+  }
+  return r.ok;
+}
+
+// ── abas ────────────────────────────────────────────────
+const ABAS = [["mixer", "Mixer & FX"], ["inst", "Instrumento"],
+              ["bib", "Biblioteca"], ["chain", "Chain"],
+              ["estoc", "Estocástica"], ["avanc", "Avançado"]];
+let abaAtual = "mixer";
+function montarNav() {
+  const nav = $("#nav");
+  ABAS.forEach(([id, nome]) => {
+    const b = el("button", id === abaAtual ? "sel" : "", nome);
+    b.onclick = () => {
+      abaAtual = id;
+      [...nav.children].forEach(c => c.classList.remove("sel"));
+      b.classList.add("sel");
+      document.querySelectorAll(".aba").forEach(a => a.classList.remove("sel"));
+      $("#aba-" + id).classList.add("sel");
+    };
+    nav.appendChild(b);
+  });
+}
+
+// ── fader vertical reutilizavel ─────────────────────────
+function fader(nome, valor, min, max, aoSoltar, hab = true) {
+  const c = el("div", "cel");
+  const v = el("div", "val", valor === null ? "—" : String(valor));
+  const i = document.createElement("input");
+  i.type = "range"; i.className = "v"; i.min = min; i.max = max;
+  i.value = valor === null ? min : valor; i.disabled = !hab;
+  i.oninput = () => { v.textContent = i.value; };
+  i.onpointerdown = () => arrastando = true;
+  i.onpointerup = i.onpointercancel = () => {
+    arrastando = false; aoSoltar(parseInt(i.value, 10));
+  };
+  c.append(v, i, el("div", "nome", nome));
+  c.dataset.chave = nome;
+  c._input = i; c._val = v;
+  return c;
+}
+
+// ── mixer ───────────────────────────────────────────────
+function montarProb() {
+  const f = $("#fila-prob");
+  f.innerHTML = "";
+  f.appendChild(el("div", "rot", "PROB %"));
+  D.instrumentos.forEach((n, i) => {
+    f.appendChild(fader(n, 100, 10, 100,
+      val => acao({acao: "prob_inst", inst: i, pct: val})));
+  });
+}
+function montarFxMapeados() {
+  const alvo = $("#fx-mapeados"), mapa = S.mapa_fx || {};
+  const chaveAtual = JSON.stringify(Object.keys(mapa).sort());
+  if (alvo.dataset.chave === chaveAtual) return;
+  alvo.dataset.chave = chaveAtual;
+  alvo.innerHTML = "";
+  const grupos = {};
+  Object.entries(mapa).forEach(([nome, ent]) =>
+    (grupos[ent.grupo || "OUTROS"] = grupos[ent.grupo || "OUTROS"] || []).push([nome, ent]));
+  Object.keys(grupos).sort().forEach(g => {
+    alvo.appendChild(el("h3", "", g));
+    grupos[g].sort().forEach(([nome, ent]) => {
+      if (ent.forma === "enum") {
+        const l = el("div", "linha");
+        l.append(el("label", "", nome));
+        const s = document.createElement("select");
+        s.dataset.enum = nome;
+        const ops = ent.opcoes || {};
+        if (!Object.keys(ops).length) s.append(new Option("(nenhuma opção anotada)", ""));
+        Object.entries(ops).sort((a, b) => a[0] - b[0]).forEach(([cod, rot]) =>
+          s.append(new Option(rot, cod)));
+        s.onchange = () => s.value !== "" && acao({acao: "fx", nome,
+          valor: parseInt(s.value, 10),
+          inst: ent.tipo === "kit" ? null : parseInt($("#sel-inst-fx").value, 10)});
+        l.append(s);
+        if (ent.tipo !== "kit") l.append(el("span", "dica", "(do instrumento escolhido)"));
+        alvo.appendChild(l);
+      } else if (ent.tipo === "inst") {
+        const f = el("div", "fila");
+        f.append(el("div", "rot", nome));
+        D.instrumentos.forEach((n, i) => f.append(fader(n, null, ent.min, ent.max,
+          val => acao({acao: "fx", nome, valor: val, inst: i}))));
+        f.dataset.fx = nome;
+        alvo.appendChild(f);
+      } else {
+        const l = el("div", "linha");
+        l.append(el("label", "", nome));
+        const i = document.createElement("input");
+        i.type = "range"; i.className = "h"; i.min = ent.min; i.max = ent.max;
+        i.dataset.fxkit = nome;
+        const v = el("span", "val", "—");
+        i.oninput = () => v.textContent = i.value;
+        i.onpointerdown = () => arrastando = true;
+        i.onpointerup = () => { arrastando = false;
+          acao({acao: "fx", nome, valor: parseInt(i.value, 10), inst: null}); };
+        l.append(i, v);
+        alvo.appendChild(l);
+      }
+    });
+  });
+}
+function montarCatalogo() {
+  const s = $("#sel-cat"), mapa = S.mapa_fx || {};
+  const faltam = D.catalogo_fx.filter(p => !(p.nome in mapa));
+  const chave = faltam.map(p => p.nome).join("|");
+  if (s.dataset.chave === chave) return;
+  s.dataset.chave = chave;
+  s.innerHTML = "";
+  faltam.forEach(p => s.append(new Option(`${p.grupo} · ${p.nome}`, p.nome)));
+  atualizarDica();
+  const se = $("#sel-enum");
+  const enums = Object.entries(mapa).filter(([, e]) => e.forma === "enum").map(([n]) => n);
+  se.innerHTML = "";
+  enums.forEach(n => se.append(new Option(n, n)));
+  atualizarRotulos();
+}
+function atualizarDica() {
+  const p = D.catalogo_fx.find(x => x.nome === $("#sel-cat").value);
+  $("#dica-cat").textContent = p ? `no painel: ${p.dica}` +
+    (p.bytes === 2 ? " · 2 bytes: gire de ponta a ponta" : "") +
+    (p.forma === "enum" ? " · é uma LISTA: capture e depois anote as opções" : "") : "";
+}
+function atualizarRotulos() {
+  const nome = $("#sel-enum").value, s = $("#sel-rotulo");
+  const cat = D.catalogo_fx.find(x => x.nome === nome);
+  s.innerHTML = "";
+  (cat && cat.opcoes || []).forEach(o => s.append(new Option(o, o)));
+  if (!s.options.length) s.append(new Option("(sem sugestões — digite no painel)", ""));
+}
+
+// ── instrumento / tones ─────────────────────────────────
+const CAT_INST = {0:"BD",1:"SD",2:"TOM",3:"TOM",4:"TOM",5:"RS",6:"HC",
+                  7:"CH_OH",8:"CH_OH",9:"CC_RC",10:"CC_RC"};
+function montarTones() {
+  const cat = $("#sel-cat-tone").value;
+  const tb = $("#tab-tones");
+  tb.innerHTML = "";
+  D.tones.filter(t => t.cat === cat).forEach(t => {
+    const tr = el("tr");
+    tr.append(el("td", "", String(t.id)), el("td", "", t.nome), el("td", "", t.tipo));
+    tr.onclick = () => {
+      escolhido.tone = t.id;
+      [...tb.children].forEach(c => c.classList.remove("sel"));
+      tr.classList.add("sel");
+    };
+    tr.ondblclick = () => acao({acao: "tone",
+      inst: parseInt($("#sel-inst-tone").value, 10), tone_id: t.id});
+    tb.appendChild(tr);
+  });
+}
+
+// ── biblioteca ──────────────────────────────────────────
+function montarBiblioteca() {
+  const tb = $("#tab-bib");
+  let estilo = null;
+  D.biblioteca.forEach(p => {
+    if (p.estilo !== estilo) {
+      estilo = p.estilo;
+      const tr = el("tr"); const td = el("td", "", estilo.toUpperCase());
+      td.colSpan = 2; td.style.color = "var(--mudo)"; td.style.fontSize = "11px";
+      tr.appendChild(td); tb.appendChild(tr);
+    }
+    const tr = el("tr");
+    tr.append(el("td", "", p.nome), el("td", "", p.bpm + " bpm"));
+    tr.onclick = () => {
+      escolhido.bib = p;
+      [...tb.children].forEach(c => c.classList.remove("sel"));
+      tr.classList.add("sel");
+      $("#bib-nome").textContent = p.nome;
+      $("#bib-info").textContent = `${p.estilo} · ${p.bpm} bpm · kit: ${p.kit}`;
+      $("#bib-obs").textContent = p.obs || "";
+      preview(p);
+    };
+    tb.appendChild(tr);
+  });
+}
+function preview(p) {
+  const alvo = $("#bib-preview");
+  alvo.innerHTML = "";
+  D.instrumentos.forEach(n => {
+    const linha = p.grade[n];
+    if (!linha || !linha.some(c => c.v)) return;
+    const div = el("div", "previewlinha");
+    div.append(el("span", "n", n));
+    const g = el("div", "grade");
+    for (let s = 0; s < 16; s++) {
+      const c = el("div", "c");
+      const cel = linha[s];
+      if (s >= (p.last_var || 16)) c.style.background = "#101010";
+      else if (cel.v) c.style.background = cel.s ? (cel.s === 1 ? "#a43afe" : "#ffe000")
+        : (cel.v >= 80 ? "#ff3b30" : "#7f1d1d");
+      g.appendChild(c);
+    }
+    div.append(g); alvo.appendChild(div);
+  });
+}
+
+// ── chain ───────────────────────────────────────────────
+function alvosChain() {
+  const modo = $("#sel-chain-modo").value, s = $("#sel-chain-alvo");
+  s.innerHTML = "";
+  if (modo === "reescrita") D.biblioteca.forEach(p => s.append(new Option(p.nome, p.id)));
+  else if (modo === "variacao") "ABCDEFGH".split("").forEach((v, i) => s.append(new Option(v, i + 1)));
+  else for (let b of "ABCDEFGH") for (let n = 1; n <= 16; n++)
+    s.append(new Option(b + n, "ABCDEFGH".indexOf(b) * 16 + n - 1));
+  chain = []; desenhaChain();
+}
+function desenhaChain() {
+  const tb = $("#tab-chain"); tb.innerHTML = "";
+  chain.forEach((e, i) => {
+    const tr = el("tr");
+    tr.append(el("td", "", e.rotulo), el("td", "", String(e.reps)));
+    const td = el("td");
+    const b = el("button", "", "remover");
+    b.onclick = () => { chain.splice(i, 1); desenhaChain(); };
+    td.append(b); tr.append(td); tb.append(tr);
+  });
+}
+
+// ── estocastica ─────────────────────────────────────────
+const ESTOC = [["densidade", "densidade (×100)", 25, 200, 100],
+               ["humanize", "humanize velocity (±)", 0, 40, 15],
+               ["retrig", "retrig / sub steps (%)", 0, 50, 15],
+               ["ghosts", "ghost notes (%)", 0, 50, 20]];
+function montarEstoc() {
+  const alvo = $("#estoc-controles");
+  ESTOC.forEach(([op, rot, min, max, ini]) => {
+    const l = el("div", "linha");
+    l.append(el("label", "", rot));
+    const i = document.createElement("input");
+    i.type = "range"; i.className = "h"; i.min = min; i.max = max; i.value = ini;
+    const v = el("span", "val", String(ini));
+    i.oninput = () => v.textContent = i.value;
+    const b = el("button", "", "Aplicar");
+    b.onclick = () => acao({acao: "estocastica", op,
+      valor: op === "densidade" ? parseInt(i.value, 10) / 100 : parseInt(i.value, 10),
+      seed: parseInt($("#in-seed").value, 10)});
+    l.append(i, v, b);
+    alvo.appendChild(l);
+  });
+  const f = $("#fila-prob-step");
+  f.appendChild(el("div", "rot", "steps"));
+  for (let s = 0; s < 16; s++) {
+    f.appendChild(fader(String(s + 1), 100, 10, 100,
+      val => acao({acao: "prob_step", inst: parseInt($("#sel-inst-prob").value, 10),
+                   step: s, pct: val}), false));
+  }
+}
+
+// ── pintura a cada quadro ───────────────────────────────
+function pintar() {
+  const on = (id, v) => $(id).classList.toggle("on", !!v);
+  on("#pt-ctrl", S.tem_tr8s); on("#pt-lp", S.tem_lp); on("#pt-clock", S.tem_clock);
+  document.querySelectorAll(".modo").forEach(b => {
+    const ativo = S.modo_geral === b.dataset.modo &&
+      (!b.dataset.estilo || b.dataset.estilo === S.estilo_standby);
+    b.classList.toggle("ativo", !!ativo);
+  });
+  $("#estado").textContent = !S.ligado ? "motor desligado — clique ON" :
+    S.modo_geral === "on"
+      ? `Variação ${S.variacao_nome || "?"}` +
+        (S.variacao_tocando && S.variacao_tocando !== S.variacao
+          ? ` (tocando a ${D.variacoes[S.variacao_tocando - 1]})` : "") +
+        ` · vel ${S.velocidade} · ${S.modo} · ${S.visiveis || ""}` +
+        (S.last_var < 16 ? ` · last ${S.last_var}` : "")
+      : S.modo_geral === "standby"
+        ? `standby · ${S.estilo_standby} — a TR-8S não é tocada`
+        : "os pads só fazem ondinha — a TR-8S não é tocada";
+  const p = S.pattern_atual, k = S.kit_atual;
+  $("#pill-ptn").textContent = "pattern " + (p == null ? "—" :
+    "ABCDEFGH"[Math.floor(p / 16)] + (p % 16 + 1));
+  $("#pill-kit").textContent = "kit " + (S.kit_nome || (k == null ? "—" : k + 1));
+  const log = S.log || [];
+  $("#msg").textContent = log.length ? log[log.length - 1] : "—";
+  if (abaAtual === "avanc") $("#logbox").textContent = log.join("\n");
+
+  if (abaAtual === "mixer") {
+    montarFxMapeados(); montarCatalogo();
+    $("#b-capturar").textContent = S.captura_fx ? `Cancelar '${S.captura_fx}'` : "Capturar";
+    if (!arrastando) {
+      const probs = S.probs_inst || [];
+      [...$("#fila-prob").querySelectorAll(".cel")].forEach((c, i) => {
+        const v = probs[i];
+        c._val.textContent = v == null ? "—" : v;
+        if (v != null) c._input.value = v;
+      });
+      const fx = S.fx || {};
+      document.querySelectorAll(".fila[data-fx]").forEach(f => {
+        const vals = fx[f.dataset.fx] || [];
+        [...f.querySelectorAll(".cel")].forEach((c, i) => {
+          const v = vals[i];
+          c._val.textContent = v == null ? "—" : v;
+          if (v != null) c._input.value = v;
+        });
+      });
+      document.querySelectorAll("input[data-fxkit]").forEach(i => {
+        const v = fx[i.dataset.fxkit];
+        if (v != null) { i.value = v; i.nextSibling.textContent = v; }
+      });
+      document.querySelectorAll("select[data-enum]").forEach(s => {
+        const ent = (S.mapa_fx || {})[s.dataset.enum]; if (!ent) return;
+        let v = fx[s.dataset.enum];
+        if (Array.isArray(v)) v = v[parseInt($("#sel-inst-fx").value, 10)];
+        if (v != null && s.value !== String(v)) s.value = String(v);
+      });
+    }
+  }
+  if (abaAtual === "inst") {
+    const i = parseInt($("#sel-inst-tone").value, 10);
+    const tid = (S.tone_ids || [])[i];
+    const t = tid == null ? null : D.tones.find(x => x.id === tid);
+    $("#tone-atual").textContent = `kit '${S.kit_nome || "?"}' · ` +
+      D.instrumentos[i] + ": " + (tid == null ? "tone ainda não lido" :
+        `id ${tid} = ` + (t ? `${t.nome} (${t.cat} ${t.tipo})` :
+          "fora da lista de presets (sample?)"));
+  }
+  if (abaAtual === "chain") {
+    const c = S.chain;
+    $("#chain-estado").textContent = !c ? "chain desarmado" :
+      `${c.ativo ? "ATIVO" : "parado"} · ${c.posicao + 1}/${c.total} · faltam ${c.reps_restantes} ciclos`;
+  }
+  if (abaAtual === "estoc" && !arrastando) {
+    const i = parseInt($("#sel-inst-prob").value, 10);
+    const vels = (S.pattern || {})[i] || [], pr = (S.probs || {})[i] || [];
+    [...$("#fila-prob-step").querySelectorAll(".cel")].forEach((c, s) => {
+      const ligado = !!vels[s];
+      c._input.disabled = !ligado;
+      c._val.textContent = ligado ? (pr[s] == null ? "—" : pr[s]) : "·";
+      if (ligado && pr[s] != null) c._input.value = pr[s];
+    });
+  }
+}
+
+async function tick() {
+  try {
+    S = await (await fetch("/estado")).json();
+    pintar();
+  } catch (e) { $("#msg").textContent = "servidor caiu — feche esta aba"; }
+  setTimeout(tick, 250);
+}
+
+// ── ligacao dos controles ───────────────────────────────
+async function iniciar() {
+  // o cookie de sessao (SameSite=Strict, HttpOnly) autoriza esta chamada;
+  // o token vai no header de todo POST
+  TOKEN = (await (await fetch("/token")).json()).token;
+  history.replaceState(null, "", "/");     // tira o ?t= da barra
+  D = await (await fetch("/dados")).json();
+  $("#build").textContent = "build " + D.build;
+  montarNav();
+  ["#sel-inst-fx", "#sel-inst-tone", "#sel-inst-prob"].forEach(id =>
+    D.instrumentos.forEach((n, i) => $(id).append(new Option(n, i))));
+  [...new Set(D.tones.map(t => t.cat))].forEach(c =>
+    $("#sel-cat-tone").append(new Option(c, c)));
+  $("#sel-cat-tone").value = CAT_INST[0];
+  montarProb(); montarBiblioteca(); montarEstoc(); montarTones(); alvosChain();
+
+  document.querySelectorAll(".modo").forEach(b => b.onclick = () =>
+    acao({acao: "modo", modo: b.dataset.modo, estilo: b.dataset.estilo || null}));
+  $("#b-recal").onclick = () => acao({acao: "externa", op: "recalibrar"});
+  $("#b-blackout").onclick = () => acao({acao: "externa", op: "blackout"});
+  $("#sel-cat").onchange = atualizarDica;
+  $("#sel-enum").onchange = atualizarRotulos;
+  $("#b-capturar").onclick = () => acao(S.captura_fx
+    ? {acao: "cancelar_captura"} : {acao: "capturar", nome: $("#sel-cat").value});
+  $("#b-anotar").onclick = () => {
+    const nome = $("#sel-enum").value;
+    const ent = (S.mapa_fx || {})[nome] || {};
+    acao({acao: "anotar_opcao", nome, rotulo: $("#sel-rotulo").value,
+          inst: ent.tipo === "kit" ? null : parseInt($("#sel-inst-fx").value, 10)});
+  };
+  $("#b-lerfx").onclick = () => acao({acao: "ler_fx"});
+  $("#b-lerkit").onclick = () => acao({acao: "ler_kit"});
+  $("#sel-inst-tone").onchange = () => {
+    $("#sel-cat-tone").value = CAT_INST[parseInt($("#sel-inst-tone").value, 10)];
+    montarTones();
+  };
+  $("#sel-cat-tone").onchange = montarTones;
+  let armado = 0;
+  $("#b-escrever").onclick = () => {
+    if (!escolhido.bib) return;
+    const agora = Date.now();
+    if (agora - armado > 2000) {
+      armado = agora;
+      $("#b-escrever").textContent = "Clique de novo (2 s)";
+      $("#bib-alvo").textContent = `vai sobrescrever a variação ${S.variacao_nome || "?"}` +
+        (S.variacao_tocando === S.variacao ? " — que está TOCANDO agora" : "") +
+        ". O Desfazer volta o que estava.";
+      return;
+    }
+    armado = 0; $("#b-escrever").textContent = "Escrever na TR-8S";
+    $("#bib-alvo").textContent = "";
+    acao({acao: "biblioteca", id: escolhido.bib.id});
+  };
+  $("#b-desfazer").onclick = () => acao({acao: "desfazer"});
+  $("#sel-chain-modo").onchange = alvosChain;
+  $("#b-add").onclick = () => {
+    const s = $("#sel-chain-alvo");
+    if (!s.value) return;
+    chain.push({alvo: $("#sel-chain-modo").value === "reescrita" ? s.value
+                  : parseInt(s.value, 10),
+                rotulo: s.options[s.selectedIndex].text,
+                reps: parseInt($("#in-reps").value, 10)});
+    desenhaChain();
+  };
+  $("#b-armar").onclick = () => acao({acao: "chain_armar",
+    modo: $("#sel-chain-modo").value, entradas: chain});
+  $("#b-parar").onclick = () => acao({acao: "chain_parar"});
+  $("#b-reverter").onclick = () => acao({acao: "estocastica", op: "reverter"});
+  $("#sel-inst-prob").onchange = () => pintar();
+  document.querySelectorAll("[data-util]").forEach(b => b.onclick = () =>
+    acao({acao: "util", op: b.dataset.util, texto: $("#in-visor").value}));
+  $("#b-sair").onclick = async () => {
+    await fetch("/sair", {method: "POST", body: "{}"});
+    $("#msg").textContent = "encerrado — pode fechar esta aba";
+  };
+  tick();
+}
+iniciar();
+</script>
+</body>
+</html>

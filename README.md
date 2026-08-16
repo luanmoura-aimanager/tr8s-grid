@@ -55,13 +55,22 @@ python3 lp_tr8s.py ports    # lista as portas MIDI com indice
 python3 lp_tr8s.py learn    # descobre esquerdo/direito e a rotacao de cada um
 python3 lp_tr8s.py run      # o grid ao vivo
 python3 lp_tr8s.py standby  # so as ondas coloridas; nem precisa da TR-8S ligada
+python3 testes.py           # testes de mesa, sem porta MIDI e sem hardware
 ```
 
-`python3 criar_app.py` monta um **`TR-8S Grid.app`** no Desktop, com janela e ícone, no
-lugar do comando no terminal.
+Duas formas de instalar a tela, e elas mantêm **cópias separadas** dos scripts:
 
-Feche o **TR-EDITOR** antes: ele segura a porta `TR-8S CTRL`, e só um processo por vez a
-usa.
+```bash
+python3 instalar_agente.py  # LaunchAgent: sobe no login e responde em 127.0.0.1:8733
+python3 criar_app.py        # TR-8S Grid.app no Desktop, com ícone
+```
+
+Depois de editar o código, rode **os dois** — quem costuma estar no ar é o do
+LaunchAgent, e atualizar só o `.app` deixa a versão velha respondendo.
+
+Feche o **TR-EDITOR** antes. O CoreMIDI deixa os dois abrirem a porta `TR-8S CTRL` ao
+mesmo tempo, mas aí ambos mandam RQ1 nela e cada um pega a resposta do outro — as
+leituras saem trocadas, sem erro nenhum aparecendo.
 
 ### Engenharia reversa
 
@@ -88,9 +97,16 @@ ocorrência, então os dois Launchpad viram um só. Por isso a enumeração e a 
 
 | Arquivo | O que é |
 |---|---|
-| `lp_tr8s.py` | O motor e a CLI: launchpads, SysEx, grid ao vivo |
-| `gui.py` | Janela: ON/off/standby, status, grid, pattern, last steps |
+| `lp_tr8s.py` | O motor e a CLI: launchpads, SysEx, grid ao vivo, sessões de hardware (`prob_watch`, `pattern`, `pc`, `var_mask`) |
+| `web/` | A interface: HTML/CSS/módulos ES sem build nem dependência. Aba **Pattern** com o grid 12×16 editável (espelho do TR-EDITOR, com probability que o hardware não exibe), barra de estado com displays e LEDs, Mixer & FX, Instrumento, Biblioteca, Chain, Estocástica, Avançado |
+| `servidor.py` + `pagina.html` | A tela: servidor local (só stdlib, 127.0.0.1, com token/Origin/CSP) + página no navegador, com o que o grid físico não tem — Mixer & FX (sends/knobs/LFO por captura guiada + probability), Instrumento (troca de tone), Biblioteca, Chain, Estocástica, Avançado. Log em `~/Library/Logs/TR8S-Grid-app.log`. Saiu do Tkinter porque o Tk 8.5.9 do Python do CLT trava no macOS atual (medições na REFERENCIA §4) |
+| `efeitos.py` | Mapa dos parâmetros de kit/FX decodificados por observação (captura no app + sniff do TR-EDITOR) |
+| `biblioteca.py` | 20 patterns clássicos em 14 estilos musicais, com kit sugerido — `python3 biblioteca.py` valida e mostra previews |
+| `gen_tones.py` → `tones.py` | Preset Tone List da Roland como dados, para a aba Instrumento (trocar o tone de cada track) |
+| `ferramentas.py` | Chain de patterns e ferramenta estocástica (probabilidade, densidade, humanize, ghosts) |
 | `criar_app.py` | Monta o `.app` do Desktop |
+| `instalar_agente.py` | Instala o LaunchAgent que sobe o servidor no login — é a cópia que costuma estar no ar |
+| `testes.py` | Testes de mesa (`unittest`, sem porta MIDI): a contagem da variação que toca e a resolução de portas do `learn`. Guardam as duas regressões de 16/08 |
 | `apc_tr8s.py` | Versão anterior, para APC40 mkII — funcionando |
 | `tr8s_sysex.py` | Parser/diff de capturas do MIDI Monitor |
 | `gen_layout.py` → `layout.html` | Referência visual do mapeamento dos botões |

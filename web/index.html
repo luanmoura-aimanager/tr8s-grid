@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>TR-8S Grid</title>
+<!-- "Adicionar a Dock" do Safari: vira janela propria, sem barra de
+     endereco nem abas. O servidor tem que estar de pe - quem sobe o motor
+     continua sendo o .app do Desktop. -->
+<link rel="manifest" href="/web/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/web/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="TR-8S Grid">
+<meta name="theme-color" content="#151311">
+<link rel="stylesheet" href="/web/css/tokens.css">
+<link rel="stylesheet" href="/web/css/base.css">
+<link rel="stylesheet" href="/web/css/componentes.css">
+<link rel="stylesheet" href="/web/css/grade.css">
+<link rel="stylesheet" href="/web/css/abas.css">
+</head>
+<body>
+<h1 class="sr">TR-8S Grid</h1>
+
+<!-- barra de estado: displays, LEDs e chips no lugar da string corrida -->
+<header id="topo">
+  <div class="displays">
+    <div class="seg" id="d-ptn"><span class="seg-rot">ptn</span><span class="seg-val">—</span></div>
+    <div class="seg" id="d-kit"><span class="seg-rot">kit</span><span class="seg-val">—</span></div>
+    <div class="seg" id="d-bpm"><span class="seg-rot">bpm</span><span class="seg-val">—</span></div>
+    <div class="seg" id="d-var"><span class="seg-rot">toca</span><span class="seg-val">—</span></div>
+    <div class="seg" id="d-vedit"><span class="seg-rot">edita</span><span class="seg-val">—</span></div>
+    <div class="seg" id="d-step"><span class="seg-rot">step</span><span class="seg-val">—</span></div>
+  </div>
+  <div class="leds" id="leds"></div>
+  <div class="modos" id="modos"></div>
+  <div class="acoes-topo">
+    <button class="bt bt-peq" id="b-recal">Recalibrar</button>
+    <button class="bt bt-peq" id="b-blackout">Apagar pads</button>
+  </div>
+</header>
+<div id="fita" class="fita" hidden></div>
+<div id="chips-estado" class="chips-estado"></div>
+
+<nav class="abas" id="abas" role="tablist" aria-label="seções"></nav>
+<main id="paineis"></main>
+
+<footer id="rodape">
+  <span class="msg mono" id="msg">—</span>
+  <span class="mono" id="build"></span>
+  <button class="bt bt-peq" id="b-densidade" title="alternar densidade">⇕</button>
+  <button class="bt bt-peq" id="b-sair">Encerrar</button>
+</footer>
+
+<script type="module" src="/web/js/app.mjs"></script>
+</body>
+</html>

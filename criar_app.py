@@ -24,7 +24,10 @@ NOME    = "TR-8S Grid"
 # protegida pelo TCC do macOS, e um .app nao assinado nem consegue pedir
 # permissao - ele leva "Operation not permitted" em silencio. Rodando de dentro
 # do proprio bundle, o app nao toca em pasta protegida nenhuma.
-ARQUIVOS = ("gui.py", "lp_tr8s.py", "apagar_luzes.py")
+# A tela virou pagina web local (servidor.py + pagina.html): o Tk 8.5.9 do
+# Python do CLT nao aguentou a janela nova - ver o cabecalho do servidor.py.
+ARQUIVOS = ("servidor.py", "pagina.html", "lp_tr8s.py", "apagar_luzes.py",
+            "biblioteca.py", "ferramentas.py", "tones.py", "efeitos.py")
 MARCA   = "Contents/.tr8s-grid-app"   # so sobrescrevemos bundles com esta marca.
                                      # Tem que ficar em Contents/: o codesign
                                      # recusa "unsealed contents" na raiz.
@@ -136,9 +139,9 @@ LOG="$HOME/Library/Logs/tr8s-grid.log"
 # Rosetta - "have arm64, need x86_64". Do Terminal isso nunca aparece, porque la
 # o shell ja e nativo. Forca o arch nativo quando a maquina e Apple Silicon.
 if [ "$(/usr/sbin/sysctl -n hw.optional.arm64 2>/dev/null)" = "1" ]; then
-    exec /usr/bin/arch -arm64 /usr/bin/python3 "$DIR/gui.py" >>"$LOG" 2>&1
+    exec /usr/bin/arch -arm64 /usr/bin/python3 "$DIR/servidor.py" >>"$LOG" 2>&1
 fi
-exec /usr/bin/python3 "$DIR/gui.py" >>"$LOG" 2>&1
+exec /usr/bin/python3 "$DIR/servidor.py" >>"$LOG" 2>&1
 """
 
 
@@ -180,6 +183,12 @@ def criar(pasta):
             print(f"(!) {nome} nao encontrado em {AQUI} - o app vai faltar peca.")
             continue
         shutil.copy2(origem, os.path.join(recursos, nome))
+
+    # o diretorio web/ inteiro (CSS e modulos ES da pagina). Sem isto o .app
+    # sobe com a pagina e sem estilo nenhum - e o navegador recusa os modulos
+    web = os.path.join(AQUI, "web")
+    if os.path.isdir(web):
+        shutil.copytree(web, os.path.join(recursos, "web"))
 
     open(os.path.join(app, MARCA), "w").close()
 
