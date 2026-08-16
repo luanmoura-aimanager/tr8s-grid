@@ -233,11 +233,27 @@ def _acao_biblioteca(a):
 
 
 def _acao_chain_armar(a):
-    modo = a.get("modo", "reescrita")
+    modo = a.get("modo", "misto")
     entradas = []
     for it in a.get("entradas", []):
         reps = max(1, int(it.get("reps", 1)))
-        if modo == "reescrita":
+        if modo == "misto":
+            # a fila da tela: cada item diz o tipo
+            if it.get("tipo") == "groove":
+                pat = next((p for p in B.PATTERNS if p["id"] == it["id"]),
+                           None)
+                if not pat:
+                    continue
+                entradas.append({"tipo": "groove", "nome": pat["nome"],
+                                 "dados": B.expandir(pat),
+                                 "accent": pat.get("accent", 0),
+                                 "reps": reps})
+            elif it.get("tipo") == "pattern":
+                n = int(it["alvo"]) & 0x7F
+                entradas.append({"tipo": "pattern", "alvo": n,
+                                 "nome": "ABCDEFGH"[n // 16]
+                                 + str(n % 16 + 1), "reps": reps})
+        elif modo == "reescrita":
             pat = next((p for p in B.PATTERNS if p["id"] == it["alvo"]), None)
             if not pat:
                 continue
@@ -267,11 +283,17 @@ def _acao_estocastica(a):
     if not m:
         HOST.log("(!) ligue o modo ON primeiro")
         return
+    # insts: None = todos; lista de indices 0-10 restringe (reforma 2)
+    insts = a.get("insts")
+    if insts is not None:
+        insts = [i for i in map(int, insts) if 0 <= i < len(L.INSTRUMENTOS)]
+        if not insts:
+            insts = None
     tabela = {
-        "densidade": lambda: HOST.estocastica.densidade(m, float(v)),
-        "humanize": lambda: HOST.estocastica.humanize_vel(m, int(v)),
-        "retrig": lambda: HOST.estocastica.retrig(m, int(v)),
-        "ghosts": lambda: HOST.estocastica.gerar_ghosts(m, int(v)),
+        "densidade": lambda: HOST.estocastica.densidade(m, float(v), insts),
+        "humanize": lambda: HOST.estocastica.humanize_vel(m, int(v), insts),
+        "retrig": lambda: HOST.estocastica.retrig(m, int(v), insts=insts),
+        "ghosts": lambda: HOST.estocastica.gerar_ghosts(m, int(v), insts),
         "reverter": lambda: HOST.estocastica.reverter(m),
     }
     if op in tabela:
@@ -358,6 +380,13 @@ ACOES = {
                                       int(a["inst"]), int(a["tone_id"])),
     "biblioteca": _acao_biblioteca,
     "desfazer": lambda a: HOST.enfileirar(HOST.motor.desfazer_escrita),
+    "desfazer_tudo": lambda a: HOST.enfileirar(HOST.motor.desfazer_tudo),
+    # troca remota provada em 15/08/2026: agora=False troca na virada,
+    # agora=True corta no meio preservando o step
+    "pattern": lambda a: HOST.enfileirar(HOST.motor.definir_pattern,
+                                         int(a["n"]), bool(a.get("agora"))),
+    # HIPOTESE ate o primeiro teste com o visor (ver definir_kit)
+    "kit": lambda a: HOST.enfileirar(HOST.motor.definir_kit, int(a["n"])),
     "chain_armar": _acao_chain_armar,
     "chain_parar": lambda a: (HOST.motor and HOST.motor.chain
                               and HOST.enfileirar(HOST.motor.chain.parar)),
@@ -379,7 +408,8 @@ def dados_estaticos():
         "velocidades": L.VELOCIDADES,
         "modos_step": [m[0] for m in L.MODOS],
         "biblioteca": [{"id": p["id"], "nome": p["nome"], "estilo": p["estilo"],
-                        "bpm": p["bpm"], "kit": p["kit"], "obs": p.get("obs"),
+                        "bpm": p["bpm"], "kit": p["kit"],
+                        "kit_num": p.get("kit_num"), "obs": p.get("obs"),
                         "last_var": p.get("last_var", 16),
                         "accent": p.get("accent", 0),
                         "grade": {L.INSTRUMENTOS[i]: [

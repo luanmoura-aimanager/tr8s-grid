@@ -96,22 +96,43 @@
 
 /* ── playhead: UM elemento movido por transform ───────────
  * Repintar 176 celulas a cada step derruba qualquer navegador; mover uma
- * div nao custa nada. */
+ * div nao custa nada. Desde a reforma 2 a moldura e fina: a enfase virou a
+ * PINTURA das notas da coluna (data-play, abaixo). */
 .playhead{
   position:absolute; top:16px; bottom:0; width:var(--cel);
   left:calc(var(--rot-l) + var(--gap));
   transform:translateX(calc(var(--p,0) * (var(--cel) + var(--gap))));
   transition:transform var(--rapida) linear;
-  border:2px solid var(--c-play,#33d17a); border-radius:var(--r1);
-  pointer-events:none; box-shadow:0 0 10px #33d17a55;
+  border:1px solid var(--c-play,#33d17a); border-radius:var(--r1);
+  pointer-events:none;
 }
 .playhead[hidden]{ display:none }
 
-/* ── espelho dos LEDs (8x16, o que o Launchpad mostra) ── */
-.pads{ display:grid; grid-template-columns:repeat(16,1fr); gap:2px;
-       width:max-content }
-.pads i{ display:block; width:14px; height:12px; border-radius:2px;
-         background:#1a1a1a; transition:background var(--rapida) }
+/* a coluna que soa, pintada como nos pads: verde cheio onde tem nota,
+ * verde fraco onde nao. E camada de TRANSPORTE por cima da cor de conteudo
+ * (a regra de cores continua sendo a de Motor.cor_do_step) - a celula volta
+ * ao normal assim que a coluna passa. */
+.cel[data-play="f"]{ background:var(--c-play,#33d17a);
+                     box-shadow:0 0 8px #33d17a66 }
+.cel[data-play="o"]{
+  background:color-mix(in srgb, var(--c-play,#33d17a) 22%,
+             var(--c-vazio,#26221e));
+}
+
+/* ── janela dos Launchpads: moldura de 8 linhas sobre o grid ──
+ * Substitui o antigo "espelho dos LEDs". --j0 = primeira linha (indice no
+ * grid, ACC = 0), --jn = quantas linhas. Acompanha INST UP/DOWN de qualquer
+ * origem, porque vem do estado do motor. */
+.janela-lp{
+  position:absolute; left:calc(var(--rot-l)); right:0; pointer-events:none;
+  top:calc(16px + var(--j0,1) * (var(--cel-h) + var(--gap)));
+  height:calc(var(--jn,8) * (var(--cel-h) + var(--gap)) - var(--gap));
+  border:2px solid var(--c-play,#33d17a); border-radius:var(--r2);
+  opacity:.45;
+}
+.janela-lp[hidden]{ display:none }
+/* fallback para janela nao contigua: barra verde no rotulo da linha */
+.grade .rot[data-lp]{ box-shadow:inset 3px 0 0 var(--c-play,#33d17a) }
 
 /* ── barra de ferramentas ─────────────────────────────── */
 .ferr{ display:flex; flex-direction:column; gap:var(--e2); width:190px }

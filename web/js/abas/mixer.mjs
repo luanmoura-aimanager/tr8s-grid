@@ -6,6 +6,7 @@
 // painel) o revelou. O que ainda nao foi revelado aparece na lista de captura,
 // com o gesto do painel ao lado - nunca como um knob que finge funcionar.
 import { h, $, texto, attr, reconciliar } from "../nucleo/dom.mjs";
+import { painel } from "../comp/painel.mjs";
 import { fader } from "../comp/fader.mjs";
 import { knob } from "../comp/knob.mjs";
 import { rotuloValor } from "../nucleo/formato.mjs";
@@ -79,10 +80,8 @@ export default {
     const bReler = h("button.bt.bt-peq", { type: "button" }, "Reler valores");
     bReler.onclick = () => agir({ acao: "ler_fx" });
 
-    elCat = h(
-      "div.cartao",
-      {},
-      h("h3", {}, "mapear parâmetro novo"),
+    elCat = painel(
+      "Mapear parâmetro novo",
       h(
         "p.dica",
         {},
@@ -111,10 +110,8 @@ export default {
     );
 
     raiz.append(
-      h(
-        "div.secao",
-        {},
-        h("h3", {}, "probability por instrumento"),
+      painel(
+        "Probability por instrumento",
         h(
           "p.dica",
           {},
@@ -123,7 +120,7 @@ export default {
         ),
         fila,
       ),
-      h("div.secao", {}, h("h3", {}, "parâmetros mapeados"), elFx),
+      painel("Parâmetros mapeados", elFx),
       elCat,
     );
   },

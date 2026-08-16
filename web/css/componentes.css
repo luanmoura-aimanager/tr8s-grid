@@ -41,6 +41,54 @@
 #d-kit:not([data-vazio]) .seg-val{ color:#ffd08a;
                                    text-shadow:0 0 12px #ffb45477 }
 
+/* ── painel com cabecalho (reforma 2, direcao TR-EDITOR) ──
+ * A unidade visual da pagina: moldura, faixa de titulo em caps pequenas no
+ * ambar dos displays, corpo mais fundo que a faixa. O header comporta
+ * chips/contadores a direita (flex + margin-left:auto no ultimo grupo). */
+.painel{
+  background:var(--painel); border:1px solid var(--linha);
+  border-radius:var(--r3); overflow:hidden; margin-bottom:var(--e4);
+}
+.painel > header{
+  display:flex; align-items:center; gap:var(--e2);
+  padding:var(--e2) var(--e3);
+  background:var(--painel-cab); border-bottom:1px solid var(--linha);
+  font-size:var(--t-micro); font-weight:var(--peso-rot);
+  letter-spacing:var(--esp-rot); text-transform:uppercase;
+  color:var(--acento);
+}
+.painel > header .h-dir{ margin-left:auto; display:flex; gap:var(--e2);
+                         align-items:center; text-transform:none;
+                         letter-spacing:normal; color:var(--fraco) }
+.painel > .corpo{ padding:var(--e3) }
+.painel .painel{ background:var(--painel2) }   /* painel dentro de painel */
+
+/* ── campo: rotulo micro em cima, controle embaixo ────── */
+.campo{ display:inline-flex; flex-direction:column; gap:var(--e1);
+        vertical-align:top }
+.campo > label{
+  font-size:var(--t-micro); font-weight:var(--peso-rot);
+  letter-spacing:var(--esp-rot); text-transform:uppercase;
+  color:var(--fraco);
+}
+
+/* ── toggle: botao de estado com bolinha ──────────────── */
+.toggle{
+  display:inline-flex; align-items:center; gap:var(--e2);
+  background:var(--painel); color:var(--tinta2);
+  border:1px solid var(--linha); border-radius:var(--r-pill);
+  padding:var(--e1) var(--e3); cursor:pointer; font-size:var(--t-peq);
+  transition:border-color var(--rapida), color var(--rapida);
+}
+.toggle::before{
+  content:""; width:10px; height:10px; border-radius:50%;
+  background:var(--linha2); transition:background var(--rapida);
+}
+.toggle[aria-pressed="true"]{ border-color:var(--acento-esc);
+                              color:var(--tinta) }
+.toggle[aria-pressed="true"]::before{ background:var(--acento);
+                                      box-shadow:0 0 6px #ffb45488 }
+
 /* ── chips ────────────────────────────────────────────── */
 .chip{
   display:inline-flex; align-items:center; gap:var(--e1);
@@ -66,12 +114,18 @@
 .knob .arco{ fill:none; stroke:var(--info); stroke-width:4;
              stroke-linecap:round; transform:rotate(135deg);
              transform-origin:center;
-             stroke-dasharray:calc(var(--pct) * 75) 100;
+             stroke-dasharray:calc(var(--pct, 0) * 75) 100;
              transition:stroke-dasharray var(--rapida) linear }
 .knob .ponteiro{ stroke:var(--tinta); stroke-width:2; stroke-linecap:round;
                  transform-origin:22px 22px;
-                 transform:rotate(calc(-135deg + var(--pct) * 270deg));
+                 transform:rotate(calc(-135deg + var(--pct, 0) * 270deg));
                  transition:transform var(--rapida) linear }
+/* knob mapeado mas ainda sem leitura (valor "-"): arco e ponteiro somem em
+ * vez de renderizar um calc() invalido - o caso nasceu com os SENDS, que
+ * nao sao fantasmas mas so ganham valor quando o bloco e lido */
+.knob:not([aria-valuenow]):not([data-fantasma]) .arco,
+.knob:not([aria-valuenow]):not([data-fantasma]) .ponteiro{
+  visibility:hidden }
 .knob .knob-rot{ font-size:var(--t-micro); color:var(--fraco);
                  text-transform:uppercase; letter-spacing:.04em;
                  text-align:center; line-height:1.2 }

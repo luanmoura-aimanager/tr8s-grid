@@ -67,8 +67,9 @@ export function knob({
 
   function pintar(nv) {
     v = nv;
-    if (nv === null) {
+    if (nv == null) {
       texto(elVal, "—");
+      raiz.removeAttribute("aria-valuenow");
       return;
     }
     const p = pct(nv, min, max);

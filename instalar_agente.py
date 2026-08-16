@@ -33,6 +33,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 
 ROTULO = "com.luanmoura.tr8s-grid"
 AQUI = os.path.dirname(os.path.abspath(__file__))
@@ -98,12 +99,20 @@ def instalar():
         f.write(MODELO.format(rotulo=ROTULO, python=sys.executable,
                               script=alvo, aqui=DESTINO, pypath=PYTHONPATH,
                               log=LOG))
-    # bootout antes: se ja estava carregado, recarrega com a versao nova
+    # bootout antes: se ja estava carregado, recarrega com a versao nova.
+    # O bootout retorna ANTES de o processo antigo morrer, e o bootstrap em
+    # cima disso falha com "Input/output error" - dai o retry com pausa
+    # (aconteceu de verdade em 16/08/2026 e deixou o agente desinstalado).
     subprocess.run(["launchctl", "bootout", f"gui/{_uid()}/{ROTULO}"],
                    capture_output=True)
-    r = subprocess.run(["launchctl", "bootstrap", f"gui/{_uid()}", PLIST],
-                       capture_output=True, text=True)
-    if r.returncode:
+    r = None
+    for tentativa in range(5):
+        time.sleep(1.0 if tentativa else 0.5)
+        r = subprocess.run(["launchctl", "bootstrap", f"gui/{_uid()}", PLIST],
+                           capture_output=True, text=True)
+        if r.returncode == 0:
+            break
+    if r is None or r.returncode:
         print(f"(!) launchctl bootstrap falhou: {r.stderr.strip()}")
         return 1
     print(f"agente instalado: {PLIST}")

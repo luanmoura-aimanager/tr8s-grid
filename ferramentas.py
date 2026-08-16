@@ -36,15 +36,33 @@ import lp_tr8s as L
 class Chain:
     """Encadeia entradas [{...}, ...] e toca uma apos a outra.
 
-    entrada de reescrita: {"nome": str, "dados": expandir(), "accent": int,
-                           "reps": int}
-    entrada de variacao:  {"var": 1-8, "reps": int}
-    entrada de pattern:   {"alvo": 0-127, "reps": int}   (pattern e pc)
+    Desde a reforma 2 o despacho e POR ENTRADA (modo "misto"): cada entrada
+    diz seu tipo, e grooves da biblioteca e patterns da maquina convivem na
+    mesma fila.
+
+    entrada groove:   {"tipo": "groove", "nome": str, "dados": expandir(),
+                       "accent": int, "reps": int}
+        -> perseguicao do playhead (escreve por tras dele; inaudivel).
+        HONESTIDADE: escreve NA VARIACAO ABERTA do pattern corrente da
+        maquina - vindo depois de uma entrada de pattern, altera aquele.
+    entrada pattern:  {"tipo": "pattern", "alvo": 0-127, "nome": str,
+                       "reps": int}
+        -> nextPattern (01 00 00 02), PROVADO 15/08/2026: troca na virada.
+    entrada variacao: {"tipo": "variacao", "var": 1-8, "reps": int}
+        -> escrita na mascara de variacao (nao confirmada em hardware).
+
+    Os modos antigos ("reescrita"/"variacao"/"pattern") continuam aceitos:
+    viram o tipo de todas as entradas. O modo "pc" MORREU em 15/08/2026 -
+    dependia de motor.comum_out, que nunca existiu.
     """
 
-    def __init__(self, entradas, modo="reescrita", log=print):
-        assert modo in ("reescrita", "variacao", "pattern", "pc")
-        self.entradas, self.modo, self.log = list(entradas), modo, log
+    def __init__(self, entradas, modo="misto", log=print):
+        assert modo in ("misto", "reescrita", "variacao", "pattern")
+        tipo_legado = {"reescrita": "groove", "variacao": "variacao",
+                       "pattern": "pattern"}.get(modo)
+        self.entradas = [dict(e, tipo=e.get("tipo") or tipo_legado or "groove")
+                         for e in entradas]
+        self.modo, self.log = modo, log
         self.idx = 0
         self.reps_restantes = self.entradas[0]["reps"] if entradas else 0
         self.ativo = False
@@ -56,21 +74,21 @@ class Chain:
     def armar(self, motor):
         """Poe a primeira entrada no ar e comeca a contar ciclos.
 
-        No modo reescrita a entrada 0 e escrita ja (via escrever_pattern, que
-        tira o snapshot do Desfazer); nos outros modos o alvo 0 e pedido ja."""
+        Groove e escrito ja (via escrever_pattern, que empilha o Desfazer);
+        pattern/variacao sao pedidos ja."""
         if not self.entradas:
             self.log("(!) chain vazio"); return
         self.idx, self.reps_restantes = 0, self.entradas[0]["reps"]
         self._ciclo, self._fila_escrita = None, None
         ent = self.entradas[0]
-        if self.modo == "reescrita":
+        if ent["tipo"] == "groove":
             if not motor.escrever_pattern(ent["dados"], ent.get("accent", 0),
                                           nome=ent.get("nome", "chain")):
                 return
         else:
             self._pedir_alvo(motor, ent)
         self.ativo = True
-        self.log(f"chain armado: {len(self.entradas)} entradas ({self.modo}), "
+        self.log(f"chain armado: {len(self.entradas)} entradas, "
                  f"'{ent.get('nome', ent.get('alvo', ent.get('var', '?')))}' "
                  f"{self.reps_restantes}x")
 
@@ -82,7 +100,13 @@ class Chain:
     def resumo(self):
         return {"ativo": self.ativo, "modo": self.modo, "posicao": self.idx,
                 "reps_restantes": self.reps_restantes,
-                "total": len(self.entradas)}
+                "total": len(self.entradas),
+                # a fila visual da tela reconcilia com isto
+                "entradas": [{"nome": e.get("nome",
+                                            str(e.get("alvo",
+                                                      e.get("var", "?")))),
+                              "tipo": e["tipo"], "reps": e["reps"]}
+                             for e in self.entradas]}
 
     # ── um tick do motor ────────────────────────────────────
     def tick(self, motor):
@@ -115,44 +139,36 @@ class Chain:
         return self.entradas[(self.idx + 1) % len(self.entradas)]
 
     def _pedir_alvo(self, motor, ent):
-        """Manda a troca de uma entrada nos modos que pedem a maquina."""
-        if self.modo == "pattern":
+        """Manda a troca de uma entrada que pede a maquina (pattern/variacao)."""
+        if ent["tipo"] == "pattern":
             motor.tr_out.send(L.dt1(
                 L.addr_soma(L.ADDR_PERF, L.OFF_PATTERN_PROX), [ent["alvo"]]))
-            self.log(f"chain: nextPattern {ent['alvo']} enviado "
-                     "(troca na virada, se a sessao B confirmar)")
-        elif self.modo == "variacao":
+            n = ent["alvo"]
+            self.log(f"chain: nextPattern {'ABCDEFGH'[n//16]}{n%16+1} "
+                     "enviado (troca na virada - provado 15/08)")
+        elif ent["tipo"] == "variacao":
             motor.tr_out.send(L.dt1(
                 L.addr_soma(L.ADDR_PATTERN, L.OFF_VAR_TOCANDO),
                 L.mascara_para_nibbles(1 << (ent["var"] - 1))))
             self.log(f"chain: variacao {L.VARIACOES[ent['var']-1]} pedida "
                      "(sessao C decide se obedece)")
-        elif self.modo == "pc":
-            if getattr(motor, "comum_out", None):
-                motor.comum_out.send(L.mido.Message(
-                    'program_change', channel=L.CANAL_TR8S,
-                    program=ent["alvo"]))
-                self.log(f"chain: PC {ent['alvo']} enviado")
-            else:
-                self.log("(!) chain pc: porta comum de saida nao aberta")
 
     def _preparar_troca(self, motor):
         """Entrou no ULTIMO ciclo da entrada atual: encaminha a proxima.
 
-        reescrita: comeca a perseguir o playhead ja neste ciclo.
-        pattern:   manda o nextPattern agora - se a maquina enfileira como no
-                   painel, ela mesma troca na virada."""
+        groove:  comeca a perseguir o playhead ja neste ciclo.
+        pattern: manda o nextPattern agora - a maquina mesma troca na virada."""
         prox = self._proxima()
-        if self.modo == "reescrita":
+        if prox["tipo"] == "groove":
             self._fila_escrita = {"passo": 0, "dados": prox["dados"]}
-        elif self.modo == "pattern":
+        elif prox["tipo"] == "pattern":
             self._pedir_alvo(motor, prox)
 
     def _avancar(self, motor):
         self.idx = (self.idx + 1) % len(self.entradas)
         ent = self.entradas[self.idx]
         self.reps_restantes = ent["reps"]
-        if self.modo == "reescrita":
+        if ent["tipo"] == "groove":
             # o grosso foi na perseguicao do ciclo anterior; se nao houve
             # tempo (entrada de 1 ciclo), a fila nasce agora e vai em rajada
             if self._fila_escrita is None:
@@ -164,11 +180,9 @@ class Chain:
             motor.pintar()
             self.log(f"chain: '{ent.get('nome', '?')}' no ar "
                      f"({self.reps_restantes}x)")
-        elif self.modo == "variacao":
+        elif ent["tipo"] == "variacao":
             self._pedir_alvo(motor, ent)
-        elif self.modo == "pc":
-            self._pedir_alvo(motor, ent)
-        # no modo pattern a troca ja foi pedida no _preparar_troca; aqui so
+        # tipo pattern: a troca ja foi pedida no _preparar_troca; aqui so
         # conta - e se a entrada nova dura 1 ciclo, o tick chama o preparo
 
     def _perseguir(self, motor, tudo=False):
@@ -200,9 +214,9 @@ class Chain:
 class Estocastica:
     """Operacoes estocasticas sobre a variacao aberta, com seed reprodutivel.
 
-    Toda operacao garante um snapshot (o mesmo buffer do desfazer da
-    biblioteca) antes de mexer - Reverter e sempre um clique. Trocar de
-    variacao invalida o snapshot e o proximo uso tira outro."""
+    Toda operacao EMPILHA um snapshot rotulado antes de mexer (reforma 2) -
+    e assim que o "Reverter" ao lado de cada Aplicar sabe desfazer SO aquela
+    edicao. insts=None opera em todos; lista de indices 0-10 restringe."""
 
     def __init__(self, seed=None):
         self.seed = seed
@@ -212,37 +226,40 @@ class Estocastica:
         self.seed = seed
         self.rng = random.Random(seed)
 
-    def _garantir_snapshot(self, motor):
-        d = getattr(motor, "desfazer", None)
-        if d is None or d[1] != motor.variacao:
-            motor.desfazer = (L.VARIACOES[motor.variacao-1], motor.variacao,
-                              {i: list(dd) for i, dd in motor.cache.items()},
-                              motor.acc)
+    @staticmethod
+    def rotulo(op, insts):
+        """O formato e CONTRATO com a tela: o Reverter-por-edicao compara o
+        topo de desfazer_pilha com o rotulo que ele espera."""
+        if not insts:
+            return f"{op} todos"
+        return op + " " + "+".join(L.INSTRUMENTOS[i] for i in insts)
 
-    def _ativos(self, motor):
+    def _ativos(self, motor, insts=None):
         for i in range(len(L.INSTRUMENTOS)):
+            if insts is not None and i not in insts:
+                continue
             lim = motor.ultimo_efetivo(i)
             for s in range(16):
                 if s < lim and motor.ler_vel(i, s):
                     yield i, s
 
-    def _pronto(self, motor):
+    def _pronto(self, motor, op, insts):
         if motor.modo_geral != L.MODO_ON or not motor.carregado:
             motor.log("(!) estocastica so no modo ON")
             return False
-        self._garantir_snapshot(motor)
+        motor.snapshot_escrita(self.rotulo(op, insts))
         return True
 
     # ── operacoes ───────────────────────────────────────────
-    def densidade(self, motor, fator):
+    def densidade(self, motor, fator, insts=None):
         """Escala a probability dos steps ativos (o poly bias do Stochas).
 
         fator 1.0 nao mexe; 0.5 rareia; 2.0 adensa (teto 100). A velocity
         fica intacta - so o byte 3 anda."""
-        if not self._pronto(motor):
+        if not self._pronto(motor, "densidade", insts):
             return
         mexidos = 0
-        for i, s in self._ativos(motor):
+        for i, s in self._ativos(motor, insts):
             p = motor.ler_prob(i, s)
             novo = max(10, min(100, int(round(p * fator / 10.0)) * 10))
             if novo != p:
@@ -255,11 +272,11 @@ class Estocastica:
         motor.log(f"densidade x{fator:.2f}: {mexidos} steps "
                   "(probability nativa da maquina)")
 
-    def humanize_vel(self, motor, alcance):
+    def humanize_vel(self, motor, alcance, insts=None):
         """Velocity +- alcance, sorteado por step ativo. Nunca desliga (>=1)."""
-        if not self._pronto(motor):
+        if not self._pronto(motor, "humanize", insts):
             return
-        for i, s in self._ativos(motor):
+        for i, s in self._ativos(motor, insts):
             v = motor.ler_vel(i, s)
             novo = max(1, min(127, v + self.rng.randint(-alcance, alcance)))
             if novo != v:
@@ -269,14 +286,14 @@ class Estocastica:
         motor.pintar()
         motor.log(f"humanize +-{alcance} aplicado (seed {self.seed})")
 
-    def retrig(self, motor, chance, tipos=(1, 2, 3, 4)):
+    def retrig(self, motor, chance, tipos=(1, 2, 3, 4), insts=None):
         """Sorteia sub steps nos steps ativos - rufos/flams aleatorios.
 
         chance em % por step; tipos sao os codigos do byte 5 (1 flam,
         2/3/4 = sub 1/2, 1/3, 1/4)."""
-        if not self._pronto(motor):
+        if not self._pronto(motor, "retrig", insts):
             return
-        for i, s in self._ativos(motor):
+        for i, s in self._ativos(motor, insts):
             if self.rng.random() * 100 < chance:
                 motor.escrever_step(i, s, motor.ler_vel(i, s),
                                     self.rng.choice(list(tipos)),
@@ -285,16 +302,18 @@ class Estocastica:
         motor.pintar()
         motor.log(f"retrig {chance}% aplicado (seed {self.seed})")
 
-    def gerar_ghosts(self, motor, chance):
+    def gerar_ghosts(self, motor, chance, insts=None):
         """Liga steps VAZIOS com velocity fraca e probability baixa.
 
         E a assinatura do Stochas traduzida: o pattern ganha notas que a
         propria maquina decide tocar ou nao a cada volta. So mexe em linhas
         que ja tem alguma nota - linha vazia e escolha, nao esquecimento."""
-        if not self._pronto(motor):
+        if not self._pronto(motor, "ghosts", insts):
             return
         criados = 0
         for i in range(len(L.INSTRUMENTOS)):
+            if insts is not None and i not in insts:
+                continue
             lim = motor.ultimo_efetivo(i)
             if not any(motor.ler_vel(i, s) for s in range(lim)):
                 continue

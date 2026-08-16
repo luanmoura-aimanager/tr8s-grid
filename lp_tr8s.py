@@ -44,7 +44,7 @@ PORTAS POR INDICE, NAO POR NOME
     mido apenas para montar/parsear mensagens. Verificado em 13/08/2026: as 4
     entradas abrem simultaneamente.
 """
-import sys, time, json, os, math, random, threading, queue
+import sys, time, json, os, math, random, threading, queue, collections
 import mido
 import rtmidi
 
@@ -1527,7 +1527,13 @@ class Motor:
         self.passo_abs = 0        # contagem absoluta, pros tracks curtos
         self.ultima_leitura = 0.0
         self.copia, self.armado, self.armado_t = None, None, 0.0
-        self.desfazer = None      # snapshot do escrever_pattern (biblioteca)
+        # PILHA de snapshots de escrita (biblioteca/estocastica): cada item e
+        # (rotulo, variacao, copia do cache, accent). Virou pilha em 15/08 a
+        # noite para o "Reverter por edicao" da estocastica - um snapshot
+        # unico obrigava o Reverter a engolir varias edicoes de uma vez.
+        self.pilha_desfazer = []
+        self.TETO_DESFAZER = 10
+        self._clock_ts = collections.deque(maxlen=25)  # BPM medido do clock
         self.chain = None         # ferramentas.Chain, quando armado
         self.alt = False               # flag do ALTERNATE, nao um dos 5 modos
         self.mudo = [False]*len(INSTRUMENTOS)   # lido da maquina, nunca inventado
@@ -1535,6 +1541,7 @@ class Motor:
         self.variacao_tocando = None            # qual variacao a maquina toca
         self.kit_atual = None                   # offset 0 do perf (01 00 00 00)
         self.kit_trocou = False                 # troca vista no painel
+        self.pattern_trocou = False             # idem, para o pattern
         self.fx_fila = []                       # blocos de FX a reler, aos poucos
         self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
         self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
@@ -1813,8 +1820,18 @@ class Motor:
             self.log(f"kit mudou no painel ({self.kit_atual} -> {novo_kit}): "
                      "relendo nome, tones e efeitos")
         self.kit_atual = novo_kit
-        self.pattern_atual = (d[OFF_PATTERN_ATUAL]
-                              if len(d) > OFF_PATTERN_ATUAL else None)
+        # Mesmo raciocinio para o PATTERN: trocar de pattern (no painel ou
+        # remotamente) muda todos os steps, e sem esta bandeira o grid segue
+        # mostrando o pattern anterior com ar de certeza. Buraco achado no
+        # planejamento da reforma 2 - a deteccao existia so para o kit.
+        novo_pat = (d[OFF_PATTERN_ATUAL]
+                    if len(d) > OFF_PATTERN_ATUAL else None)
+        if novo_pat != self.pattern_atual and self.pattern_atual is not None:
+            self.pattern_trocou = True
+            n = novo_pat
+            self.log("pattern mudou "
+                     f"({'ABCDEFGH'[n // 16]}{n % 16 + 1}): relendo o grid")
+        self.pattern_atual = novo_pat
         m = nibbles_para_mascara(d[OFF_MUTE:OFF_MUTE + 4])
         novo = [bool(m >> i & 1) for i in range(len(INSTRUMENTOS))]
         mudou = novo != self.mudo
@@ -2232,8 +2249,7 @@ class Motor:
         if self.modo_geral != MODO_ON or not self.carregado:
             self.log("(!) escrever pattern so no modo ON")
             return False
-        self.desfazer = (VARIACOES[self.variacao-1], self.variacao,
-                         {i: list(d) for i, d in self.cache.items()}, self.acc)
+        self.snapshot_escrita(f"escrita '{nome or '?'}'")
         for i in range(len(INSTRUMENTOS)):
             for s in range(16):
                 vel, sub, prob, alt = dados.get(i, [(0, 0, 100, False)]*16)[s]
@@ -2253,16 +2269,58 @@ class Motor:
                  f"{VARIACOES[self.variacao-1]}")
         return True
 
-    def desfazer_escrita(self):
-        """Volta o que escrever_pattern sobrescreveu (mesma rajada do PASTE)."""
-        if not getattr(self, "desfazer", None):
-            self.log("(!) nada para desfazer")
+    def definir_pattern(self, n, agora=False):
+        """Troca o pattern da maquina - protocolo PROVADO em 15/08/2026.
+
+        agora=False: escreve o PROXIMO pattern (01 00 00 02); a maquina troca
+        na virada, como no painel - o modo do chain e da estrutura.
+        agora=True: escreve o pattern ATUAL (01 00 00 01); corta no meio do
+        compasso PRESERVANDO o step - troca de conteudo com o relogio
+        intacto, para performance.
+
+        A releitura do grid vem pela deteccao de pattern_trocou no
+        ler_mudos(), igual a troca feita no painel."""
+        if self.modo_geral != MODO_ON or not self.tr_out:
+            self.log("(!) trocar pattern so no modo ON")
             return
-        origem, var, blocos, mascara = self.desfazer
+        n = int(n) & 0x7F
+        off = OFF_PATTERN_ATUAL if agora else OFF_PATTERN_PROX
+        self.tr_out.send(dt1(addr_soma(ADDR_PERF, off), [n]))
+        nome = "ABCDEFGH"[n // 16] + str(n % 16 + 1)
+        self.log(f"pattern {'AGORA' if agora else 'na virada'} -> {nome}")
+
+    def definir_kit(self, n):
+        """Troca o kit da maquina escrevendo o byte 0 do perf.
+
+        HIPOTESE (15/08/2026): os offsets 1 e 2 do mesmo no sao provados
+        (troca de pattern); o 0 e lido ha dias como kit atual, mas NUNCA foi
+        escrito. Primeiro uso em hardware: conferir o visor. A releitura de
+        nome/tones/efeitos vem pela deteccao de kit_trocou no ler_mudos()."""
+        if self.modo_geral != MODO_ON or not self.tr_out:
+            self.log("(!) trocar kit so no modo ON")
+            return
+        n = int(n) & 0x7F
+        self.tr_out.send(dt1(addr_soma(ADDR_PERF, OFF_KIT_ATUAL), [n]))
+        self.log(f"kit -> {n + 1:03d} (escrita nova em hardware: confira o "
+                 "visor da TR-8S)")
+
+    def snapshot_escrita(self, rotulo):
+        """Empilha o estado da variacao aberta antes de uma escrita em massa.
+
+        O rotulo e o que a tela mostra no historico ("ghosts BD", "escrita
+        'Deep house'") e o que o Reverter-por-edicao compara para saber se a
+        SUA edicao ainda e o topo da pilha."""
+        self.pilha_desfazer.append(
+            (rotulo, self.variacao,
+             {i: list(d) for i, d in self.cache.items()}, self.acc))
+        del self.pilha_desfazer[:-self.TETO_DESFAZER]
+
+    def _restaurar_snapshot(self, snap):
+        rotulo, var, blocos, mascara = snap
         if var != self.variacao:
-            self.log(f"(!) o snapshot e da variacao {origem} - va ate ela "
-                     "para desfazer")
-            return
+            self.log(f"(!) '{rotulo}' e da variacao {VARIACOES[var-1]} - va "
+                     "ate ela para desfazer")
+            return False
         for i, dados_i in blocos.items():
             for s in range(16):
                 b = s * BYTES_P_STEP
@@ -2273,9 +2331,27 @@ class Motor:
         self.acc = mascara
         self.tr_out.send(dt1(addr_accent(self.variacao),
                              mascara_para_nibbles(mascara)))
-        self.desfazer = None
         self.pintar()
-        self.log(f"desfeito: variacao {origem} de volta ao que era")
+        return True
+
+    def desfazer_escrita(self):
+        """Desfaz a ULTIMA escrita em massa (topo da pilha)."""
+        if not self.pilha_desfazer:
+            self.log("(!) nada para desfazer")
+            return
+        if self._restaurar_snapshot(self.pilha_desfazer[-1]):
+            rotulo = self.pilha_desfazer.pop()[0]
+            self.log(f"desfeito: {rotulo}")
+
+    def desfazer_tudo(self):
+        """Volta ao estado ANTES da primeira escrita da pilha e a esvazia."""
+        if not self.pilha_desfazer:
+            self.log("(!) nada para desfazer")
+            return
+        if self._restaurar_snapshot(self.pilha_desfazer[0]):
+            n = len(self.pilha_desfazer)
+            self.pilha_desfazer.clear()
+            self.log(f"desfeitas {n} edicoes - variacao de volta ao inicio")
 
     def alternar(self, linha, step):
         # a linha mutada continua editavel: ela some do grid so quando voce pede,
@@ -2995,6 +3071,9 @@ class Motor:
         for msg in self.clk.iter_pending():
             t = msg.type
             if t == 'clock':
+                # carimbo para o BPM medido (24 ppq); a TR-8S manda clock
+                # mesmo parada, entao o BPM aparece sempre que ha cabo
+                self._clock_ts.append(time.time())
                 if self.tocando:
                     self.pulsos += 1
                     self.passo_abs = self.pulsos // PULSOS_P_STEP
@@ -3012,6 +3091,19 @@ class Motor:
                 # deixaria as outras com o verde preso na tela
                 self.tocando, self.passo = False, -1
                 self.pintar()
+
+    def _bpm_medido(self):
+        """BPM derivado do intervalo entre clocks (24 por seminima), ou None.
+
+        Mostrar e barato; ESCREVER BPM nao tem endereco conhecido - o tempo
+        continua sendo o knob TEMPO da maquina (REFERENCIA 7)."""
+        ts = self._clock_ts
+        if len(ts) < 13 or time.time() - ts[-1] > 1.0:
+            return None
+        dt = ts[-1] - ts[0]
+        if dt <= 0:
+            return None
+        return round((len(ts) - 1) / dt * 60.0 / 24.0, 1)
 
     def _escape(self, cc):
         """Fora do ON (off e standby), HIDE MUTED + ALT juntos (os dois vizinhos
@@ -3097,6 +3189,15 @@ class Motor:
                     self.ler_kit()
                     self.fx_fila = self._fx_alvos()
                 self._drenar_fx_fila()
+                # pattern trocou: o grid inteiro e outro. ADIADO enquanto o
+                # chain estiver perseguindo o playhead (a releitura de ~2 s
+                # atropelaria a fila de escrita dele)
+                if self.pattern_trocou and not (
+                        self.chain and getattr(self.chain, "_fila_escrita",
+                                               None)):
+                    self.pattern_trocou = False
+                    self.recarregar()
+                    self.pintar()
                 # e as notas: sem isto, ligar um step no painel da TR-8S
                 # nunca chegaria ao grid nem aos Launchpad
                 if self._reler_pattern_rodizio():
@@ -3209,7 +3310,9 @@ class Motor:
                 "vel_idx": self.vel_idx,
                 "modo_idx": self.modo,
                 "copia_cheia": self.copia is not None,
-                "desfazer_disponivel": bool(self.desfazer),
+                "desfazer_disponivel": bool(self.pilha_desfazer),
+                "desfazer_pilha": [s[0] for s in self.pilha_desfazer],
+                "bpm": self._bpm_medido(),
                 "polirritmia": self.polirritmia(),
                 "fx": self._fx_valores(),
                 "mapa_fx": {n: dict(e) for n, e in self.mapa_fx.items()},

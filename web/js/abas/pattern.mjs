@@ -10,8 +10,6 @@ import { toast } from "../comp/toast.mjs";
 let grade,
   elVars,
   elFerr,
-  elPads,
-  padCels = [],
   linhaSel = 1;
 const pendentes = new Set(); // "l,s" enviados, aguardando a maquina
 let ultimoArmado = 0;
@@ -136,6 +134,20 @@ export default {
       });
     };
 
+    // janela dos Launchpads: os mesmos INST UP/DOWN dos pads, agora na tela
+    const bCima = h(
+      "button.bt.bt-peq",
+      { type: "button", id: "b-rolar-cima", title: "INST UP" },
+      "▲",
+    );
+    bCima.onclick = () => agir({ acao: "exec", tipo: "rolar", arg: -1 });
+    const bBaixo = h(
+      "button.bt.bt-peq",
+      { type: "button", id: "b-rolar-baixo", title: "INST DOWN" },
+      "▼",
+    );
+    bBaixo.onclick = () => agir({ acao: "exec", tipo: "rolar", arg: 1 });
+
     elFerr.append(
       grupo("velocity", velChips),
       grupo("modo do step", modoChips, bAlt),
@@ -151,15 +163,17 @@ export default {
         bClearVar,
         bAcc,
       ),
+      grupo(
+        "janela dos Launchpads",
+        h(
+          "div.linha",
+          {},
+          bCima,
+          bBaixo,
+          h("span.mono.dica", { id: "rot-janela" }, "—"),
+        ),
+      ),
     );
-
-    // ── espelho dos LEDs (o que os Launchpads mostram, com a ondinha) ──
-    elPads = h("div.pads");
-    for (let i = 0; i < 128; i++) {
-      const c = h("i");
-      padCels.push(c);
-      elPads.append(c);
-    }
 
     raiz.append(
       h(
@@ -175,22 +189,11 @@ export default {
             {},
             "clique liga/desliga · Shift-clique grava fraco · " +
               "arraste para pintar vários · clique direito (ou Alt-clique) " +
-              "abre velocity/sub step/alternate/probability",
+              "abre velocity/sub step/alternate/probability · a moldura " +
+              "verde é a janela dos Launchpads",
           ),
         ),
         elFerr,
-      ),
-      h(
-        "div.secao",
-        {},
-        h("h3", {}, "espelho dos LEDs"),
-        h(
-          "p.dica",
-          {},
-          "o que está nos Launchpad agora — 8 linhas, já roladas, " +
-            "com o playhead. No standby mostra a ondinha.",
-        ),
-        elPads,
       ),
     );
     grade.marcarLinha(linhaSel);
@@ -230,43 +233,26 @@ export default {
       lt.value = v && v < 16 ? String(v) : "";
     }
 
-    // espelho dos LEDs: pads ja vem com a cor resolvida pelo motor
-    const pads = e.pads;
-    for (let l = 0; l < 8; l++) {
-      for (let c = 0; c < 16; c++) {
-        const cor = pads ? pads[l][c] : null;
-        const hex =
-          cor === null || cor === undefined
-            ? "#1a1a1a"
-            : Array.isArray(cor)
-              ? `rgb(${Math.min(255, cor[0] * 2)},${Math.min(255, cor[1] * 2)},${Math.min(255, cor[2] * 2)})`
-              : (D.paleta_idx && D.paleta_idx[cor]) || corIndice(cor);
-        const cel = padCels[l * 16 + c];
-        if (cel.dataset.h !== hex) {
-          cel.dataset.h = hex;
-          cel.style.background = hex;
-        }
-      }
+    // janela dos Launchpads: a moldura verde sobre o proprio grid substitui
+    // o antigo "espelho dos LEDs" (a ondinha do standby saiu da web junto).
+    // +1 porque a linha 0 do grid e a ACC
+    const idx = (e.visiveis || [])
+      .map((n) => D.instrumentos.indexOf(n) + 1)
+      .filter((x) => x > 0);
+    grade.marcarJanela(idx);
+    const rotJanela = $("#rot-janela");
+    if (rotJanela && idx.length) {
+      texto(
+        rotJanela,
+        `${D.instrumentos[idx[0] - 1]}–${D.instrumentos[idx[idx.length - 1] - 1]}`,
+      );
     }
+    const emCima = e.base_inst === 0;
+    const emBaixo = idx.length && idx[idx.length - 1] === D.instrumentos.length;
+    attr($("#b-rolar-cima"), "aria-disabled", emCima ? "true" : null);
+    attr($("#b-rolar-baixo"), "aria-disabled", emBaixo ? "true" : null);
   },
 };
-
-// espelho de PALETA_HEX do lp_tr8s.py, para os indices que o grid usa
-const IDX = {
-  0: "#1a1a1a",
-  1: "#3a3a3a",
-  3: "#ffffff",
-  5: "#ff3b30",
-  7: "#5c1512",
-  9: "#ff9500",
-  11: "#5c3a0f",
-  13: "#ffe600",
-  21: "#33d17a",
-  23: "#14532d",
-  45: "#3b82f6",
-  49: "#a855f7",
-};
-const corIndice = (i) => IDX[i] || "#1a1a1a";
 
 // ── menu do step ─────────────────────────────────────────
 // O ultimo estado, guardado so para o menu: sem ele os chips nasciam todos

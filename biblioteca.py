@@ -13,6 +13,10 @@ Formato de cada pattern:
     estilo   chave de agrupamento
     bpm      sugestao, SO exibida (andamento se ajusta na maquina)
     kit      dica de texto de que kit combina - nunca e enviado
+    kit_num  opcional: numero do kit PRESET correspondente (1=TR-808,
+             2=TR-909, 3=TR-707, 4=TR-727, 5=TR-606, 6=TR-626). E o que o
+             botao KIT e o "Auto kit" da tela usam (byte no fio = kit_num-1).
+             Ausente = sugestao so textual (acusticos/breaks)
     last_var comprimento (default 16)
     accent   mascara de 16 bits do ACCENT, bit 0 = step 1 (default 0)
     obs      aviso opcional mostrado na janela
@@ -38,7 +42,7 @@ PATTERNS = [
     # ── house ────────────────────────────────────────────────
     {
         "id": "house_classico", "nome": "House quatro no chao",
-        "estilo": "house", "bpm": 124, "kit": "estilo TR-909",
+        "estilo": "house", "bpm": 124, "kit": "estilo TR-909", "kit_num": 2,
         "accent": 0x1111,          # steps 1 5 9 13
         "steps": {
             "BD": "x...x...x...x...",
@@ -49,7 +53,7 @@ PATTERNS = [
     },
     {
         "id": "deep_house", "nome": "Deep house",
-        "estilo": "house", "bpm": 122, "kit": "estilo TR-909, tons abafados",
+        "estilo": "house", "bpm": 122, "kit": "estilo TR-909, tons abafados", "kit_num": 2,
         "steps": {
             "BD": "x...x...x...x...",
             "HC": "....o.......o...",
@@ -61,7 +65,7 @@ PATTERNS = [
     # ── techno ───────────────────────────────────────────────
     {
         "id": "techno_pancada", "nome": "Techno reto",
-        "estilo": "techno", "bpm": 132, "kit": "estilo TR-909 (ou 606 nos hats)",
+        "estilo": "techno", "bpm": 132, "kit": "estilo TR-909 (ou 606 nos hats)", "kit_num": 2,
         "accent": 0x1111,
         "steps": {
             "BD": "x...x...x...x...",
@@ -73,7 +77,7 @@ PATTERNS = [
     },
     {
         "id": "techno_detroit", "nome": "Detroit",
-        "estilo": "techno", "bpm": 128, "kit": "estilo TR-909 + percussao",
+        "estilo": "techno", "bpm": 128, "kit": "estilo TR-909 + percussao", "kit_num": 2,
         "steps": {
             "BD": "x...x...x...x...",
             "HC": "....x.......x...",
@@ -86,7 +90,7 @@ PATTERNS = [
     # ── electro / miami ──────────────────────────────────────
     {
         "id": "electro_808", "nome": "Electro (Planet Rock)",
-        "estilo": "electro", "bpm": 128, "kit": "estilo TR-808",
+        "estilo": "electro", "bpm": 128, "kit": "estilo TR-808", "kit_num": 1,
         # a celula do electro: bumbo no 1, na segunda colcheia do 2 e na
         # sincopa do 3 - o esqueleto do Planet Rock / 808 classico
         "steps": {
@@ -100,7 +104,7 @@ PATTERNS = [
     },
     {
         "id": "miami_bass", "nome": "Miami bass",
-        "estilo": "electro", "bpm": 130, "kit": "estilo TR-808, bumbo longo",
+        "estilo": "electro", "bpm": 130, "kit": "estilo TR-808, bumbo longo", "kit_num": 1,
         "steps": {
             "BD": "x..o..x...x...o.",
             "SD": "....x.......x...",
@@ -112,7 +116,7 @@ PATTERNS = [
     # ── hip-hop ──────────────────────────────────────────────
     {
         "id": "boom_bap", "nome": "Boom bap",
-        "estilo": "hip-hop", "bpm": 92, "kit": "estilo TR-808 ou samples",
+        "estilo": "hip-hop", "bpm": 92, "kit": "estilo TR-808 ou samples", "kit_num": 1,
         "steps": {
             "BD": "x.....x..o......",
             "SD": "....x.......x...",
@@ -122,7 +126,7 @@ PATTERNS = [
     },
     {
         "id": "trap_meio_tempo", "nome": "Trap (meio tempo)",
-        "estilo": "hip-hop", "bpm": 140, "kit": "estilo TR-808, 808 longo",
+        "estilo": "hip-hop", "bpm": 140, "kit": "estilo TR-808, 808 longo", "kit_num": 1,
         "obs": "os dois rolos de hat usam sub step - o retrigger nativo",
         "steps": {
             "BD": "x....o....x.....",
@@ -180,7 +184,7 @@ PATTERNS = [
     },
     {
         "id": "disco", "nome": "Disco",
-        "estilo": "disco", "bpm": 118, "kit": "acustico ou TR-909",
+        "estilo": "disco", "bpm": 118, "kit": "acustico ou TR-909", "kit_num": 2,
         "accent": 0x1111,
         "steps": {
             "BD": "x...x...x...x...",
@@ -203,7 +207,7 @@ PATTERNS = [
     # ── latino / caribe ──────────────────────────────────────
     {
         "id": "reggaeton_dembow", "nome": "Dembow",
-        "estilo": "reggaeton", "bpm": 95, "kit": "estilo TR-808 + timbal",
+        "estilo": "reggaeton", "bpm": 95, "kit": "estilo TR-808 + timbal", "kit_num": 1,
         # o dembow canonico: bumbo nos 4 tempos, caixa no 3-3-2 (4 e 7 de
         # cada metade)
         "steps": {
@@ -215,7 +219,7 @@ PATTERNS = [
     },
     {
         "id": "dancehall", "nome": "Dancehall",
-        "estilo": "reggaeton", "bpm": 100, "kit": "estilo TR-808",
+        "estilo": "reggaeton", "bpm": 100, "kit": "estilo TR-808", "kit_num": 1,
         "steps": {
             "BD": "x..x....x..x....",
             "RS": "......o.......o.",
@@ -226,7 +230,7 @@ PATTERNS = [
     {
         "id": "funk_tamborzao", "nome": "Funk carioca (tamborzão)",
         "estilo": "funk brasileiro", "bpm": 130,
-        "kit": "estilo TR-808 + tambores/percussao",
+        "kit": "estilo TR-808 + tambores/percussao", "kit_num": 1,
         "last_var": 12,
         # grade de TERCINAS: o tamborzao nao cabe em semicolcheia. 12 steps =
         # 1 compasso em tercina de colcheia; bumbo em 1-3-4-6 de cada metade
@@ -266,13 +270,183 @@ PATTERNS = [
     },
     {
         "id": "garage_2step", "nome": "UK garage (2-step)",
-        "estilo": "garage", "bpm": 132, "kit": "estilo TR-909 + samples",
+        "estilo": "garage", "bpm": 132, "kit": "estilo TR-909 + samples", "kit_num": 2,
         "steps": {
             "BD": "x......x..x.....",
             "SD": "....x.......x...",
             "CH": "o.o..oo.o.o..oo.",     # o chimbal que pula e o swing do 2-step
             "RS": "...........o....",
             "OH": "..............o.",
+        },
+    },
+    # ════ expansao da reforma 2 (16/08/2026) ═════════════════
+    # Grooves classicos como os produtores os programam em drum machine.
+    # ── house (mais 2) ───────────────────────────────────────
+    {
+        "id": "acid_house", "nome": "Acid house",
+        "estilo": "house", "bpm": 126, "kit": "estilo TR-909 seco", "kit_num": 2,
+        # o quatro-no-chao do acid: clap dobrado e hat aberto empurrando
+        "steps": {
+            "BD": "x...x...x...x...",
+            "HC": "....x......ox...",
+            "CH": "o.o.o.o.o.o.o.o.",
+            "OH": "..x...x...x...xo",
+            "RS": ".......o........",
+        },
+    },
+    {
+        "id": "jackin_house", "nome": "Jackin' house",
+        "estilo": "house", "bpm": 126, "kit": "estilo TR-909", "kit_num": 2,
+        # a caixa fantasma na colcheia e o "jack" de Chicago
+        "steps": {
+            "BD": "x...x...x...x...",
+            "SD": "....x..o....x..o",
+            "CH": "o.o.o.o.o.o.o.o.",
+            "OH": "..x...x...x...x.",
+        },
+    },
+    # ── techno (mais 2) ──────────────────────────────────────
+    {
+        "id": "techno_hipnotico", "nome": "Techno hipnótico",
+        "estilo": "techno", "bpm": 134, "kit": "estilo TR-909, hats curtos", "kit_num": 2,
+        # menos e mais: rim andando em ciclo de 3 contra o 4 do bumbo
+        "steps": {
+            "BD": "x...x...x...x...",
+            "RS": "o..o..o..o..o..o",
+            "CH": "..x...x...x...x.",
+            "CC": "x...............",
+        },
+    },
+    {
+        "id": "techno_industrial", "nome": "Industrial",
+        "estilo": "techno", "bpm": 138, "kit": "estilo TR-909 distorcido", "kit_num": 2,
+        "accent": 0x1111,
+        "steps": {
+            "BD": "x...x..xx...x...",
+            "SD": "....x.......x..o",
+            "CH": "oooooooooooooooo",
+            "MT": "..........o...o.",
+        },
+    },
+    # ── hip-hop (mais 1) ─────────────────────────────────────
+    {
+        "id": "trap_808", "nome": "Trap (808 rolando)",
+        "estilo": "hip-hop", "bpm": 150, "kit": "estilo TR-808, 808 longo", "kit_num": 1,
+        "obs": "hats em sub step 1/3 - o rolo triplo classico do trap",
+        "steps": {
+            "BD": "x.....x...x.....",
+            "SD": "........x.......",
+            "CH": [FORTE, None, FRACA, None, FORTE, None, FRACA,
+                   {"vel": FRACA, "sub": 3}, FORTE, None, FRACA, None,
+                   {"vel": FORTE, "sub": 3}, None, FRACA, None],
+            "OH": "....o...........",
+        },
+    },
+    # ── drum'n'bass (mais 1) ─────────────────────────────────
+    {
+        "id": "jungle_2", "nome": "Jungle (chopped)",
+        "estilo": "drum'n'bass", "bpm": 172, "kit": "breaks fatiados", "kit_num": None,
+        # o Amen refatorado: caixa deslocada no 8 e ghost no 11
+        "steps": {
+            "BD": "x.........x.....",
+            "SD": "....x..x.o..x..o",
+            "CH": "o.o.o.o.o.o.o.o.",
+            "RS": ".......o........",
+        },
+    },
+    # ── breakbeat (mais 1) ───────────────────────────────────
+    {
+        "id": "big_beat", "nome": "Big beat",
+        "estilo": "breakbeat", "bpm": 120, "kit": "breaks + crash", "kit_num": None,
+        "accent": 0x0101,
+        "steps": {
+            "BD": "x..x....x.x.....",
+            "SD": "....x.......x...",
+            "CH": "o.o.o.o.o.o.o.o.",
+            "CC": "x...............",
+            "OH": "..............o.",
+        },
+    },
+    # ── footwork / juke ──────────────────────────────────────
+    {
+        "id": "footwork", "nome": "Footwork",
+        "estilo": "footwork", "bpm": 160, "kit": "estilo TR-808 seco", "kit_num": 1,
+        "obs": "os toms em tercina (sub 1/3) sao a assinatura do footwork",
+        "steps": {
+            "BD": "x..x..x...x..x..",
+            "HC": "....x.......x...",
+            "LT": [None, None, None, None, None, None,
+                   {"vel": FORTE, "sub": 3}, None, None, None, None, None,
+                   None, None, {"vel": FRACA, "sub": 3}, None],
+            "CH": "o...o...o...o...",
+        },
+    },
+    # ── gqom ─────────────────────────────────────────────────
+    {
+        "id": "gqom", "nome": "Gqom",
+        "estilo": "gqom", "bpm": 124, "kit": "estilo TR-808 grave + toms", "kit_num": 1,
+        # o vazio no tempo 1 e proposital: o peso do gqom vem da sincopa
+        "steps": {
+            "BD": "..x...x...x..x..",
+            "LT": "x.......x.......",
+            "SD": "......o.......o.",
+            "CH": "o..oo..oo..oo..o",
+        },
+    },
+    # ── amapiano ─────────────────────────────────────────────
+    {
+        "id": "amapiano", "nome": "Amapiano",
+        "estilo": "amapiano", "bpm": 112, "kit": "log drum no BD (tone grave)", "kit_num": None,
+        "steps": {
+            "BD": "..o..x.....o..x.",     # o log drum sincopado
+            "RS": "x...x...x...x...",
+            "CH": "o.o.o.o.o.o.o.o.",
+            "HC": "..........x.....",
+        },
+    },
+    # ── punk / rock ──────────────────────────────────────────
+    {
+        "id": "punk", "nome": "Punk (d-beat)",
+        "estilo": "rock", "bpm": 180, "kit": "acustico seco", "kit_num": None,
+        "steps": {
+            "BD": "x..x..x.x..x..x.",
+            "SD": "..x...x...x...x.",
+            "CH": "o.o.o.o.o.o.o.o.",
+            "CC": "x...............",
+        },
+    },
+    {
+        "id": "rock_basico", "nome": "Rock de garagem",
+        "estilo": "rock", "bpm": 132, "kit": "acustico", "kit_num": None,
+        "steps": {
+            "BD": "x......xx.......",
+            "SD": "....x.......x...",
+            "CH": "o.o.o.o.o.o.o.o.",
+            "OH": "..............o.",
+        },
+    },
+    # ── r&b / neo-soul ───────────────────────────────────────
+    {
+        "id": "neo_soul", "nome": "Neo-soul",
+        "estilo": "r&b", "bpm": 88, "kit": "acustico abafado", "kit_num": None,
+        "obs": "ghosts de caixa fracos - o 'atras do tempo' do Dilla",
+        "steps": {
+            "BD": "x.....x...o.....",
+            "SD": "....x..o..o.x...",
+            "CH": "o.oo.o.oo.o.o.oo",
+            "RS": "..............o.",
+        },
+    },
+    # ── dembow ───────────────────────────────────────────────
+    {
+        "id": "dembow_cru", "nome": "Dembow (cru)",
+        "estilo": "dembow", "bpm": 115, "kit": "estilo TR-808 + timbal", "kit_num": 1,
+        # o dembow dominicano: mais seco e repetitivo que o reggaeton
+        "steps": {
+            "BD": "x...x...x...x...",
+            "SD": "...x..x....x..x.",
+            "HC": "...o..o....o..o.",
+            "CH": "o.o.o.o.o.o.o.o.",
         },
     },
 ]
@@ -318,6 +492,9 @@ def validar(pat):
     for chave in ("id", "nome", "estilo", "bpm", "kit", "steps"):
         if chave not in pat:
             erros.append(f"falta a chave '{chave}'")
+    kn = pat.get("kit_num")
+    if kn is not None and not 1 <= kn <= 128:
+        erros.append(f"kit_num {kn} fora de 1-128")
     if not 0 <= pat.get("accent", 0) <= 0xFFFF:
         erros.append("accent fora de 16 bits")
     for nome, linha in pat.get("steps", {}).items():

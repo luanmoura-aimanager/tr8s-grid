@@ -14,21 +14,16 @@ import pattern from "./abas/pattern.mjs";
 import fx from "./abas/fx.mjs";
 import mixer from "./abas/mixer.mjs";
 import instrumento from "./abas/instrumento.mjs";
-import biblioteca from "./abas/biblioteca.mjs";
-import chain from "./abas/chain.mjs";
+import grooves from "./abas/grooves.mjs";
 import estocastica from "./abas/estocastica.mjs";
 import avancado from "./abas/avancado.mjs";
 
-const ABAS = [
-  pattern,
-  fx,
-  mixer,
-  instrumento,
-  biblioteca,
-  chain,
-  estocastica,
-  avancado,
-];
+const ABAS = [pattern, fx, mixer, instrumento, grooves, estocastica, avancado];
+
+// Biblioteca e Chain viraram a aba Grooves (reforma 2): quem tinha uma das
+// duas salva volta na fusao, nao na primeira aba
+if (["biblioteca", "chain"].includes(localStorage.getItem("aba")))
+  localStorage.setItem("aba", "grooves");
 let atual = null;
 
 /** acao() com toast automatico no erro - ninguem clica no escuro. */
@@ -211,6 +206,9 @@ function pintar(e, dados) {
     e.kit_nome || (e.kit_atual == null ? "—" : e.kit_atual + 1),
     !e.kit_nome && e.kit_atual == null,
   );
+  // BPM medido do MIDI clock (24 ppq): a TR-8S manda clock mesmo parada,
+  // entao ele aparece sempre que o cabo esta la. Escrever BPM nao existe.
+  seg("#d-bpm", e.bpm != null ? e.bpm.toFixed(1) : "—", e.bpm == null);
   seg("#d-var", e.variacao_nome || "—", !e.variacao_nome);
   seg(
     "#d-step",

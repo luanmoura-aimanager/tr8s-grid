@@ -1,6 +1,7 @@
 // abas/avancado.mjs - o bloco utility do mapa oficial da Roland + o log.
 // NADA disto foi testado nesta maquina: cada botao e uma mini-sessao.
 import { h, texto } from "../nucleo/dom.mjs";
+import { painel } from "../comp/painel.mjs";
 import { agir } from "../app.mjs";
 
 let logbox,
@@ -84,7 +85,7 @@ export default {
             "verdade é religar a máquina depois",
         ),
       ),
-      h("div.secao", {}, h("h3", {}, "log"), logbox),
+      painel("Log", logbox),
     );
   },
 

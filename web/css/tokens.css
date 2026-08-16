@@ -20,11 +20,16 @@
   --t-med:15px; --t-gr:20px; --t-xg:28px;
   --peso-rot:600; --esp-rot:.08em;
 
-  /* superficie */
-  --fundo:#141210; --painel:#1e1b18; --painel2:#242019; --linha:#33302c;
+  /* superficie - tres niveis de profundidade: fundo < corpo do painel <
+     cabecalho/elemento ativo (reforma 2, direcao TR-EDITOR) */
+  --fundo:#0f0d0b; --painel:#1e1b18; --painel2:#242019; --linha:#33302c;
   --linha2:#413c36;
+  --painel-cab:#211c15;         /* faixa de titulo dos paineis */
   --tinta:#ece8e2; --tinta2:#b9b2a8;
   --fraco:#a8a199;              /* 5.4:1 sobre --fundo (AA em texto pequeno) */
+
+  /* acento - o ambar dos displays 7-seg, promovido a identidade da pagina */
+  --acento:#ffb454; --acento-esc:#8a5a20;
 
   /* estado */
   --ok:#4ade80; --erro:#f87171; --aviso:#fbbf24; --roxo:#a855f7;

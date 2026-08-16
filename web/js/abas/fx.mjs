@@ -8,6 +8,7 @@
 // painel e, literalmente, o placar da engenharia reversa.
 import { h, $, texto, attr, prop } from "../nucleo/dom.mjs";
 import { knob } from "../comp/knob.mjs";
+import { painel } from "../comp/painel.mjs";
 import { rotuloValor } from "../nucleo/formato.mjs";
 import { agir } from "../app.mjs";
 import { toast } from "../comp/toast.mjs";
@@ -47,26 +48,34 @@ export default {
       tabs.append(b);
     });
 
-    raiz.append(
-      caminhoAudio(),
-      h("div.linha", {}, h("label", {}, "instrumento (painéis INST)"), tabs),
-      h(
-        "p.aviso",
-        {},
-        "Nenhum offset de efeito é documentado pela Roland: " +
-          "knob apagado = ainda não descoberto. Clique nele para capturar pelo " +
-          "painel, ou faça a sessão de sniff do TR-EDITOR para destravar " +
-          "vários de uma vez.",
-      ),
+    // POR INSTRUMENTO x MASTER/KIT: a separacao que faltava. Os paineis de
+    // escopo "inst" (INSTRUMENT, INST FX) entram no primeiro grupo junto
+    // com o SENDS novo; os de kit no segundo.
+    const porInst = [];
+    const master = [];
+    (D.paineis_fx || []).forEach((pn) =>
+      (pn.escopo === "inst" ? porInst : master).push(montarPainel(pn, D)),
     );
 
-    (D.paineis_fx || []).forEach((pn) => raiz.append(montarPainel(pn, D)));
+    raiz.append(
+      caminhoAudio(),
+      painel("Por instrumento", { dir: [tabs] }, montarSends(D), ...porInst),
+      painel("Master / Kit", ...master),
+    );
   },
 
   atualizar(e, D) {
     const mapa = e.mapa_fx || {},
       fx = e.fx || {};
     ultimoMapa = mapa;
+
+    // sends: um knob por instrumento, direto dos arrays do estado
+    for (const [nome, ks] of Object.entries(sendsKnobs)) {
+      const vals = fx[nome];
+      ks.forEach((k, i) =>
+        k.definir(Array.isArray(vals) ? (vals[i] ?? null) : null),
+      );
+    }
     paineis.forEach((pn) => {
       // seletor de tipo do painel (REVERB tipo, MFX tipo...)
       let tipoAtual = null;
@@ -155,7 +164,9 @@ function montarPainel(pn, D) {
   const corpoComuns = h("div.knobs");
   pn.comuns.forEach((nome) => corpoComuns.append(controle(nome, D)));
 
-  const cabecalho = h("div.linha", {}, h("h3", {}, pn.rotulo), contador, barra);
+  // painel com cabecalho (reforma 2): contador e barra moram no header
+  const hDir = h("div.h-dir", {}, contador, barra);
+  const cabecalho = h("header", {}, pn.rotulo, hDir);
 
   const chipsCx = h("div.chips");
   (pn.tipos || []).forEach((t) => {
@@ -209,21 +220,62 @@ function montarPainel(pn, D) {
   }
 
   const cx = h(
-    "div.secao.cartao",
+    "div.painel",
     {},
     cabecalho,
-    pn.seletor ? h("div.linha", {}, h("label", {}, "tipo"), chipsCx) : null,
-    corpoComuns,
-    ...Object.values(blocos),
+    h(
+      "div.corpo",
+      {},
+      pn.seletor ? h("div.linha", {}, h("label", {}, "tipo"), chipsCx) : null,
+      corpoComuns,
+      ...Object.values(blocos),
+    ),
   );
   if (pn.escopo === "inst") {
-    cabecalho.append(h("span.chip", {}, "por instrumento"));
+    hDir.append(h("span.chip", {}, "por instrumento"));
   }
   atualizarVisivel();
   return cx;
 }
 
 let ultimoMapa = {};
+
+// ── SENDS: fileiras de 11 knobs, um por instrumento ────────
+// Como no TR-EDITOR: reverb send e delay send lado a lado para o kit todo.
+// Fora do Map `controles` (que resolve pelo instrumento selecionado): aqui
+// cada knob e um instrumento fixo, e fx["inst reverb send"] ja chega do
+// motor como array de 11. Offsets provados em hardware - sem fantasma.
+const sendsKnobs = { "inst reverb send": [], "inst delay send": [] };
+
+function montarSends(D) {
+  const fileira = (nome, rotulo) => {
+    const cx = h("div.fila-inst", {}, h("div.rot-fila", {}, rotulo));
+    D.instrumentos.forEach((n, i) => {
+      const k = knob({
+        rotulo: n,
+        min: 0,
+        max: 255,
+        chave: `${nome}:${i}`,
+        formatar: (v) => String(v),
+        aoSoltar: (v) => agir({ acao: "fx", nome, valor: v, inst: i }),
+      });
+      sendsKnobs[nome].push(k);
+      cx.append(k.raiz);
+    });
+    return cx;
+  };
+  return h(
+    "div.painel",
+    {},
+    h("header", {}, "Sends"),
+    h(
+      "div.corpo",
+      {},
+      fileira("inst reverb send", "REVERB"),
+      fileira("inst delay send", "DELAY"),
+    ),
+  );
+}
 
 function controle(nome, D) {
   const cat = (D.catalogo_fx || []).find((c) => c.nome === nome) || {};

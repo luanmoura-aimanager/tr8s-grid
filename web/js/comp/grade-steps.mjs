@@ -93,6 +93,58 @@ export function gradeSteps({
   const playhead = h("div.playhead", { hidden: true });
   raiz.append(playhead);
 
+  // moldura da janela dos Launchpads: 8 linhas sobre o proprio grid, no
+  // lugar do antigo "espelho dos LEDs". Elemento unico movido por CSS vars.
+  const janela = h("div.janela-lp", { hidden: true });
+  raiz.append(janela);
+  let janelaChave = "";
+
+  function marcarJanela(indices) {
+    const chave = indices.join(",");
+    if (chave === janelaChave) return;
+    janelaChave = chave;
+    // linhas nao contiguas (esconder_mudos tirou uma do meio): a moldura
+    // mentiria, entao ela some e a marca vai para os rotulos das linhas
+    const contigua =
+      indices.length > 0 &&
+      indices[indices.length - 1] - indices[0] === indices.length - 1;
+    janela.hidden = !contigua;
+    if (contigua) {
+      prop(janela, "--j0", indices[0]);
+      prop(janela, "--jn", indices.length);
+    }
+    rotulos.forEach((r, l) =>
+      attr(r, "data-lp", indices.includes(l) && !contigua ? "" : null),
+    );
+  }
+
+  // ── playhead que pinta as NOTAS da coluna ─────────────────
+  // Verde cheio onde tem nota, verde fraco onde nao - como os pads. Le o
+  // data-c que a pintura ja calculou (nao duplica a regra de cores nem toca
+  // no cache Int32Array; data-play e camada de TRANSPORTE por cima da cor
+  // de conteudo, e a celula volta ao normal quando a coluna passa).
+  let colunaPintada = -1;
+
+  function pintarColuna(p) {
+    if (p === colunaPintada) return;
+    limparColuna();
+    colunaPintada = p;
+    if (p < 0) return;
+    for (let l = 0; l < LINHAS; l++) {
+      const c = celulas[l * 16 + p];
+      const t = c.dataset.c;
+      if (t === "fora" || t === "invalido") continue;
+      attr(c, "data-play", t && t !== "vazio" ? "f" : "o");
+    }
+  }
+
+  function limparColuna() {
+    if (colunaPintada < 0) return;
+    for (let l = 0; l < LINHAS; l++)
+      attr(celulas[l * 16 + colunaPintada], "data-play", null);
+    colunaPintada = -1;
+  }
+
   // ── playhead que anda sozinho entre dois quadros ──────────
   // O Launchpad e pintado no instante em que o clock chega; a tela so
   // saberia no proximo /estado, e a 120 bpm um step dura 125 ms contra 250 ms
@@ -119,6 +171,7 @@ export function gradeSteps({
       timer = 0;
     }
     passoReal = -1;
+    limparColuna();
   }
 
   function marcarPasso(p) {
@@ -133,6 +186,7 @@ export function gradeSteps({
       passoReal = p;
       tPasso = agora;
       prop(playhead, "--p", p);
+      pintarColuna(p);
     }
     if (timer) clearTimeout(timer);
     if (!durStep) return;
@@ -140,7 +194,11 @@ export function gradeSteps({
     timer = setTimeout(
       () => {
         timer = 0;
-        if (passoReal >= 0) prop(playhead, "--p", (passoReal + 1) % 16);
+        if (passoReal >= 0) {
+          const prox = (passoReal + 1) % 16;
+          prop(playhead, "--p", prox);
+          pintarColuna(prox);
+        }
       },
       Math.max(10, falta),
     );
@@ -256,9 +314,17 @@ export function gradeSteps({
       playhead.hidden = !mostra;
       if (mostra) marcarPasso(e.passo);
       else pararRelogio();
+      // o repintado acima pode ter trocado o data-c de celulas sob o
+      // playhead: refaz a camada de transporte por cima
+      if (colunaPintada >= 0) {
+        const p = colunaPintada;
+        colunaPintada = -1;
+        pintarColuna(p);
+      }
     },
     marcarLinha(l) {
       rotulos.forEach((r, k) => attr(r, "data-sel", k === l ? "" : null));
     },
+    marcarJanela,
   };
 }
