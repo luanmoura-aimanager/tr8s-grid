@@ -1285,8 +1285,10 @@ três caminhos).
    escrever o "próximo pattern" (`01 00 00 02`) troca **na virada**, como no
    painel. É o mecanismo certo para o chain. A variante `now` (offset 1)
    **corta no meio do compasso** (B1↔B2 tocando, confirmado em duas passadas
-   com BPM baixo) — corte seco, para performance. O chain ganha dois modos
-   musicais: na virada (`próximo`) e imediato (`now`).
+   com BPM baixo) **e preserva a posição** — o pattern novo continua do mesmo
+   step, sem voltar ao 1: troca de conteúdo com o relógio intacto, não um
+   restart. O chain ganha dois modos musicais: na virada (`próximo`) e
+   imediato (`now`).
 
 E os arremates da mesma noite: **CTRL dos toms** fechou por eliminação
 (espaço de códigos global — LT sample percorreu 0–5 e 9–23, o pulo 6/7/8 é

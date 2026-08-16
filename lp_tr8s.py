@@ -3395,8 +3395,9 @@ def cmd_pattern(argv):
     PROVADO em 15/08/2026 (A1->A2, A2->A1, A1->A2, A2->B1, maquina tocando):
     o modo 'proximo' troca NA VIRADA do pattern, como no painel - e o
     mecanismo certo para o chain. A variante 'now' CORTA NO MEIO do compasso
-    (B1<->B2 tocando, confirmado em duas passadas com BPM baixo) - corte
-    seco, para performance."""
+    (B1<->B2 tocando, confirmado em duas passadas com BPM baixo) e PRESERVA
+    A POSICAO: o pattern novo continua do mesmo step, sem voltar ao 1 -
+    troca de conteudo com o relogio intacto, nao um restart."""
     if not argv:
         print("uso: pattern <A1..H16 | 0-127> [now]"); return
     n = _num_pattern(argv[0])
