@@ -1419,59 +1419,56 @@ motor e concluir "está limpo" foi medir o lado errado três vezes seguidas.
 Quando o sintoma é visual e o backend mede limpo, o próximo lugar a olhar é o
 que a tela faz **entre** dois quadros.
 
-### 7.5b CORREÇÃO — `24 5x` também não acompanha a troca de pattern
+### 7.5b RESOLVIDO de vez — `24 5x` era o pattern 3-06, e a regra é geral
 
-**A seção 7.5 abaixo está parcialmente errada e não deve ser lida sozinha.** Ela
-foi escrita antes do teste de troca de pattern, que só aconteceu depois. O que
-7.5 provou continua valendo: `24 5x` é onde o TR-EDITOR lê e escreve, e o
-conteúdo dele bateu byte a byte com o painel para o pattern 3-06. O que ela
-concluiu **cedo demais** foi que aquilo era "o pattern corrente".
+**A seção 7.5 abaixo está certa no que mediu e errada no que generalizou** — não
+deve ser lida sozinha. Ela provou que o TR-EDITOR lê e escreve em `24 5x` e que
+aquele conteúdo bate byte a byte com o painel. O que não podia concluir é que
+`24 5x` fosse *o* endereço do pattern: era o endereço **daquele** pattern.
 
-**Medido em 16/08/2026, trocando o pattern no painel duas vezes:**
+**O segundo byte vale `pattern × 16 + variação`**, com carry de 7 bits para o
+primeiro. A captura sempre disse isso, bastava ler o começo dela: antes de ir a
+`24 5x`, o editor perguntou `01 00 00 01` — *qual é o pattern atual* — e recebeu
+o número. O 3-06 é o índice 37, e `37 × 16 + 1 = 593 = 4 × 128 + 81`, ou seja
+byte 0 = `0x20 + 4` e byte 1 = `0x51`. Exatamente o `24 51` observado.
 
-| | perf `01 00 00 01` | kit | nó `24 5x` (nome / last / notas) |
-|---|---|---|---|
-| 3-06 → 1-13 | 37 → **12** ✔ | Simple Trap → **Lost Moon** ✔ | **não mudou** ✗ |
-| 1-13 → 1-05 | 12 → **4** ✔ | Lost Moon → **SambaWork** ✔ | **não mudou** ✗ |
+Confirmado lendo quatro patterns na máquina, incluindo os que transbordam:
 
-E não muda também com troca **remota** (`01 00 00 01` = n), nem com um
-`recarregar()` completo do app. Ficou congelado no `32bars Trap` — que era o
-pattern carregado quando o **GET do TR-EDITOR** rodou.
+| pattern | BD da variação A | nome |
+|---|---|---|
+| 0 (1-01) | `20 01 00 08` | `----` |
+| 4 (1-05) | `20 41 00 08` | `SambaWork` |
+| 43 (3-12) | `25 31 00 08` | `Loafing` |
+| 127 (8-16) | `2F 71 00 08` | `----` |
 
-**O quadro real, então, é este:**
+E verificado em hardware pelo Luan com o gesto do relato original: **trocar de
+pattern no painel passa a mudar o grid**.
 
-- `20 xx` — buffer congelado, conteúdo de origem desconhecida. Nunca muda.
-- `24 5x` — buffer de **edição**, carregado em algum momento (o GET é o
-  suspeito) e que **não segue** o pattern que toca.
-- `01 xx` (perf) — este sim acompanha tudo: número do pattern e kit, na hora.
+Com isso caem, de uma vez, as três coisas que a 7.5b anterior listava como
+mistério: não existe "buffer de edição" que precise ser carregado, não existe
+gatilho a descobrir, e o GET do TR-EDITOR não é um comando — ele é só uma
+leitura no endereço certo. Os sete estímulos testados contra a hipótese do
+buffer (troca pelo painel, troca remota, `01 00 00 01`, `01 00 00 02`,
+keep-alives, TR-REC, `[UTILITY]`+`[PTN SELECT]`) deram todos negativo porque
+não havia nada para ressincronizar.
 
-Ou seja: **o pattern que TOCA não tem endereço de leitura conhecido.** O grid
-consegue ler e escrever *um* pattern com fidelidade total (provado: 11/11
-instrumentos, e o Luan confirmou de ouvido que editar soa) — mas é o pattern que
-estiver no buffer de edição, não necessariamente o que está soando.
+**A lição de método**, que vale mais que o achado: uma pilha de negativos
+consistentes pareceu confirmar a hipótese quando só dizia que ela era
+irrelevante. O que destravou não foi mais um teste na mesma direção — foi ler o
+que o programa que funciona faz, na captura que já estava em disco.
 
-**Isto conversa diretamente com o achado do LED amarelo (seção acima).** A
-máquina separa "a variação que toca" de "a variação que o painel exibe". O mesmo
-provavelmente vale para patterns: `24 5x` seria o pattern **em edição**, e trocar
-o que toca não mexe nele. Se for isso, a pergunta certa deixou de ser "onde está
-o pattern corrente" e passou a ser **"o que faz a máquina carregar um pattern no
-buffer de edição"**.
+**Armadilha para quem for mexer nisto:** todo endereço da região depende do
+pattern carregado, então qualquer ferramenta que monte endereço sem perguntar
+`01 00 00 01` observa um pattern que não é o que está tocando. Foi assim que o
+`snap`, o `tempo_watch`, o `var_mask` e a máscara de variação do Chain ficaram
+ancorados no 1-01 — e a saída do `snap` é o que vira fato neste documento.
+Dois snapshots de patterns diferentes agora são **recusados** pelo `snapdiff`,
+porque o silêncio deles parecia "nada mudou".
 
-**Próximos testes, do mais barato ao mais caro:**
+### 7.5 A captura que achou a região (16/08/2026) — leia a 7.5b antes
 
-1. Trocar o pattern no painel e **depois apertar um step/instrumento no painel**
-   — se a edição manual for o que carrega o buffer, o `24 5x` muda aí.
-2. Trocar de pattern com a máquina **parada** (o teste acima foi todo tocando).
-3. Repetir o GET no TR-EDITOR já em outro pattern e ver se o `24 5x` passa a
-   refletir o novo — isso confirmaria o GET como o gatilho e transformaria a
-   captura dele em obrigatória (aí sim seria preciso achar o comando, que a
-   primeira captura não mostrou: 602 RQ1, 0 DT1 de escrita antes das leituras).
-
-**Enquanto isso não se resolve, o guarda `_conferir_espelho` é a proteção que
-existe** — ele bloqueia a escrita quando o playhead denuncia que o last step
-daqui não é o de lá.
-
-### 7.5 RESOLVIDO — o pattern mora em `24 5x`, não em `20 xx` (16/08/2026)
+*Registro do que a captura mostrou. A generalização correta está na 7.5b
+acima: `24 5x` é o pattern 3-06, não o endereço fixo do pattern.*
 
 A captura do GET do TR-EDITOR foi feita, e o achado **não é um comando**: o
 editor não manda nada para "carregar" buffer nenhum. Ele simplesmente **lê outra

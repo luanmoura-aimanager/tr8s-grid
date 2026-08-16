@@ -230,7 +230,13 @@ def addr_fx(bloco, kit=0, inst=None):
 # Os dois LAST STEP moram na mesma tabela de 20 bytes e sao 0-based: o valor 0x0F
 # e 16 steps. As variacoes A-H tem slot; os dois Fill In nao - onde eles guardam
 # o comprimento continua desconhecido.
-ADDR_PATTERN   = (0x20, 0x00, 0x00, 0x00)
+# O no do pattern ZERO (1-01). Nome explicito de proposito: com o nome
+# generico anterior ele parecia 'o no do pattern' e era chamado como tal -
+# foi assim que a mascara de variacao acabou sendo escrita no 1-01. Serve
+# so de endereco de liveness, que precisa existir sempre e nao pode
+# depender de saber onde a maquina esta. Para o pattern corrente e
+# addr_no_pattern(p).
+ADDR_PATTERN_ZERO   = (0x20, 0x00, 0x00, 0x00)
 OFF_VAR_TOCANDO = 63   # 63-66: mascara de 4 nibbles, bit i = variacao i+1
 OFF_LAST_VAR   = 67    # +0 = A ... +7 = H
 OFF_LAST_TRACK = 75    # +0 = BD ... +10 = RC, +11 = TRG
@@ -247,10 +253,10 @@ OFF_LAST_TRACK = 75    # +0 = BD ... +10 = RC, +11 = TRG
 # Trocar de variacao NAO emite Program Change - escutado por 14 s na porta comum,
 # so clock. Ler este endereco e o unico caminho.
 
-# Somam sobre ADDR_PATTERN_RD (24 50), nao sobre o 20 00 congelado: sao ESCRITA
-# no mesmo cabecalho de onde o ler_last_steps le. Enquanto apontavam pro 20 00,
-# mexer no [LAST] pela tela nao chegava na maquina e o valor voltava sozinho na
-# releitura seguinte, sem erro nenhum aparecendo.
+# Somam sobre addr_no_pattern(pattern), o cabecalho do pattern CORRENTE - o
+# mesmo de onde o ler_last_steps le. Ja apontaram para o `20 00` fixo, e
+# entao mexer no [LAST] pela tela nao chegava na maquina: o valor voltava
+# sozinho na releitura seguinte, sem erro nenhum aparecendo.
 def addr_last_var(var, pattern):
     return addr_soma(addr_no_pattern(pattern), OFF_LAST_VAR + var - 1)
 def addr_last_track(inst, pattern):
@@ -1342,18 +1348,30 @@ def cmd_snap(argv):
     print()
 
     with open(destino, "w") as f:
-        json.dump({"variacoes": vars_, "blocos": dados}, f)
+        json.dump({"variacoes": vars_, "pattern": pattern,
+                   "blocos": dados}, f)
     resp = len(unicos) - mudos
     print(f"{destino}: {resp} enderecos responderam, {mudos} calaram "
           f"(calar = endereco que nao existe).")
 
 
+def _e_regiao_pattern(addr):
+    """O endereco cai na regiao de pattern?
+
+    Nao da mais para testar `addr[0] == 0x20`: o primeiro byte e
+    0x20 + ((pattern*16 + var) >> 7), ou seja 0x20 so ate o pattern 7. No
+    pattern 3-06, por exemplo, os enderecos comecam com 0x24 - e a traducao
+    de offset parava de aparecer justamente nos patterns onde se estava
+    trabalhando."""
+    return 0x20 <= addr[0] <= 0x2F
+
+
 def _traduzir_offset(addr, i, tamanho):
     """Offset cru -> o que ele significa naquele endereco."""
-    if tamanho == 128 and addr[0] == 0x20 and addr[3] == 0x08:
+    if tamanho == 128 and _e_regiao_pattern(addr) and addr[3] == 0x08:
         step, campo = divmod(i, BYTES_P_STEP)
         return f"step {step + 1:2}, byte {campo}"
-    if tamanho == 8 and addr[0] == 0x20 and addr[2] == 0x00 and addr[3] == 0x00:
+    if tamanho == 8 and _e_regiao_pattern(addr) and addr[2] == 0x00 and addr[3] == 0x00:
         # bytes 0-3 = mascara de ACCENT em nibbles; 4-7 = o resto do cabecalho
         # da variacao, ainda sem nome (candidatos: last step, scale, shuffle)
         return f"nibble {i} do ACCENT" if i < 4 else f"cabecalho byte {i}"
@@ -1364,9 +1382,25 @@ def cmd_snapdiff(p1, p2):
     def carregar(p):
         with open(p) as f:
             j = json.load(f)
-        return {k: v for k, v in j["blocos"].items()}
+        return {k: v for k, v in j["blocos"].items()}, j.get("pattern")
 
-    a, b = carregar(p1), carregar(p2)
+    (a, pa), (b, pb) = carregar(p1), carregar(p2)
+    # Os enderecos da regiao de pattern DEPENDEM do pattern carregado, e o
+    # diff casa bloco por endereco. Dois snaps de patterns diferentes nao tem
+    # endereco em comum ali, e o `if chave not in b: continue` engolia todos:
+    # o diff dizia "nada mudou" e a conclusao ("esse parametro nao mora no
+    # pattern") virava fato na REFERENCIA. Recusar e a resposta certa.
+    if pa != pb:
+        def rot(p):
+            return "desconhecido (snap antigo)" if p is None else nome_pattern(p)
+        print(f"(!) os dois snapshots sao de patterns DIFERENTES: "
+              f"{p1} = {rot(pa)}, {p2} = {rot(pb)}.\n"
+              "    Os enderecos da regiao de pattern dependem do pattern, "
+              "entao comparar\n    os dois nao diria nada - e o silencio "
+              "pareceria 'nada mudou'.")
+        return
+    if pa is not None:
+        print(f"pattern {nome_pattern(pa)}\n")
     achou = False
 
     for chave in a:
@@ -1422,7 +1456,7 @@ def cmd_sniff(argv):
                 with SaidaMIDI(*tout) as t_out:
                     # liveness: o no do pattern 0 existe sempre e nao depende
                     # de saber onde a maquina esta
-                    t_out.send(rq1(ADDR_PATTERN, 8))
+                    t_out.send(rq1(ADDR_PATTERN_ZERO, 8))
                 limite, ecoou = time.time() + 1.5, False
                 while time.time() < limite and not ecoou:
                     for msg in tr_in.iter_pending():
@@ -1559,7 +1593,7 @@ def cmd_varrer(argv):
     def vivo(tr_in, tr_out):
         """A maquina ainda responde num endereco que sabidamente existe?"""
         tr_in.iter_pending()
-        return ler_bloco(tr_in, tr_out, ADDR_PATTERN, 8, timeout=1.0) is not None
+        return ler_bloco(tr_in, tr_out, ADDR_PATTERN_ZERO, 8, timeout=1.0) is not None
 
     def gravar(ate):
         with open(destino, "w") as f:
@@ -1929,6 +1963,7 @@ class Motor:
         self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
         self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
         self.pattern_atual = None
+        self._pattern_tentado = 0.0   # ultima tentativa de descobri-lo
         self.kit_nome = None                    # lidos por ler_kit(), sob demanda
         self.tone_ids = [None] * len(INSTRUMENTOS)
         # mixer/FX: blocos de kit vigiados, mapa de parametros decodificados e
@@ -2033,14 +2068,37 @@ class Motor:
         para o pattern errado em silencio, que e exatamente o bug que o
         `24 5x` fixo escondia. Duas tentativas, como os blocos de step - a
         maquina engasga."""
-        if self.pattern_atual is None and self.tr_in and self.tr_out:
-            for _ in range(2):
-                d = ler_bloco(self.tr_in, self.tr_out, ADDR_PERF, 128,
-                              timeout=SNAP_TIMEOUT)
-                if d and len(d) > OFF_PATTERN_ATUAL:
-                    self.pattern_atual = d[OFF_PATTERN_ATUAL]
-                    break
+        if self.pattern_atual is not None:
+            return self.pattern_atual
+        if not (self.tr_in and self.tr_out):
+            return None
+        # NAO insistir a cada chamada: sao duas leituras de SNAP_TIMEOUT, e o
+        # escrever_step roda em rajada (o Chain manda 3 por tick). Sem este
+        # intervalo, uma maquina muda travava o tick inteiro - que e quem
+        # tambem cuida do clock, dos pads e do playhead - por segundos.
+        agora = time.time()
+        if agora - self._pattern_tentado < INTERVALO_RELEITURA:
+            return None
+        self._pattern_tentado = agora
+        for _ in range(2):
+            d = ler_bloco(self.tr_in, self.tr_out, ADDR_PERF, 128,
+                          timeout=SNAP_TIMEOUT)
+            if d and len(d) > OFF_PATTERN_ATUAL:
+                self.pattern_atual = d[OFF_PATTERN_ATUAL]
+                break
         return self.pattern_atual
+
+    def _pattern_para_escrever(self, rot):
+        """O pattern corrente, ou None avisando. Use antes de montar endereco.
+
+        Sem isto o `addr_no_pattern(None)` levanta TypeError la dentro, e o
+        erro sobe como '(!) erro no motor' (na tela) ou derruba o `run` do
+        terminal, que so trata KeyboardInterrupt."""
+        p = self._garantir_pattern()
+        if p is None:
+            self.log(f"(!) {rot}: nao sei em que pattern a maquina esta - "
+                     "abortado (a leitura do no de performance falhou).")
+        return p
 
     def recarregar(self):
         if self._garantir_pattern() is None:
@@ -2208,6 +2266,8 @@ class Motor:
 
     def definir_last_var(self, n):
         with self.lock:
+            if self._pattern_para_escrever("last step da variacao") is None:
+                return
             if self.escrita_bloqueada("last step da variacao"):
                 return
             n = max(1, min(16, int(n)))
@@ -2222,6 +2282,8 @@ class Motor:
 
     def definir_last_track(self, i, n):
         with self.lock:
+            if self._pattern_para_escrever("last step do track") is None:
+                return
             if self.escrita_bloqueada("last step da linha"):
                 return
             n = 16 if n is None else max(1, min(16, int(n)))
@@ -2300,6 +2362,15 @@ class Motor:
                     if len(d) > OFF_PATTERN_ATUAL else None)
         if novo_pat != self.pattern_atual and self.pattern_atual is not None:
             self.pattern_trocou = True
+            # O cache ainda e do pattern ANTERIOR, e o endereco de escrita ja
+            # aponta para o novo. O escrever_step manda os 8 bytes do step
+            # inteiro - inclusive os bytes 0-2, que ele nao entende e copia do
+            # cache -, entao escrever nessa janela carregaria lixo do pattern
+            # velho para dentro do novo. A releitura pode demorar (ela e
+            # ADIADA enquanto o chain persegue o playhead), entao a escrita
+            # fica bloqueada ate ela acontecer, pelo mesmo caminho que uma
+            # linha nao lida usa.
+            self.cache_invalido.update(range(len(INSTRUMENTOS)))
             n = novo_pat
             self.log("pattern mudou "
                      f"({nome_pattern(n)}): relendo o grid")
@@ -2870,8 +2941,13 @@ class Motor:
         O rotulo e o que a tela mostra no historico ("ghosts BD", "escrita
         'Deep house'") e o que o Reverter-por-edicao compara para saber se a
         SUA edicao ainda e o topo da pilha."""
+        # o PATTERN entra no snapshot desde 16/08/2026. Antes so a variacao
+        # entrava, e enquanto todo endereco caia no mesmo lugar isso bastava.
+        # Com o endereco correto, desfazer depois de trocar de pattern
+        # despejava o conteudo do pattern antigo por cima do novo - 16 steps x
+        # 11 instrumentos, calado.
         self.pilha_desfazer.append(
-            (rotulo, self.variacao,
+            (rotulo, self.variacao, self.pattern_atual,
              {i: list(d) for i, d in self.cache.items()}, self.acc))
         del self.pilha_desfazer[:-self.TETO_DESFAZER]
 
@@ -2879,8 +2955,14 @@ class Motor:
         if self._garantir_pattern() is None:
             self.log("(!) desfazer: nao sei em que pattern a maquina esta - abortado.")
             return
-        rotulo, var, blocos, mascara = snap
+        rotulo, var, pat, blocos, mascara = snap
         if self.escrita_bloqueada("desfazer"):
+            return False
+        if pat != self.pattern_atual:
+            self.log(f"(!) '{rotulo}' foi feito no pattern "
+                     f"{nome_pattern(pat) if pat is not None else '?'} e a "
+                     f"maquina esta no {nome_pattern(self.pattern_atual)} - "
+                     "desfazer aqui sobrescreveria o pattern errado.")
             return False
         if var != self.variacao:
             self.log(f"(!) '{rotulo}' e da variacao {VARIACOES[var-1]} - va "
@@ -3757,7 +3839,10 @@ class Motor:
         if not self.tr_out:
             self.log("(!) sem porta CTRL - ligue o modo ON")
             return
-        self.tr_out.send(dt1(addr_soma(addr_no_pattern(self.pattern_atual), OFF_VAR_TOCANDO),
+        p = self._pattern_para_escrever("pedir variacao")
+        if p is None:
+            return
+        self.tr_out.send(dt1(addr_soma(addr_no_pattern(p), OFF_VAR_TOCANDO),
                              mascara_para_nibbles(1 << (v - 1))))
         self.log(f"pedi a variacao {VARIACOES[v-1]} a maquina "
                  "(a proxima leitura confirma se ela obedeceu)")
@@ -3794,7 +3879,10 @@ class Motor:
             m = 0
             for x in atual:
                 m |= 1 << (x - 1)
-            self.tr_out.send(dt1(addr_soma(addr_no_pattern(self.pattern_atual), OFF_VAR_TOCANDO),
+            p = self._pattern_para_escrever("rodizio de variacoes")
+            if p is None:
+                return
+            self.tr_out.send(dt1(addr_soma(addr_no_pattern(p), OFF_VAR_TOCANDO),
                                  mascara_para_nibbles(m)))
             nomes = " ".join(VARIACOES[x-1] for x in sorted(atual))
             self.log(f"rodizio agora: {nomes}"
@@ -4397,7 +4485,7 @@ def cmd_tempo_watch():
         p = pattern_corrente(tin, tout)
         if p is None:
             print("(!) nao consegui ler o pattern corrente."); return
-        # o no do pattern CORRENTE - ADDR_PATTERN e o do pattern 0, e o
+        # o no do pattern CORRENTE - ADDR_PATTERN_ZERO e o do pattern 0, e o
         # watch estaria olhando um pattern que nao e o que esta tocando
         alvos = [("perf", ADDR_PERF, 128), ("pattern", addr_no_pattern(p), 193)]
         print(f"Observando perf e o no do pattern {nome_pattern(p)}. "
