@@ -107,15 +107,11 @@ export function gradeSteps({
       indices[indices.length - 1] - indices[0] === indices.length - 1;
     janela.hidden = !contigua;
     if (contigua) {
-      // MEDIR, nao calcular: a primeira versao somava "16px de regua +
-      // n*(altura+gap)" e o erro acumulado deixava a moldura cortando a
-      // ultima linha no meio. offsetTop dos rotulos reais nao mente e
-      // sobrevive a troca de densidade.
-      const r0 = rotulos[indices[0]];
-      const r1 = rotulos[indices[indices.length - 1]];
-      janela.style.top = r0.offsetTop + "px";
-      janela.style.height =
-        r1.offsetTop + r1.offsetHeight - r0.offsetTop + "px";
+      // A moldura e um ITEM DO GRID, nas mesmas linhas das celulas - o
+      // motor de layout alinha por construcao. As duas tentativas
+      // anteriores (somar alturas, medir offsetTop) sairam tortas nas
+      // bordas. +2: a linha 1 do grid CSS e a regua, a 2 e a ACC.
+      janela.style.gridRow = `${indices[0] + 2} / span ${indices.length}`;
     }
     const chave = indices.join(",");
     if (chave === janelaChave) return;

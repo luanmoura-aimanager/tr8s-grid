@@ -124,8 +124,10 @@
  * grid, ACC = 0), --jn = quantas linhas. Acompanha INST UP/DOWN de qualquer
  * origem, porque vem do estado do motor. */
 .janela-lp{
-  position:absolute; left:calc(var(--rot-l)); right:0; pointer-events:none;
-  /* top/height sao MEDIDOS do DOM em marcarJanela (offsetTop dos rotulos) */
+  /* item do grid por cima das celulas: grid-row vem do JS (marcarJanela);
+     as colunas sao as 16 de steps. Alinhamento exato por construcao. */
+  grid-column:2 / -1; pointer-events:none;
+  margin:calc(-1 * var(--gap) / 2);
   border:2px solid var(--c-play,#33d17a); border-radius:var(--r2);
   opacity:.45;
 }
