@@ -107,11 +107,29 @@ export function gradeSteps({
       indices[indices.length - 1] - indices[0] === indices.length - 1;
     janela.hidden = !contigua;
     if (contigua) {
-      // A moldura e um ITEM DO GRID, nas mesmas linhas das celulas - o
-      // motor de layout alinha por construcao. As duas tentativas
-      // anteriores (somar alturas, medir offsetTop) sairam tortas nas
-      // bordas. +2: a linha 1 do grid CSS e a regua, a 2 e a ACC.
-      janela.style.gridRow = `${indices[0] + 2} / span ${indices.length}`;
+      // Mede AS PROPRIAS CELULAS das esquinas (primeira da primeira linha,
+      // ultima da ultima) e cobre exatamente esse retangulo. Tentativas
+      // anteriores: somar alturas (erro acumulado), item do grid CSS
+      // (deslocava as celulas auto-posicionadas - piorou tudo). Celula de
+      // esquina nao tem como mentir. Os indices ja sao linhas do grid
+      // (o +1 da ACC veio de quem chamou).
+      const primeira = celulas[indices[0] * 16];
+      const ultima = celulas[indices[indices.length - 1] * 16 + 15];
+      const m = 3; // folga para a borda nao encostar nas celulas
+      janela.style.top = primeira.offsetTop - m + "px";
+      janela.style.left = primeira.offsetLeft - m + "px";
+      janela.style.width =
+        ultima.offsetLeft +
+        ultima.offsetWidth -
+        primeira.offsetLeft +
+        2 * m +
+        "px";
+      janela.style.height =
+        ultima.offsetTop +
+        ultima.offsetHeight -
+        primeira.offsetTop +
+        2 * m +
+        "px";
     }
     const chave = indices.join(",");
     if (chave === janelaChave) return;
