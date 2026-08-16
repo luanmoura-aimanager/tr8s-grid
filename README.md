@@ -27,6 +27,7 @@ que separa explicitamente **o que foi provado do que é dedução**.
 |---|---|
 | Formato da mensagem, checksum, aritmética de endereço com carry de 7 bits | 2.2 |
 | Mapa de endereços: kit, pattern, variações, TRG | 2.3 |
+| **Como um pattern é endereçado**: o byte 1 é `pattern × 16 + variação`, com carry para o byte 0 | 7 |
 | Layout do step: velocity, flam, sub steps, **probability**, **ALT** | 2.4 |
 | ACCENT como máscara de 16 bits em nibbles | 2.5 |
 | **LAST STEP** da variação e do track | 2.3.1 |
@@ -60,8 +61,11 @@ python3 lp_tr8s.py standby  # so as ondas coloridas; nem precisa da TR-8S ligada
 `python3 criar_app.py` monta um **`TR-8S Grid.app`** no Desktop, com janela e ícone, no
 lugar do comando no terminal.
 
-Feche o **TR-EDITOR** antes: ele segura a porta `TR-8S CTRL`, e só um processo por vez a
-usa.
+Feche o **TR-EDITOR** antes. Quem ocupa a porta `TR-8S CTRL` é o *motor* (o servidor
+sozinho não abre MIDI nenhum), e o modo como isso falha é traiçoeiro: no CoreMIDI a porta
+aceita vários clientes, então **nada dá erro** — os dois processos passam a consumir a
+resposta um do outro e a medida sai errada sem sintoma. As sessões guiadas checam isso
+sozinhas e se recusam a medir.
 
 ### Engenharia reversa
 
@@ -84,11 +88,16 @@ python3 lp_tr8s.py varrer mapa.json    # que enderecos existem (leia a 3.1 antes
 ocorrência, então os dois Launchpad viram um só. Por isso a enumeração e a abertura usam
 `rtmidi` cru **por índice**, e o `mido` fica só para montar mensagens (REFERENCIA 7).
 
+O índice, porém, **não é a identidade** de um aparelho — é só onde ele caiu na enumeração
+daquele dia. Plugar um teclado no meio empurra os Launchpad e os índices salvos passam a
+apontar para outra coisa. O layout guarda o par **(nome, n-ésima ocorrência)**, que é a
+distinção que o mido apaga, e reencontra cada aparelho na lista de agora.
+
 ## Arquivos
 
 | Arquivo | O que é |
 |---|---|
-| `lp_tr8s.py` | O motor e a CLI: launchpads, SysEx, grid ao vivo, sessões de hardware (`prob_watch`, `pattern`, `pc`, `var_mask`) |
+| `lp_tr8s.py` | O motor e a CLI: launchpads, SysEx, grid ao vivo, sessões de hardware (`pattern_watch`, `prob_watch`, `kit_watch`, `tempo_watch`, `pattern`, `pc`, `var_mask`) |
 | `web/` | A interface: HTML/CSS/módulos ES sem build nem dependência. Aba **Pattern** com o grid 12×16 editável (espelho do TR-EDITOR, com probability que o hardware não exibe), barra de estado com displays e LEDs, Mixer & FX, Instrumento, Biblioteca, Chain, Estocástica, Avançado |
 | `servidor.py` + `pagina.html` | A tela: servidor local (só stdlib, 127.0.0.1, com token/Origin/CSP) + página no navegador, com o que o grid físico não tem — Mixer & FX (sends/knobs/LFO por captura guiada + probability), Instrumento (troca de tone), Biblioteca, Chain, Estocástica, Avançado. Log em `~/Library/Logs/TR8S-Grid-app.log`. Saiu do Tkinter porque o Tk 8.5.9 do Python do CLT trava no macOS atual (medições na REFERENCIA §4) |
 | `efeitos.py` | Mapa dos parâmetros de kit/FX decodificados por observação (captura no app + sniff do TR-EDITOR) |
