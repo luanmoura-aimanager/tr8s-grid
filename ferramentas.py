@@ -153,8 +153,13 @@ class Chain:
             self.log(f"chain: nextPattern {L.nome_pattern(n)} "
                      "enviado (troca na virada - provado 15/08)")
         elif ent["tipo"] == "variacao":
+            # addr_no_pattern(o pattern CORRENTE), nao ADDR_PATTERN: aquele e
+            # o no do pattern 0, e escrever nele pedia variacao no 1-01 com a
+            # maquina tocando outra coisa. Mesmo bug do 20 xx, sobrevivendo
+            # neste canto (16/08/2026).
             motor.tr_out.send(L.dt1(
-                L.addr_soma(L.ADDR_PATTERN, L.OFF_VAR_TOCANDO),
+                L.addr_soma(L.addr_no_pattern(motor.pattern_atual),
+                            L.OFF_VAR_TOCANDO),
                 L.mascara_para_nibbles(1 << (ent["var"] - 1))))
             self.log(f"chain: variacao {L.VARIACOES[ent['var']-1]} pedida "
                      "(sessao C decide se obedece)")
@@ -184,8 +189,9 @@ class Chain:
             # o accent vai por DT1 direto, entao consulta o guarda do espelho
             # aqui: o escrever_step do _perseguir ja se protege sozinho
             if not motor.escrita_bloqueada("chain: accent"):
-                motor.tr_out.send(L.dt1(L.addr_accent_rd(motor.variacao),
-                                        L.mascara_para_nibbles(motor.acc)))
+                motor.tr_out.send(L.dt1(
+                    L.addr_accent_rd(motor.variacao, motor.pattern_atual),
+                    L.mascara_para_nibbles(motor.acc)))
             motor.pintar()
             self.log(f"chain: '{ent.get('nome', '?')}' no ar "
                      f"({self.reps_restantes}x)")

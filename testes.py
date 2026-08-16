@@ -361,5 +361,59 @@ class TesteGuardaDePortas(unittest.TestCase):
         self.assertTrue(msgs)
 
 
+class TesteEnderecoDePattern(unittest.TestCase):
+    """O `24 5x` era uma FOTOGRAFIA do pattern 3-06, o que estava carregado
+    durante o sniff. A regra geral e `pattern*16 + variacao` no segundo byte,
+    com carry de 7 bits para o primeiro."""
+
+    def test_reproduz_o_sniff_do_tr_editor(self):
+        """3-06 e o indice 37: 37*16+1 = 593 = 4*128+81, ou seja 24 51.
+
+        Se esta conta parar de bater com o que o editor pediu na captura, a
+        formula regrediu - e o sniff e a unica fonte que temos."""
+        self.assertEqual(L.addr_variacao(37, 0), (0x24, 0x50, 0x00, 0x00))
+        self.assertEqual(L.addr_variacao(37, 1), (0x24, 0x51, 0x00, 0x00))
+        self.assertEqual(L.addr_bloco_rd(0, 1, 37), (0x24, 0x51, 0x00, 0x08))
+        # e o DT1 de escrita visto no segundo sniff (step 2 do BD)
+        self.assertEqual(L.addr_step_rd(0, 1, 1, 37), (0x24, 0x51, 0x00, 0x10))
+
+    def test_confere_com_a_maquina_de_16_08(self):
+        """Os quatro patterns lidos na TR-8S, incluindo os que transbordam o
+        carry de 7 bits para o byte 0."""
+        for pattern, esperado in ((0,   (0x20, 0x01, 0x00, 0x08)),
+                                  (4,   (0x20, 0x41, 0x00, 0x08)),
+                                  (43,  (0x25, 0x31, 0x00, 0x08)),
+                                  (127, (0x2F, 0x71, 0x00, 0x08))):
+            with self.subTest(pattern=pattern):
+                self.assertEqual(L.addr_bloco_rd(0, 1, pattern), esperado)
+
+    def test_o_pattern_e_obrigatorio(self):
+        """Um default silencioso E o bug: ele nao some, so muda de pattern.
+
+        Guarda de projeto - se alguem puser `pattern=0` de volta para 'facilitar',
+        este teste cai."""
+        for fn, args in ((L.addr_bloco_rd, (0, 1)),
+                         (L.addr_accent_rd, (1,)),
+                         (L.addr_no_pattern, ()),
+                         (L.addr_last_var, (1,)),
+                         (L.addr_last_track, (0,))):
+            with self.subTest(fn=fn.__name__):
+                with self.assertRaises(TypeError):
+                    fn(*args)
+
+    def test_todo_pattern_tem_endereco_proprio(self):
+        """Nenhum par (pattern, variacao) pode colidir com outro - foi
+        exatamente a colisao (tudo caindo no pattern 0) que causou o bug."""
+        vistos = {}
+        for p in range(128):
+            for v in range(11):
+                a = L.addr_variacao(p, v)
+                self.assertNotIn(a, vistos,
+                                 f"{a} serve {(p, v)} e {vistos.get(a)}")
+                vistos[a] = (p, v)
+                self.assertTrue(all(0 <= b <= 0x7F for b in a),
+                                f"{a} estourou os 7 bits")
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
