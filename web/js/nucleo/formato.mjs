@@ -1,11 +1,11 @@
 // formato.mjs - traducoes de valor para texto. Espelho de efeitos.rotulo_valor.
-const BANCOS = "ABCDEFGH";
 
-/** 0-127 -> "B3". Trata null e fora de faixa: "pattern undefined1" ja
- *  apareceu na tela por causa de um indice sem guarda. */
+/** 0-127 -> "2-05", COMO O VISOR: banco e NUMERO (1-8); letra e variacao.
+ *  A tela ja mostrou "B5" e confundiu o Luan - "nem existe pattern B"
+ *  (16/08). Trata null e fora de faixa. */
 export function nomePattern(p) {
   if (p === null || p === undefined || p < 0 || p > 127) return "—";
-  return BANCOS[Math.floor(p / 16)] + ((p % 16) + 1);
+  return Math.floor(p / 16) + 1 + "-" + String((p % 16) + 1).padStart(2, "0");
 }
 
 export function intOu(v, padrao = 0) {

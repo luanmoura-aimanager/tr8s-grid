@@ -144,7 +144,7 @@ class Chain:
             motor.tr_out.send(L.dt1(
                 L.addr_soma(L.ADDR_PERF, L.OFF_PATTERN_PROX), [ent["alvo"]]))
             n = ent["alvo"]
-            self.log(f"chain: nextPattern {'ABCDEFGH'[n//16]}{n%16+1} "
+            self.log(f"chain: nextPattern {L.nome_pattern(n)} "
                      "enviado (troca na virada - provado 15/08)")
         elif ent["tipo"] == "variacao":
             motor.tr_out.send(L.dt1(

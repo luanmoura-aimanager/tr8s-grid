@@ -245,6 +245,12 @@ UTIL_DISPLAY       = 0x12   # data = 32 chars ASCII; escreve no visor
 UTIL_VERSION       = 0x13   # resposta: 8 chars ("1.13"...)
 UTIL_UID           = 0x14
 
+def nome_pattern(n):
+    """Como o VISOR mostra: banco 1-8, pattern 1-16 -> "2-05".
+    A letra e VARIACAO, nao banco - a tela ja confundiu as duas (16/08)."""
+    return f"{n // 16 + 1}-{n % 16 + 1:02d}"
+
+
 def addr_util(sub):         return (0x50, 0x00, 0x00, sub)
 
 def ler_util(tr_in, tr_out, sub, data=(0,), timeout=1.0):
@@ -1844,7 +1850,7 @@ class Motor:
             self.pattern_trocou = True
             n = novo_pat
             self.log("pattern mudou "
-                     f"({'ABCDEFGH'[n // 16]}{n % 16 + 1}): relendo o grid")
+                     f"({nome_pattern(n)}): relendo o grid")
             # HIPOTESE de 16/08/2026 (sintoma: apos trocar de pattern, editar
             # o grid nao soava e o painel nao aparecia no grid): o buffer de
             # edicao SysEx (blocos 20 xx) pode nao acompanhar a troca sozinho.
@@ -2309,7 +2315,7 @@ class Motor:
         n = int(n) & 0x7F
         off = OFF_PATTERN_ATUAL if agora else OFF_PATTERN_PROX
         self.tr_out.send(dt1(addr_soma(ADDR_PERF, off), [n]))
-        nome = "ABCDEFGH"[n // 16] + str(n % 16 + 1)
+        nome = nome_pattern(n)
         self.log(f"pattern {'AGORA' if agora else 'na virada'} -> {nome}")
 
     def definir_kit(self, n):

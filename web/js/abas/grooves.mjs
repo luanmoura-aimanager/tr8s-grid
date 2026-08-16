@@ -16,7 +16,9 @@ import { agir } from "../app.mjs";
 import { toast } from "../comp/toast.mjs";
 
 const KITS = ["TR-808", "TR-909", "TR-707", "TR-727", "TR-606", "TR-626"];
-const nomePat = (n) => "ABCDEFGH"[n >> 4] + ((n % 16) + 1);
+// como o visor: banco 1-8 (numero!), pattern 1-16 -> "2-05". Letra e variacao.
+const nomePat = (n) =>
+  (n >> 4) + 1 + "-" + String((n % 16) + 1).padStart(2, "0");
 
 let D_;
 let sel = null; // {tipo:"groove", p} | {tipo:"pattern", n}
@@ -92,7 +94,7 @@ export default {
     // grade A1-H16 da maquina
     gradeMaq = h("div.grade-maquina", { hidden: true });
     for (let b = 0; b < 8; b++) {
-      gradeMaq.append(h("span.rot-banco", {}, "ABCDEFGH"[b]));
+      gradeMaq.append(h("span.rot-banco", {}, String(b + 1)));
       for (let i = 0; i < 16; i++) {
         const n = b * 16 + i;
         const bt = h(

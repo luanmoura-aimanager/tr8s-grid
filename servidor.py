@@ -251,8 +251,8 @@ def _acao_chain_armar(a):
             elif it.get("tipo") == "pattern":
                 n = int(it["alvo"]) & 0x7F
                 entradas.append({"tipo": "pattern", "alvo": n,
-                                 "nome": "ABCDEFGH"[n // 16]
-                                 + str(n % 16 + 1), "reps": reps})
+                                 "nome": L.nome_pattern(n),
+                                 "reps": reps})
         elif modo == "reescrita":
             pat = next((p for p in B.PATTERNS if p["id"] == it["alvo"]), None)
             if not pat:
