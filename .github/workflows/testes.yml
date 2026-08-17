@@ -1,0 +1,57 @@
+# Testes de mesa a cada push e a cada PR.
+#
+# NADA aqui toca hardware: os testes nao abrem porta MIDI e nao precisam da
+# TR-8S. O que este workflow protege e o que da para provar sem ela - contratos
+# entre camadas, offsets medidos, escalas lidas no visor, sintaxe dos modulos.
+# Verde aqui NAO significa "funciona": significa "nao quebrou o que ja estava
+# provado". Quem diz que funciona continua sendo o Luan na frente da maquina
+# (CLAUDE.md).
+name: testes
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  mesa:
+    # 22.04 e nao ubuntu-latest: o Mac do projeto roda Python 3.9 (o do Command
+    # Line Tools), e testar na mesma versao e o que evita descobrir uma
+    # incompatibilidade de sintaxe so quando o Luan roda - ja aconteceu com
+    # f-string multilinha, que e 3.12+
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.9"
+
+      # O lp_tr8s.py importa mido E rtmidi no TOPO, sem try/except - sem os
+      # dois nem `import lp_tr8s` roda, e 28 dos testes morrem no import. O
+      # python-rtmidi compila C++ quando nao ha wheel para a versao; estas duas
+      # bibliotecas sao o que faz a compilacao passar. Se houver wheel, o apt
+      # custa alguns segundos e nao atrapalha.
+      - name: dependencias de MIDI do sistema
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev libjack-jackd2-dev
+
+      - name: mido e python-rtmidi
+        run: python -m pip install --upgrade pip mido python-rtmidi
+
+      # so para o `node --check` dos modulos da pagina (web/js/**.mjs). O
+      # projeto nao tem package.json de proposito: modulos ES nativos, zero
+      # build, zero dependencia
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: testes de mesa
+        run: python3 testes.py
+
+      - name: catalogo de efeitos (nomes unicos, paineis montam)
+        run: python3 efeitos.py
+
+      - name: biblioteca (54 patterns validam)
+        run: python3 biblioteca.py

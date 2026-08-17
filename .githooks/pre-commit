@@ -1,0 +1,31 @@
+#!/bin/sh
+# Recusa commit direto na main.
+#
+# Existe porque em 17/08/2026 sete commits foram direto para a main depois de um
+# PR mergeado - sem malicia, so por inercia. O /ship cria a branch sozinho
+# quando esta na main; este hook e para quando ninguem esta usando o /ship.
+#
+# Instalar (uma vez por clone):  python3 instalar_hooks.py
+# Escapar (quando voce SABE):    git commit --no-verify
+
+ramo=$(git rev-parse --abbrev-ref HEAD)
+
+if [ "$ramo" = "main" ]; then
+    cat >&2 <<'FIM'
+
+  ✗ commit direto na main
+
+    Toda edicao sai de uma branch e entra na main por PR (CLAUDE.md,
+    "Fluxo de trabalho"). O trabalho que voce acabou de fazer NAO se perdeu -
+    ele esta no indice. Leve para uma branch:
+
+        git checkout -b nome-da-branch
+        git commit ...
+
+    Se voce sabe o que esta fazendo:  git commit --no-verify
+
+FIM
+    exit 1
+fi
+
+exit 0

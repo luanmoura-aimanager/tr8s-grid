@@ -43,6 +43,26 @@ trabalho é entregue:
 - **Não usar `--break-system-packages`**: o pip é 21.2.4 e não suporta
 - PDFs: `pdftotext` não existe aqui. Usar `fitz` (PyMuPDF), que já está instalado
 
+## Fluxo de trabalho
+
+**Toda edição sai de uma branch e entra na `main` por PR.** Nunca commitar direto na
+`main` — em 17/08/2026 sete commits foram parar lá por pura inércia, depois de um PR
+mergeado.
+
+```bash
+python3 instalar_hooks.py   # uma vez por clone; liga os hooks de .githooks/
+```
+
+- `pre-commit` recusa commit na `main` e diz como levar o trabalho para uma branch
+- `pre-push` roda `python3 testes.py`; falhou, não empurra
+- Para escapar de um deles, quando você sabe o que está fazendo: `--no-verify`
+- O `/ship` já cria a branch, abre o PR, roda a revisão e mergeia — o hook é a rede para
+  quando ninguém está usando o `/ship`
+
+O CI (`.github/workflows/testes.yml`) roda os mesmos testes a cada push e PR. **Verde não
+significa "funciona"**: significa "não quebrou o que já estava provado". Quem diz que
+funciona é o Luan, na frente da máquina.
+
 ## Depois de editar
 
 - Mexeu em `servidor.py`, `lp_tr8s.py`, `ferramentas.py`, `efeitos.py`, `biblioteca.py`,
@@ -58,7 +78,11 @@ trabalho é entregue:
   motor ainda ligado**. Reiniciar no meio de uma sessão de hardware derruba o
   motor e obriga a reler tudo do zero (aconteceu três vezes em 17/08/2026)
 - `gui.py` (Tk) **não é copiado por nenhum dos dois** — é legado; a tela viva é a web
-- Rodar os testes de mesa: `python3 testes.py` (sem porta MIDI, sem hardware)
+- Rodar os testes de mesa: `python3 testes.py` (sem porta MIDI, sem hardware). Desde
+  17/08/2026 eles cobrem também os **contratos entre as camadas** — ação que a página
+  chama e o servidor não tem, ação do servidor sem botão, chave de estado lida sem
+  existir, nome de parâmetro de FX renomeado, sintaxe dos `.mjs` — que é a classe de bug
+  que passa por todo teste de Python e só aparece com a página aberta
 - Mexeu em `gen_layout.py` ou `gen_adesivo.py` → regerar. O adesivo precisa da
   compensação de impressora: `python3 gen_adesivo.py --medido 93`
 - Só um processo por vez pode usar a porta CTRL. Um `run` esquecido em background impede

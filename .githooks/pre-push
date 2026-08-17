@@ -1,0 +1,33 @@
+#!/bin/sh
+# Roda os testes de mesa antes de empurrar. Falhou, nao empurra.
+#
+# Os testes nao tocam em porta MIDI nem precisam da TR-8S ligada - se este hook
+# demorar mais que alguns segundos, alguma coisa esta errada com ELE, nao com o
+# seu push.
+#
+# Escapar (quando voce SABE):  git push --no-verify
+
+raiz=$(git rev-parse --show-toplevel) || exit 1
+cd "$raiz" || exit 1
+
+# o mesmo PYTHONPATH que o CLAUDE.md manda exportar: mido e python-rtmidi moram
+# no site-packages do usuario, e o lp_tr8s importa os dois no topo
+export PYTHONPATH="$HOME/Library/Python/3.9/lib/python/site-packages"
+
+saida=$(python3 testes.py 2>&1)
+codigo=$?
+
+if [ $codigo -ne 0 ]; then
+    echo "$saida" >&2
+    cat >&2 <<'FIM'
+
+  ✗ os testes falharam - push cancelado
+
+    Conserte, ou empurre assumindo:  git push --no-verify
+
+FIM
+    exit 1
+fi
+
+echo "$saida" | tail -3
+exit 0
