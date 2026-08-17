@@ -55,6 +55,20 @@ def instalar():
     if faltando:
         print(f"(!) nao achei em {PASTA}/: {', '.join(faltando)}")
         return 1
+    # core.hooksPath substitui o diretorio de hooks INTEIRO: o que estiver em
+    # .git/hooks (git-lfs, ferramenta de editor, hook de outra ferramenta) para
+    # de rodar a partir daqui. Avisar e o minimo - apontado na revisao de
+    # 17/08/2026
+    atual = _git("config", "--get", "core.hooksPath").stdout.strip()
+    if atual and atual != PASTA:
+        print(f"(!) core.hooksPath ja apontava para '{atual}' - vou "
+              f"substituir por '{PASTA}'")
+    proprios = [h for h in os.listdir(os.path.join(AQUI, ".git", "hooks"))
+                if not h.endswith(".sample")] if os.path.isdir(
+                    os.path.join(AQUI, ".git", "hooks")) else []
+    if proprios:
+        print(f"(!) ha hooks em .git/hooks que PARAM de rodar agora: "
+              f"{', '.join(sorted(proprios))}")
     for h in HOOKS:                      # o modo nao sobrevive a todo clone
         os.chmod(os.path.join(AQUI, PASTA, h), 0o755)
     r = _git("config", "core.hooksPath", PASTA)
@@ -69,7 +83,23 @@ def instalar():
 
 
 def remover():
-    _git("config", "--unset", "core.hooksPath")
+    """Desliga. Confere de verdade em vez de anunciar sucesso no escuro.
+
+    O `--unset` sai com 5 quando a chave nao existe, e o escopo LOCAL nao
+    alcanca um core.hooksPath definido em --global ou --system: nos dois casos
+    a versao anterior imprimia "removido" e o usuario saia achando que tinha
+    desligado. Apontado na revisao de 17/08/2026."""
+    r = _git("config", "--unset", "core.hooksPath")
+    if r.returncode == 5:
+        print("core.hooksPath ja nao estava definido neste clone")
+    elif r.returncode:
+        print(f"(!) git config --unset falhou: {r.stderr.strip()}")
+        return 1
+    restante = _git("config", "--get", "core.hooksPath").stdout.strip()
+    if restante:
+        print(f"(!) ainda ha core.hooksPath = {restante} (vem de --global ou "
+              "--system; o --unset local nao alcanca)")
+        return 1
     print("hooks desligados (core.hooksPath removido)")
     return 0
 

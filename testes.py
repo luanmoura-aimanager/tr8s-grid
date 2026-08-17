@@ -510,6 +510,28 @@ def _todo_o_js():
     return "\n".join(t for _, t in _mjs())
 
 
+def _chamadas_agir():
+    """[(arquivo, {chave: valor literal})] de cada `agir({...})` da pagina.
+
+    Ler a CHAMADA INTEIRA, e nao cada `tipo:`/`op:`/`nome:` solto pelo arquivo,
+    e o que faz o teste enxergar o que ele promete. A primeira versao usava
+    regex avulsa e colhia o `tipo: "ok"` do toast, o `tipo: "knob"` do fx e o
+    `nome:` de qualquer objeto - ruido que obrigava a comparar so a intersecao,
+    e comparar intersecao com o conjunto e tautologia: o teste nunca falhava.
+    Apontado na revisao de 17/08/2026, provado por mutacao.
+
+    A chamada aninhada do chain_armar (que tem `{tipo:"groove"}` dentro) sai
+    inteira num pedaco so, e as chaves de dentro ficam no lugar certo: sao do
+    chain_armar, nao do exec."""
+    saida = []
+    for arq, texto_js in _mjs():
+        for corpo in re.findall(r'agir\(\s*\{(.*?)\}\s*\)', texto_js, re.S):
+            pares = dict(re.findall(r'(\w+):\s*"([^"]*)"', corpo))
+            if pares:
+                saida.append((arq, pares))
+    return saida
+
+
 class TesteContratos(unittest.TestCase):
     """O que a pagina PEDE x o que o servidor OFERECE.
 
@@ -538,7 +560,7 @@ class TesteContratos(unittest.TestCase):
                    "playing": "idem", "versao": "idem"}
 
     def acoes_da_pagina(self):
-        return set(re.findall(r'acao:\s*"([a-z_]+)"', _todo_o_js()))
+        return {p["acao"] for _arq, p in _chamadas_agir() if "acao" in p}
 
     def test_toda_acao_da_pagina_existe_no_servidor(self):
         """Botao que chama acao inexistente responde 400 e nao faz nada."""
@@ -563,22 +585,45 @@ class TesteContratos(unittest.TestCase):
                          f"ORFAS_CONHECIDAS cita acao que nao existe mais: "
                          f"{sorted(sumidas)} - limpe a lista")
 
-    def test_subdespachos_exec_e_util(self):
-        """Um nivel abaixo das acoes ha outra lista fechada: exec (11 tipos) e
-        util (4 ops). Mesmo risco, mesmo teste."""
+    def _argumentos_de(self, acao, chave):
+        """Os valores de `chave` nas chamadas de UMA acao. Escopado: sem isso o
+        `tipo:` do toast e o `op:` do externa entram na conta."""
+        return {p[chave] for _arq, p in _chamadas_agir()
+                if p.get("acao") == acao and chave in p}
+
+    def test_exec_nos_dois_sentidos(self):
+        """`exec` e uma segunda lista fechada (EXEC_OK), um nivel abaixo das
+        acoes: tipo que nao esta nela levanta ValueError e vira 500 - o botao
+        nao faz nada e ninguem descobre por que."""
         import servidor
-        js = _todo_o_js()
-        usados_exec = set(re.findall(r'tipo:\s*"([a-z_]+)"', js))
-        for t in sorted(usados_exec & servidor.EXEC_OK):
-            self.assertIn(t, servidor.EXEC_OK)
-        # o inverso: tipo de exec sem chamador
-        orfaos = servidor.EXEC_OK - usados_exec - set(self.EXEC_ORFAOS)
+        usados = self._argumentos_de("exec", "tipo")
+        self.assertTrue(usados, "nenhum exec extraido - o extrator quebrou")
+        for t in sorted(usados):
+            with self.subTest(tipo=t):
+                self.assertIn(t, servidor.EXEC_OK,
+                              f"a pagina manda exec '{t}', que o servidor "
+                              "recusa")
+        orfaos = servidor.EXEC_OK - usados - set(self.EXEC_ORFAOS)
         self.assertFalse(orfaos, f"exec sem chamador: {sorted(orfaos)}")
 
-        usados_util = set(re.findall(r'op:\s*"([a-z_]+)"', js))
-        todos_util = {"visor", "playing", "versao", "write"}
-        orfaos_util = todos_util - usados_util - set(self.UTIL_ORFAOS)
-        self.assertFalse(orfaos_util, f"util sem chamador: {sorted(orfaos_util)}")
+    def test_util_nos_dois_sentidos(self):
+        """O `util` e pior que o exec: op desconhecida cai fora dos dois ramos
+        do _acao_util e retorna EM SILENCIO - sem log, sem erro, sem 500."""
+        import inspect
+        import servidor
+        fonte = inspect.getsource(servidor._acao_util)
+        # a lista sai do FONTE do servidor, nao copiada a mao: op nova la
+        # entra no teste sozinha
+        ops = set(re.findall(r'"(\w+)":', fonte)) | set(
+            re.findall(r'a\["op"\] == "(\w+)"', fonte))
+        usados = self._argumentos_de("util", "op")
+        self.assertTrue(usados, "nenhum util extraido - o extrator quebrou")
+        for o in sorted(usados):
+            with self.subTest(op=o):
+                self.assertIn(o, ops, f"a pagina manda util '{o}', que o "
+                                      "servidor ignora calado")
+        orfaos = ops - usados - set(self.UTIL_ORFAOS)
+        self.assertFalse(orfaos, f"util sem chamador: {sorted(orfaos)}")
 
     # ── estado ──
     # nomes que a pagina le num objeto chamado `e` que NAO sao estado: sao
@@ -675,11 +720,15 @@ class TesteContratos(unittest.TestCase):
         mapa = efeitos.carregar()
         js = _todo_o_js()
         nomes = set()
-        # QUALQUER string nestas posicoes, nao so as que "parecem" nome de
-        # parametro: a primeira versao deste extrator aceitava so minusculas, e
-        # uma sabotagem de teste renomeando para "inst gainX" passou batida
-        for padrao in (r'nome:\s*"([^"]+)"',
-                       r'doCat\(D,\s*"([^"]+)"\)',
+        # o `nome:` sai SO das chamadas com acao "fx" - solto pelo repositorio
+        # ele colhia o `nome:` de qualquer objeto (um `nome: "meu groove"` no
+        # grooves.mjs quebrava o teste). Apontado na revisao de 17/08/2026.
+        nomes |= {p["nome"] for _arq, p in _chamadas_agir()
+                  if p.get("acao") == "fx" and "nome" in p}
+        # estes sao especificos o bastante para valer no arquivo todo. QUALQUER
+        # string neles, nao so as minusculas: uma sabotagem renomeando para
+        # "inst gainX" passou batida na primeira versao
+        for padrao in (r'doCat\(D,\s*"([^"]+)"\)',
                        r'faixaDoCatalogo\(D,\s*"([^"]+)"\)',
                        r'\bfx\["([^"]+)"\]',
                        r'\bmapa\["([^"]+)"\]',
@@ -689,9 +738,11 @@ class TesteContratos(unittest.TestCase):
         self.assertTrue(nomes, "nenhum nome extraido - o extrator quebrou")
         for n in sorted(nomes):
             with self.subTest(nome=n):
-                self.assertIn(n, mapa,
-                              f"a tela usa o parametro '{n}' e ele nao esta no "
-                              "mapa (renomeado? o controle ficou mudo)")
+                # assertTrue e nao assertIn: o assertIn imprime o mapa INTEIRO
+                # (75 KB) so para dizer que um nome nao esta la
+                self.assertTrue(n in mapa,
+                                f"a tela usa o parametro '{n}' e ele nao esta "
+                                "no mapa (renomeado? o controle ficou mudo)")
 
 
 class TesteSintaxeJS(unittest.TestCase):
@@ -706,6 +757,13 @@ class TesteSintaxeJS(unittest.TestCase):
         import subprocess
         node = shutil.which("node")
         if not node:
+            # no CI, pular e pior que falhar: se o step do setup-node cair, o
+            # workflow fica verde sem ter compilado um .mjs sequer, e o README
+            # continua prometendo que todos compilam. Apontado na revisao de
+            # 17/08/2026
+            if os.environ.get("CI"):
+                self.fail("node ausente no CI - a checagem de sintaxe dos "
+                          ".mjs nao rodou, e verde aqui viraria mentira")
             self.skipTest("node nao instalado - a checagem de sintaxe some")
         for arq, _ in _mjs():
             with self.subTest(arquivo=arq):
@@ -962,21 +1020,38 @@ class TesteInstaladores(unittest.TestCase):
     da copia - e a copia e o que roda de verdade (CLAUDE.md)."""
 
     def modulos_do_servidor(self):
-        import re as _re
+        """Todo modulo local que o servidor alcanca - TRANSITIVAMENTE.
+
+        A primeira versao so olhava os `import X` diretos do servidor.py:
+        modulo novo importado pelo lp_tr8s.py passava batido, e a copia do
+        LaunchAgent (a que costuma estar no ar) quebrava no primeiro uso.
+        Apontado na revisao de 17/08/2026."""
         raiz = os.path.dirname(os.path.abspath(__file__))
-        with open(os.path.join(raiz, "servidor.py"), encoding="utf-8") as f:
-            fonte = f.read()
         locais = {a[:-3] for a in os.listdir(raiz) if a.endswith(".py")}
-        achados = set()
-        for linha in fonte.splitlines():
-            m = _re.match(r'import (\w+)(?: as \w+)?$', linha.strip())
-            if m and m.group(1) in locais:
-                achados.add(m.group(1))
-        return achados
+        vistos, fila = set(), ["servidor"]
+        while fila:
+            mod = fila.pop()
+            if mod in vistos:
+                continue
+            vistos.add(mod)
+            try:
+                with open(os.path.join(raiz, mod + ".py"), encoding="utf-8") as f:
+                    fonte = f.read()
+            except OSError:
+                continue
+            for linha in fonte.splitlines():
+                linha = linha.strip()
+                m = (re.match(r'import (\w+)(?: as \w+)?$', linha)
+                     or re.match(r'from (\w+) import ', linha))
+                if m and m.group(1) in locais:
+                    fila.append(m.group(1))
+        # o servidor tambem DISPARA um script por subprocess (blackout): ele
+        # nao aparece em import nenhum e mesmo assim precisa estar na copia
+        return vistos | {"apagar_luzes"}
 
     def test_os_dois_instaladores_copiam_o_que_o_servidor_importa(self):
         raiz = os.path.dirname(os.path.abspath(__file__))
-        precisa = self.modulos_do_servidor() | {"servidor"}
+        precisa = self.modulos_do_servidor()
         for instalador in ("instalar_agente.py", "criar_app.py"):
             with open(os.path.join(raiz, instalador), encoding="utf-8") as f:
                 fonte = f.read()
