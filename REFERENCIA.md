@@ -2288,6 +2288,19 @@ sendo o único caminho, e o "?" da barra de estado segue sendo honesto.
 Isto vale como resultado NEGATIVO registrado: a próxima sessão não precisa
 procurar de novo nos mesmos dois lugares.
 
+### Botão de reset do volume do kit
+
+Pedido do Luan depois de ver a máquina recarregar o kit sozinha e apagar as
+edições da sessão. O botão `↺` ao lado do fader KIT LVL devolve **o valor de
+quando o kit foi lido** — e a dica na tela diz exatamente isso, porque
+"de fábrica" é o que não dá para saber: esse valor só existe na memória da
+máquina, e recarregar o kit só para lê-lo seria mais caro que o problema.
+
+A referência nasce na primeira leitura do bloco `kit` depois de cada troca de
+kit (`_lembrar_kit_level`), e o botão fica desabilitado quando não há para onde
+voltar ou quando o valor já é o original — com a dica mudando junto, em vez de
+um botão morto sem explicação.
+
 ### Três pendências que a sessão abriu (17/08/2026)
 
 1. ~~**SCALE — o playhead anda em metade da velocidade.**~~ **RESOLVIDA na

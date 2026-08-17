@@ -129,6 +129,17 @@ export default {
         dica: "level do delay do kit — em 0 os sends não soam",
         aoSoltar: fxk("delay level"),
       }),
+      // botao de reset do volume do kit: devolve o valor de quando o kit foi
+      // lido. O "de fabrica" nao da para saber sem recarregar o kit da memoria,
+      // entao a dica promete exatamente o que o motor entrega
+      resetKit: h(
+        "button.bt.bt-peq",
+        {
+          type: "button",
+          "data-dica": "volta ao volume que este kit tinha quando foi lido",
+        },
+        "↺",
+      ),
       kit: fader({
         rotulo: "KIT LVL",
         ...doCat(D, "kit level"),
@@ -150,6 +161,7 @@ export default {
       mfxTipo: h("select", { "aria-label": "tipo do MASTER FX" }),
       chaveTipos: "",
     };
+    master.resetKit.onclick = () => agir({ acao: "reset_kit_level" });
     master.mfxSw.onclick = () => {
       const ligado = master.mfxSw.getAttribute("aria-pressed") === "true";
       agir({ acao: "fx", nome: "mfx sw", valor: ligado ? 0 : 1, inst: null });
@@ -181,6 +193,7 @@ export default {
           "volume do kit inteiro",
         ),
         master.kit.raiz,
+        master.resetKit,
       ),
     );
 
@@ -231,6 +244,17 @@ export default {
     master.rvb.definir(fx["reverb level"] ?? null);
     master.dly.definir(fx["delay level"] ?? null);
     master.kit.definir(fx["kit level"] ?? null);
+    // o reset so existe quando ha para onde voltar E ha o que desfazer
+    const ref = e.kit_level_ref;
+    const podeResetar = ref != null && fx["kit level"] != null &&
+      fx["kit level"] !== ref;
+    attr(master.resetKit, "aria-disabled", podeResetar ? null : "true");
+    attr(master.resetKit, "data-dica",
+      ref == null
+        ? "ainda não li o volume original deste kit"
+        : podeResetar
+          ? `volta o volume do kit para ${ref}, como estava quando foi lido`
+          : `o volume já está no original (${ref})`);
     attr(master.mfxSw, "aria-pressed", fx["mfx sw"] === 1 ? "true" : "false");
     // tipos do MASTER FX: opcoes anotadas do mapa, populadas so quando mudam
     const ent = (e.mapa_fx || {})["mfx tipo"];

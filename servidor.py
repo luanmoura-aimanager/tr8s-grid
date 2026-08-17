@@ -367,6 +367,9 @@ ACOES = {
         None if a.get("valor") is None else int(a["valor"])),
     "esquecer_fx": lambda a: HOST.enfileirar(HOST.motor.esquecer_fx, a["nome"]),
     "reler": lambda a: HOST.enfileirar(HOST.motor.recarregar),
+    # botao de reset do volume do kit (pedido de 17/08/2026): devolve o valor
+    # de quando o kit foi LIDO, que e o unico "original" que temos como saber
+    "reset_kit_level": lambda a: HOST.enfileirar(HOST.motor.resetar_kit_level),
     "prob_inst": lambda a: HOST.enfileirar(HOST.motor.definir_prob_inst,
                                            int(a["inst"]), int(a["pct"])),
     # toggle do mute de UM instrumento (botao da mesa). Escrita da mascara

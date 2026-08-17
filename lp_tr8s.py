@@ -1991,6 +1991,7 @@ class Motor:
     # None = ainda nao lido; True/False = a maquina esta (ou nao) num fill
     fill_ativo = None
     auto_fill = None      # intervalo do AUTO FILL IN (32/16/12/8/4/2)
+    kit_level_ref = None  # volume do kit como ele foi lido (botao de reset)
 
     def __init__(self, cfg, log=print):
         self.cfg, self.log = cfg, log
@@ -2062,6 +2063,7 @@ class Motor:
         self.scale = None                       # SCALE do pattern (OFF_SCALE)
         self.fill_ativo = None                  # a maquina esta num fill?
         self.auto_fill = None                   # intervalo do AUTO FILL IN
+        self.kit_level_ref = None               # volume original do kit
         self.cache_var = {}                     # (pattern, var) -> espelho lido
         self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
         self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
@@ -3433,6 +3435,7 @@ class Motor:
                           timeout=SNAP_TIMEOUT)
             if d:
                 self.fx_blocos[chave] = list(d)
+                self._lembrar_kit_level(chave)
             else:
                 faltaram.append(chave)
         if faltaram:
@@ -3479,6 +3482,32 @@ class Motor:
                           timeout=SNAP_TIMEOUT)
             if d:
                 self.fx_blocos[chave] = list(d)
+                # e por aqui que o bloco chega depois de uma troca de kit: o
+                # ler_fx inteiro so roda ao entrar no modo ON
+                self._lembrar_kit_level(chave)
+
+    def _lembrar_kit_level(self, chave):
+        """Guarda o VOLUME DO KIT como ele chegou da maquina.
+
+        Pedido do Luan em 17/08/2026: um botao que devolve o volume do kit ao
+        que era. "De fabrica" nao da para saber - o valor de fabrica so existe
+        na memoria da maquina, e recarregar o kit para ler seria mais caro que
+        o problema. O que da para prometer com honestidade e ESTE valor: o que
+        estava quando o kit foi lido, antes de qualquer mexida nossa. E e isso
+        que a dica na tela diz."""
+        if chave != "kit" or self.kit_level_ref is not None:
+            return
+        ent = self.mapa_fx.get("kit level")
+        if ent:
+            self.kit_level_ref = self._fx_ler_valor(self.fx_blocos.get("kit"),
+                                                    ent)
+
+    def resetar_kit_level(self):
+        """Devolve o volume do kit ao valor de quando o kit foi lido."""
+        if self.kit_level_ref is None:
+            self.log("(!) ainda nao li o volume original deste kit")
+            return
+        self.definir_fx("kit level", self.kit_level_ref)
 
     def _fx_alvo(self, ent, inst=None):
         """(chave do bloco, endereco base, tamanho) do parametro."""
@@ -4315,6 +4344,9 @@ class Motor:
                 # de FX entram numa fila e saem POUCOS POR CICLO.
                 if self.kit_trocou:
                     self.kit_trocou = False
+                    # kit novo, referencia nova: o botao de reset passa a
+                    # apontar para o volume DESTE kit
+                    self.kit_level_ref = None
                     self.ler_kit()
                     self.fx_fila = self._fx_alvos()
                     self.fx_rearmado = time.time()
@@ -4553,6 +4585,8 @@ class Motor:
                 # intervalo do AUTO FILL IN lido do no do pattern (e por
                 # pattern, nao global). O que o numero conta segue desconhecido
                 "auto_fill": self.auto_fill,
+                # volume do kit como foi lido - o alvo do botao de reset
+                "kit_level_ref": self.kit_level_ref,
                 "last_var": self.last_var(),
                 "last_track": list(self.ultimo_track),
                 "armado": self.armado,
