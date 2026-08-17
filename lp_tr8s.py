@@ -309,6 +309,21 @@ OFF_MUTE  = 12        # 12,13,14,15 = os 4 nibbles
 # playhead ate parar e tocar de novo. Este byte responde a pergunta direto.
 OFF_STEP_ATUAL = 7
 
+# FILL IN EM ANDAMENTO - decodificado em 17/08/2026 com um watch da regiao de
+# performance (930 leituras, 17 fills). 1 = a maquina esta tocando um fill,
+# 0 = pattern normal.
+#
+# A assinatura nao deixa duvida: acende e apaga SEMPRE na virada do compasso
+# (step 15 -> 0), dura exatamente um compasso no automatico (2,74 a 2,94 s
+# medidos, contra 2,79 s teoricos de 16 steps a 86 bpm) e, no fill MANUAL,
+# acende no instante do aperto (foi visto no step 6) e apaga na mesma virada.
+#
+# E o unico caminho para saber que a maquina saiu do pattern: a mascara de
+# variacao habilitada (63-66) so reporta A-H e nunca os dois Fill In (2.3.2),
+# e o watch confirmou que NENHUM byte da performance reporta qual variacao
+# toca. Sem isto, o grid seguia desenhando o playhead sobre uma variacao que
+# nao estava soando.
+
 # TROCA REMOTA DE KIT E PATTERN - do mapa oficial da Roland embutido no site
 # ARIA (TR-8S-SysEx/js/Tr8s/Tr8sData.js, base64) e visto em capturas reais:
 #   offset 0 = kit atual, 1 = pattern atual, 2 = proximo pattern (1 byte,
@@ -325,6 +340,7 @@ OFF_PATTERN_PROX  = 2
 # ~139.7) e 0B 0B 08 = 0xBB8 = 3000 = 300.0 (o teto do knob). Faixa
 # 40.0-300.0. LEITURA provada; escrita e a mesma hipotese ja confirmada nos
 # vizinhos (kit no 0, pattern no 1/2).
+OFF_FILL = 0x09
 OFF_TEMPO = 0x3A
 
 # perf offset 0x40: alterna 0/1 a cada volta MESMO com A->B->C ciclando
@@ -1933,6 +1949,8 @@ class Motor:
     # bits 11-15 da mascara de mute, guardados crus: a 2.7 nao diz o que eles
     # fazem, e alternar_mudo reescreve a mascara inteira
     mudo_bits_altos = 0
+    # None = ainda nao lido; True/False = a maquina esta (ou nao) num fill
+    fill_ativo = None
 
     def __init__(self, cfg, log=print):
         self.cfg, self.log = cfg, log
@@ -2002,6 +2020,7 @@ class Motor:
         self.fx_fila = []                       # blocos de FX a reler, aos poucos
         self.fx_rearmado = 0.0                  # quando a fila deu a ultima volta
         self.scale = None                       # SCALE do pattern (OFF_SCALE)
+        self.fill_ativo = None                  # a maquina esta num fill?
         self.cache_var = {}                     # (pattern, var) -> espelho lido
         self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
         self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
@@ -2468,6 +2487,9 @@ class Motor:
         # Guardar os bits DE CIMA crus e o que permite reescrever a mascara sem
         # apagar funcao que ninguem mapeou (ver alternar_mudo).
         self.mudo_bits_altos = m & ~((1 << len(INSTRUMENTOS)) - 1)
+        # o fill vem no mesmo bloco, sem custo nenhum de leitura
+        if len(d) > OFF_FILL:
+            self.fill_ativo = bool(d[OFF_FILL])
         novo = [bool(m >> i & 1) for i in range(len(INSTRUMENTOS))]
         mudou = novo != self.mudo
         self.mudo = novo
@@ -4470,6 +4492,9 @@ class Motor:
                 # fechar o app para rodar um snap. Ver alternar_mudo, que os
                 # devolve como estavam em vez de mandar zero.
                 "mudo_bits_altos": self.mudo_bits_altos,
+                # a maquina esta tocando um FILL IN (perf 0x09): o que soa nao
+                # e a variacao aberta no grid
+                "fill_ativo": self.fill_ativo,
                 "last_var": self.last_var(),
                 "last_track": list(self.ultimo_track),
                 "armado": self.armado,

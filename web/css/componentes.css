@@ -114,6 +114,9 @@
 }
 .chip[data-on="1"]{ color:var(--tinta); border-color:var(--linha2) }
 .chip-mudo{ color:var(--info); border-color:#1e3a5f; background:#101a26 }
+/* FILL IN: a maquina saiu do pattern e esta tocando outra coisa - e a
+   unica cor da barra que avisa que o grid nao e o que soa agora */
+.chip-fill{ color:var(--acento); border-color:#5a3d16; background:#2a1d10 }
 
 /* ── knob ─────────────────────────────────────────────────
  * O arco usa pathLength="100": o dasharray vira porcentagem direta e nao

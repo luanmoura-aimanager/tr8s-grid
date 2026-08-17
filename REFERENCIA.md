@@ -2164,6 +2164,47 @@ mostrou **`+7.0 dB`**. Com a faixa 0-161 já documentada, os dois pontos fecham 
 reta, e o parâmetro ganhou a tabela. O `extin pan` continua sem escala: esse
 ninguém leu.
 
+## FILL IN decifrado — performance `0x09` (17/08/2026, noite)
+
+**`01 00 00 09` diz se a máquina está tocando um fill.** `1` = fill em
+andamento, `0` = pattern normal. Watch da região de performance, ~6 leituras
+por segundo, **930 leituras e 17 fills** — nenhuma exceção:
+
+| o que se mediu | resultado |
+|---|---|
+| duração no fill **automático** | 2,72 a 2,94 s — **um compasso** (16 steps a 86 bpm = 2,79 s) |
+| onde vira | **sempre no step 15 → 0**, a fronteira do compasso |
+| fill **manual** | acende no instante do aperto (visto no step 6) e apaga na mesma virada — dura o resto do compasso |
+| intervalo dos automáticos | 11,09 a 11,26 s, regularidade de ±0,1 s |
+
+**Por que isso importa mais do que parece:** a máscara de variação habilitada
+(63-66) só reporta A–H e **nunca** os dois Fill In (2.3.2, medido em 14/08), e o
+mesmo watch confirmou que **nenhum** byte da performance reporta qual variação
+toca. Ou seja: este byte é o **único** sinal de que a máquina saiu do pattern.
+Sem ele o grid seguia desenhando o playhead sobre uma variação que não estava
+soando — foi exatamente a queixa de 17/08 ("*estava com auto fill in acionado e
+quando ia pro auto fill in, o grid não parava, bagunçando ainda mais*").
+
+**De brinde:** o fill manual **não reinicia o relógio do automático** — os
+automáticos seguiram nos seus 11,15 s como se os manuais no meio não
+existissem.
+
+**O que o número do knob conta continua desconhecido.** Com o AUTO FILL IN em
+`2`, o fill entrou a cada **4 voltas de 16 steps**, não a cada 2. A medição está
+aqui; a interpretação fica em aberto até alguém medir os outros valores
+(32/16/12/8/4).
+
+### A variação que toca não está em lugar nenhum que a gente leia
+
+O mesmo watch trocou a variação tocando de **A → C → F** e **nenhum byte da
+região de performance se mexeu**. Somando com o que a 7.4 já registrava (o nó de
+193 bytes também ficou em silêncio num watch anterior), os **dois** candidatos
+naturais estão descartados. A dedução pelo clock (`_avancar_ciclo_vars`) segue
+sendo o único caminho, e o "?" da barra de estado segue sendo honesto.
+
+Isto vale como resultado NEGATIVO registrado: a próxima sessão não precisa
+procurar de novo nos mesmos dois lugares.
+
 ### Três pendências que a sessão abriu (17/08/2026)
 
 1. ~~**SCALE — o playhead anda em metade da velocidade.**~~ **RESOLVIDA na

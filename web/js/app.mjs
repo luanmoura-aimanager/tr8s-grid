@@ -298,6 +298,10 @@ function pintar(e, dados) {
   (e.cache_invalido || []).forEach((i) =>
     quer.push(["inv-" + i, "chip", "⚠ " + dados.instrumentos[i] + " não lido"]),
   );
+  // FILL IN (17/08/2026): o unico jeito de saber que a maquina saiu do pattern.
+  // A mascara de variacao nunca reportou os fills, entao ate aqui o grid seguia
+  // desenhando como se nada tivesse acontecido.
+  if (e.fill_ativo) quer.push(["fill", "chip chip-fill", "FILL IN"]);
   if (e.alt) quer.push(["alt", "chip", "ALT ligado"]);
   if (e.armado) quer.push(["arm", "chip", "CLEAR armado"]);
   if (e.polirritmia) quer.push(["poli", "chip", "polirritmia"]);
