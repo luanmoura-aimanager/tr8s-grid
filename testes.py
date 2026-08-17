@@ -16,6 +16,7 @@ aparelho da esquerda, e o bug aberto do buffer de edicao (REFERENCIA 7).
 """
 
 import os
+import re
 import sys
 import threading
 import time
@@ -475,6 +476,590 @@ class TesteScale(unittest.TestCase):
         """Codigo fora dos quatro conhecidos nao pode zerar nem explodir: a
         conta do playhead divide por este numero."""
         self.assertEqual(self.motor(0x7F).pulsos_p_step(), L.PULSOS_P_STEP)
+
+
+# ─────────────────────────────────────────────────────────────
+# CONTRATOS ENTRE AS CAMADAS
+#
+# Tudo aqui nasceu de 17/08/2026, quando uma reforma grande passou nos 31 testes
+# e mesmo assim quebrou: a acao "reler" existia no servidor sem NENHUM botao (e
+# quando uma leitura falhava a escrita ficava bloqueada sem saida pela pagina),
+# a captura de FX ficou sem cancelamento quando a aba Avancado saiu, e um
+# `fileira2` que nao existia foi parar no fx.mjs. Nenhum desses e pegavel
+# testando Python: os dois lados do contrato estao em linguagens diferentes.
+#
+# A tecnica: ler os .mjs como TEXTO. E o que dispensa runner JS num projeto cuja
+# decisao explicita e "modulos ES nativos, zero build, zero dependencia".
+# ─────────────────────────────────────────────────────────────
+WEB_JS = os.path.join(os.path.dirname(os.path.abspath(__file__)), "web", "js")
+
+
+def _mjs():
+    """[(caminho relativo, texto)] de todos os modulos da pagina."""
+    saida = []
+    for raiz, _dirs, arqs in os.walk(WEB_JS):
+        for a in sorted(arqs):
+            if a.endswith(".mjs"):
+                caminho = os.path.join(raiz, a)
+                with open(caminho, encoding="utf-8") as f:
+                    saida.append((os.path.relpath(caminho, WEB_JS), f.read()))
+    return saida
+
+
+def _todo_o_js():
+    return "\n".join(t for _, t in _mjs())
+
+
+def _chamadas_agir():
+    """[(arquivo, {chave: valor literal})] de cada `agir({...})` da pagina.
+
+    Ler a CHAMADA INTEIRA, e nao cada `tipo:`/`op:`/`nome:` solto pelo arquivo,
+    e o que faz o teste enxergar o que ele promete. A primeira versao usava
+    regex avulsa e colhia o `tipo: "ok"` do toast, o `tipo: "knob"` do fx e o
+    `nome:` de qualquer objeto - ruido que obrigava a comparar so a intersecao,
+    e comparar intersecao com o conjunto e tautologia: o teste nunca falhava.
+    Apontado na revisao de 17/08/2026, provado por mutacao.
+
+    A chamada aninhada do chain_armar (que tem `{tipo:"groove"}` dentro) sai
+    inteira num pedaco so, e as chaves de dentro ficam no lugar certo: sao do
+    chain_armar, nao do exec."""
+    saida = []
+    for arq, texto_js in _mjs():
+        for corpo in re.findall(r'agir\(\s*\{(.*?)\}\s*\)', texto_js, re.S):
+            pares = dict(re.findall(r'(\w+):\s*"([^"]*)"', corpo))
+            if pares:
+                saida.append((arq, pares))
+    return saida
+
+
+class TesteContratos(unittest.TestCase):
+    """O que a pagina PEDE x o que o servidor OFERECE.
+
+    Quatro divergencias reais motivaram cada teste daqui, todas de 17/08/2026 e
+    todas silenciosas: acao sem botao, botao sem acao, aba removida deixando
+    referencia solta, e chave de estado lida sem existir."""
+
+    # Acoes que existem no servidor e NINGUEM chama na pagina. Cada uma precisa
+    # de motivo escrito: orfa nova quebra o teste, orfa antiga fica documentada.
+    ORFAS_CONHECIDAS = {
+        # a aba Avancado saiu em 17/08/2026 ("o programa tem que ficar mais
+        # simples") e levou junto a ferramenta de captura guiada. As acoes
+        # ficaram porque o catalogo pode voltar a ter buraco - e ai a captura
+        # volta do git sem precisar reescrever o servidor
+        "capturar": "captura guiada, sem UI desde 17/08/2026",
+        "cancelar_captura": "idem",
+        "anotar_opcao": "idem",
+        "esquecer_fx": "idem",
+        # duplica o caminho do exec com OUTRA chave de payload (a["var"] contra
+        # a["arg"]): quem chamar a 'obvia' passa o argumento errado e nada
+        # acontece. Candidata a remocao - ver o plano de 17/08
+        "variacao": "duplicada pelo exec; payload divergente",
+    }
+    EXEC_ORFAOS = {"oculto": "esconder linha muda saiu da barra de ferramentas"}
+    UTIL_ORFAOS = {"visor": "botoes de utility sairam com a aba Avancado",
+                   "playing": "idem", "versao": "idem"}
+
+    def acoes_da_pagina(self):
+        return {p["acao"] for _arq, p in _chamadas_agir() if "acao" in p}
+
+    def test_toda_acao_da_pagina_existe_no_servidor(self):
+        """Botao que chama acao inexistente responde 400 e nao faz nada."""
+        import servidor
+        for acao in sorted(self.acoes_da_pagina()):
+            with self.subTest(acao=acao):
+                self.assertIn(acao, servidor.ACOES,
+                              f"a pagina chama '{acao}' e o servidor nao tem")
+
+    def test_toda_acao_do_servidor_tem_chamador(self):
+        """A acao 'reler' viveu sem botao ate 17/08/2026: quando uma leitura
+        falhava, a escrita ficava bloqueada e a pagina nao tinha como sair."""
+        import servidor
+        orfas = set(servidor.ACOES) - self.acoes_da_pagina()
+        novas = orfas - set(self.ORFAS_CONHECIDAS)
+        self.assertFalse(novas,
+                         f"acoes sem chamador na pagina: {sorted(novas)}. Se "
+                         "for de proposito, acrescente em ORFAS_CONHECIDAS com "
+                         "o motivo; se nao, esta faltando o botao")
+        sumidas = set(self.ORFAS_CONHECIDAS) - set(servidor.ACOES)
+        self.assertFalse(sumidas,
+                         f"ORFAS_CONHECIDAS cita acao que nao existe mais: "
+                         f"{sorted(sumidas)} - limpe a lista")
+
+    def _argumentos_de(self, acao, chave):
+        """Os valores de `chave` nas chamadas de UMA acao. Escopado: sem isso o
+        `tipo:` do toast e o `op:` do externa entram na conta."""
+        return {p[chave] for _arq, p in _chamadas_agir()
+                if p.get("acao") == acao and chave in p}
+
+    def test_exec_nos_dois_sentidos(self):
+        """`exec` e uma segunda lista fechada (EXEC_OK), um nivel abaixo das
+        acoes: tipo que nao esta nela levanta ValueError e vira 500 - o botao
+        nao faz nada e ninguem descobre por que."""
+        import servidor
+        usados = self._argumentos_de("exec", "tipo")
+        self.assertTrue(usados, "nenhum exec extraido - o extrator quebrou")
+        for t in sorted(usados):
+            with self.subTest(tipo=t):
+                self.assertIn(t, servidor.EXEC_OK,
+                              f"a pagina manda exec '{t}', que o servidor "
+                              "recusa")
+        orfaos = servidor.EXEC_OK - usados - set(self.EXEC_ORFAOS)
+        self.assertFalse(orfaos, f"exec sem chamador: {sorted(orfaos)}")
+
+    def test_util_nos_dois_sentidos(self):
+        """O `util` e pior que o exec: op desconhecida cai fora dos dois ramos
+        do _acao_util e retorna EM SILENCIO - sem log, sem erro, sem 500."""
+        import inspect
+        import servidor
+        fonte = inspect.getsource(servidor._acao_util)
+        # a lista sai do FONTE do servidor, nao copiada a mao: op nova la
+        # entra no teste sozinha
+        ops = set(re.findall(r'"(\w+)":', fonte)) | set(
+            re.findall(r'a\["op"\] == "(\w+)"', fonte))
+        usados = self._argumentos_de("util", "op")
+        self.assertTrue(usados, "nenhum util extraido - o extrator quebrou")
+        for o in sorted(usados):
+            with self.subTest(op=o):
+                self.assertIn(o, ops, f"a pagina manda util '{o}', que o "
+                                      "servidor ignora calado")
+        orfaos = ops - usados - set(self.UTIL_ORFAOS)
+        self.assertFalse(orfaos, f"util sem chamador: {sorted(orfaos)}")
+
+    # ── estado ──
+    # nomes que a pagina le num objeto chamado `e` que NAO sao estado: sao
+    # propriedades de evento do DOM. A colisao e real - `e.alt` e chave de
+    # estado e `e.altKey` e do teclado, no mesmo repositorio
+    EVENTO_DOM = {"altKey", "button", "clientX", "clientY", "ctrlKey", "deltaY",
+                  "detail", "key", "message", "metaKey", "name", "pointerId",
+                  "preventDefault", "shiftKey", "stopPropagation", "target",
+                  "currentTarget", "dataset", "type", "value", "stack"}
+
+    def chaves_do_estado(self):
+        """As chaves que o motor e o servidor produzem, tiradas do FONTE.
+
+        Do fonte, e nao de uma chamada real, porque estado() precisa de um Motor
+        inteiro - e a graca destes testes e nao precisar de hardware."""
+        import inspect
+        import servidor
+        do_motor = set(re.findall(r'"(\w+)":', inspect.getsource(L.Motor.estado)))
+        fonte_host = inspect.getsource(servidor.Host.estado)
+        do_host = set(re.findall(r'e\["(\w+)"\]', fonte_host))
+        return do_motor | do_host
+
+    def test_toda_chave_lida_pela_pagina_existe(self):
+        """Chave que a pagina le e ninguem produz vira `undefined` calado - a
+        tela mostra "—" para sempre e parece um problema de hardware."""
+        produzidas = self.chaves_do_estado()
+        lidas = set()
+        for arq, texto_js in _mjs():
+            lidas |= set(re.findall(r'\be\.([a-z_][a-zA-Z0-9_]*)', texto_js))
+            # a aba Grooves guarda o ultimo quadro num alias chamado `ultimo` e
+            # le o estado por ele. So ali: no comp/toast.mjs existe outro
+            # `ultimo`, que e o de-duplicador de toasts e nao tem nada a ver
+            if arq == os.path.join("abas", "grooves.mjs"):
+                lidas |= set(re.findall(r'\bultimo\.([a-z_][a-zA-Z0-9_]*)',
+                                        texto_js))
+        faltando = lidas - produzidas - self.EVENTO_DOM
+        self.assertFalse(faltando,
+                         f"a pagina le chaves que o estado nao tem: "
+                         f"{sorted(faltando)}. Se for propriedade de evento do "
+                         "DOM, acrescente em EVENTO_DOM")
+
+    # ── contrato de aba ──
+    def test_toda_aba_cumpre_o_contrato(self):
+        """app.mjs espera {id, rotulo, montar, atualizar} em cada aba."""
+        for arq, texto_js in _mjs():
+            if not arq.startswith("abas" + os.sep):
+                continue
+            with self.subTest(aba=arq):
+                for campo in ('id:', 'rotulo:', 'montar(', 'atualizar('):
+                    self.assertIn(campo, texto_js,
+                                  f"{arq} nao tem '{campo}'")
+
+    def test_ids_das_abas_batem_com_o_app(self):
+        """Remover uma aba e esquecer a referencia no app.mjs quebra o boot
+        inteiro - foi o risco real quando a Avancado saiu, em 17/08/2026."""
+        app = dict(_mjs())["app.mjs"]
+        importadas = set(re.findall(r'import (\w+) from "\./abas/(\w+)\.mjs"',
+                                    app) and
+                         [m[1] for m in re.findall(
+                             r'import (\w+) from "\./abas/(\w+)\.mjs"', app)])
+        arquivos = {arq.split(os.sep)[1][:-4] for arq, _ in _mjs()
+                    if arq.startswith("abas" + os.sep)}
+        self.assertEqual(importadas, arquivos,
+                         "ha aba em web/js/abas/ que o app.mjs nao importa, ou "
+                         "import de aba que nao existe mais")
+
+    # ── o contrato escrito duas vezes ──
+    def test_rotulo_da_estocastica_bate_nos_dois_lados(self):
+        """Estocastica.rotulo diz na propria docstring que o formato e CONTRATO
+        com a tela, e o estocastica.mjs o reimplementa a mao em rotuloEsperado.
+        Se divergirem, os botoes Reverter ficam desabilitados PARA SEMPRE, sem
+        erro nenhum - o unico sintoma e uma coisa que nunca acende."""
+        import ferramentas
+        self.assertEqual(ferramentas.Estocastica.rotulo("densidade", None),
+                         "densidade todos")
+        self.assertEqual(ferramentas.Estocastica.rotulo("humanize", [0, 7]),
+                         "humanize BD+CH")
+        js = " ".join(dict(_mjs())[os.path.join("abas", "estocastica.mjs")]
+                      .split())
+        self.assertIn("`${op} todos`", js,
+                      "o lado JS mudou o formato de 'op todos'")
+        self.assertIn('op + " " +', js,
+                      "o lado JS mudou o separador entre op e instrumentos")
+        self.assertIn('.join("+")', js,
+                      "o lado JS mudou o separador entre instrumentos")
+
+    # ── nomes de parametro que a tela escreve a mao ──
+    def test_nomes_de_fx_usados_pela_tela_existem_no_mapa(self):
+        """A mesa chama "inst gain", "kit level", "inst ctrl select"... por
+        nome. Renomear um no efeitos.py deixa o controle MUDO: o motor loga
+        "parametro nao mapeado" e a tela nao mostra nada. Sao tambem chave
+        permanente do ~/.lp_tr8s_fx.json (CLAUDE.md)."""
+        import efeitos
+        mapa = efeitos.carregar()
+        js = _todo_o_js()
+        nomes = set()
+        # o `nome:` sai SO das chamadas com acao "fx" - solto pelo repositorio
+        # ele colhia o `nome:` de qualquer objeto (um `nome: "meu groove"` no
+        # grooves.mjs quebrava o teste). Apontado na revisao de 17/08/2026.
+        nomes |= {p["nome"] for _arq, p in _chamadas_agir()
+                  if p.get("acao") == "fx" and "nome" in p}
+        # estes sao especificos o bastante para valer no arquivo todo. QUALQUER
+        # string neles, nao so as minusculas: uma sabotagem renomeando para
+        # "inst gainX" passou batida na primeira versao
+        for padrao in (r'doCat\(D,\s*"([^"]+)"\)',
+                       r'faixaDoCatalogo\(D,\s*"([^"]+)"\)',
+                       r'\bfx\["([^"]+)"\]',
+                       r'\bmapa\["([^"]+)"\]',
+                       r'\barr\("([^"]+)"\)',
+                       r'\bfileira\("([^"]+)"'):
+            nomes |= set(re.findall(padrao, js))
+        self.assertTrue(nomes, "nenhum nome extraido - o extrator quebrou")
+        for n in sorted(nomes):
+            with self.subTest(nome=n):
+                # assertTrue e nao assertIn: o assertIn imprime o mapa INTEIRO
+                # (75 KB) so para dizer que um nome nao esta la
+                self.assertTrue(n in mapa,
+                                f"a tela usa o parametro '{n}' e ele nao esta "
+                                "no mapa (renomeado? o controle ficou mudo)")
+
+
+class TesteSintaxeJS(unittest.TestCase):
+    """`node --check` em todos os modulos.
+
+    Em 17/08/2026 um `fileira2` que nao existia entrou no fx.mjs e so apareceu
+    quando o Luan abriu a pagina. O navegador e o unico interpretador do projeto
+    e ele so reclama em runtime; isto traz a reclamacao para ca."""
+
+    def test_todos_os_mjs_compilam(self):
+        import shutil
+        import subprocess
+        node = shutil.which("node")
+        if not node:
+            # no CI, pular e pior que falhar: se o step do setup-node cair, o
+            # workflow fica verde sem ter compilado um .mjs sequer, e o README
+            # continua prometendo que todos compilam. Apontado na revisao de
+            # 17/08/2026
+            if os.environ.get("CI"):
+                self.fail("node ausente no CI - a checagem de sintaxe dos "
+                          ".mjs nao rodou, e verde aqui viraria mentira")
+            self.skipTest("node nao instalado - a checagem de sintaxe some")
+        for arq, _ in _mjs():
+            with self.subTest(arquivo=arq):
+                r = subprocess.run([node, "--check",
+                                    os.path.join(WEB_JS, arq)],
+                                   capture_output=True, text=True)
+                self.assertEqual(r.returncode, 0, r.stderr.strip())
+
+
+class TesteCatalogoFX(unittest.TestCase):
+    """Invariantes do efeitos.py que so o __main__ dele checava.
+
+    As escalas entraram em 17/08/2026, lidas no visor da maquina: sao o unico
+    lugar do projeto onde um numero magico vale uma sessao de hardware."""
+
+    def test_nomes_do_catalogo_sao_unicos(self):
+        import efeitos
+        nomes = [e["nome"] for e in efeitos.CATALOGO]
+        dup = sorted({n for n in nomes if nomes.count(n) > 1})
+        self.assertFalse(dup, f"nome duplicado no catalogo: {dup}")
+
+    def test_toda_entrada_fixa_tem_off_e_bloco_valido(self):
+        """carregar() NAO garante 'off': uma entrada sem ele passa e so quebra
+        na hora de ler o byte."""
+        import efeitos
+        for nome, ent in sorted(efeitos.PARAMS_FIXOS.items()):
+            with self.subTest(param=nome):
+                self.assertIn("off", ent, "entrada sem offset")
+                bloco = ent.get("bloco") or (
+                    "inst" if ent.get("tipo") == "inst" else "kit")
+                self.assertIn(bloco, efeitos.BLOCOS,
+                              f"bloco '{bloco}' nao existe em BLOCOS")
+
+    def test_opcoes_do_catalogo_so_onde_o_catalogo_tem_opcoes(self):
+        import efeitos
+        for nome, ent in sorted(efeitos.PARAMS_FIXOS.items()):
+            if not ent.get("opcoes_do_catalogo"):
+                continue
+            with self.subTest(param=nome):
+                cat = efeitos.POR_NOME.get(nome, {})
+                self.assertTrue(cat.get("opcoes"),
+                                "marcado como opcoes_do_catalogo e o catalogo "
+                                "nao tem lista de opcoes")
+
+    def test_escala_do_gain(self):
+        """Lida no visor em 17/08/2026: byte 0 = -INF, 81 = 0.0 dB, 161 = +40.0.
+        A tela mostrava "-47" onde a maquina dizia 0.0 dB."""
+        import efeitos
+        self.assertEqual(efeitos.GANHO_ESCALA[0], "-INF")
+        self.assertEqual(efeitos.GANHO_ESCALA[81], "0.0 dB")
+        self.assertEqual(efeitos.GANHO_ESCALA[161], "+40.0 dB")
+        self.assertEqual(efeitos.GANHO_ESCALA[95], "+7.0 dB")   # o EXT IN
+        self.assertEqual(max(efeitos.GANHO_ESCALA), efeitos.GANHO_MAX)
+
+    def test_escala_do_pan(self):
+        """O CENTER ocupa DOIS bytes (127 e 128) - era esse o erro de um que
+        fazia a tela dizer -10 onde a maquina dizia L9."""
+        import efeitos
+        self.assertEqual(efeitos.PAN_ESCALA[0], "L127")
+        self.assertEqual(efeitos.PAN_ESCALA[118], "L9")
+        self.assertEqual(efeitos.PAN_ESCALA[126], "L1")
+        self.assertEqual(efeitos.PAN_ESCALA[127], "CENTER")
+        self.assertEqual(efeitos.PAN_ESCALA[128], "CENTER")
+        self.assertEqual(efeitos.PAN_ESCALA[129], "R1")
+        self.assertEqual(efeitos.PAN_ESCALA[255], "R127")
+
+
+class TesteProtocolo(unittest.TestCase):
+    """Os offsets que custaram sessao de hardware.
+
+    Congelados de proposito: nenhum deles pode ser "arrumado" por dedução. Cada
+    um tem a data e o metodo no comentario do lp_tr8s.py."""
+
+    def test_offsets_medidos(self):
+        self.assertEqual(L.OFF_SCALE, 0x16)          # snapdiff ida e volta
+        self.assertEqual(L.OFF_FILL, 0x09)           # watch, 17 fills
+        self.assertEqual(L.OFF_AUTO_FILL, 0x7F)      # snapdiff, 3 pontos
+        self.assertEqual(L.OFF_TEMPO_NO, 0x10)       # sniff do TR-EDITOR
+        self.assertEqual(L.OFF_TEMPO, 0x3A)          # espelho, so leitura
+        self.assertEqual(L.AUTO_FILL_VALORES, [32, 16, 12, 8, 4, 2])
+        import efeitos
+        self.assertEqual(efeitos.CTRL_OFF_BASE, 0x01)
+
+    def test_bpm_escreve_quatro_nibbles_no_no_do_pattern(self):
+        """A REGRESSAO de 17/08: escrevia 3 nibbles no espelho da performance.
+        A maquina aceitava o valor, a leitura de volta confirmava... e o
+        andamento nao mudava. So medir o clock revelou."""
+        m = object.__new__(L.Motor)
+        m.log = lambda *a, **k: None
+        m.modo_geral = L.MODO_ON
+        m.pattern_atual = 0
+        m._garantir_pattern = lambda: 0
+        enviadas = []
+
+        class SaidaFalsa:
+            def send(self, msg):
+                enviadas.append(msg)
+
+        m.tr_out = SaidaFalsa()
+        m.definir_bpm(120.0)
+        self.assertEqual(len(enviadas), 1, "mandou mais de uma mensagem")
+        dados = list(enviadas[0].data)
+        endereco = dados[7:11]
+        esperado = list(L.addr_soma(L.addr_no_pattern(0), L.OFF_TEMPO_NO))
+        self.assertEqual(endereco, esperado,
+                         "o tempo tem que ir para o NO do pattern")
+        # 1200 = 0x4B0 em quatro nibbles
+        self.assertEqual(dados[11:15], [0x0, 0x4, 0xB, 0x0],
+                         "o campo inteiro ou nada: escrita parcial e recusada")
+
+    def test_mudo_preserva_os_bits_que_ninguem_mapeou(self):
+        """Achado da revisao de 17/08: a mascara tem 16 bits e a 2.7 decodificou
+        11. Remontar do zero mandava ZERO nos outros cinco."""
+        m = self._motor_de_mute()
+        m.mudo_bits_altos = 0x0800
+        m.alternar_mudo(7)
+        self.assertEqual(m.escritas, [0x0880],
+                         "o bit 11 tinha que voltar como estava")
+
+    def test_mudo_nao_escreve_com_leitura_falha(self):
+        """ler_mudos devolve False tanto para 'nada mudou' quanto para 'nao
+        consegui ler', e no segundo caso deixa o espelho intacto. Seguir ali
+        ressuscitaria um mute feito no painel."""
+        m = self._motor_de_mute(falhar=True)
+        m.alternar_mudo(0)
+        self.assertEqual(m.escritas, [], "escreveu em cima de espelho velho")
+
+    def _motor_de_mute(self, falhar=False):
+        m = object.__new__(L.Motor)
+        m.log = lambda *a, **k: None
+        m.modo_geral = L.MODO_ON
+        m.tr_out = object()
+        m.mudo = [False] * len(L.INSTRUMENTOS)
+        m.mudo_bits_altos = 0
+        m.leituras_falhas = 0
+        m.escritas = []
+
+        def ler(quieto=False):
+            if falhar:
+                m.leituras_falhas += 1
+            return False
+
+        m.ler_mudos = ler
+        m.definir_mudos = lambda mascara: m.escritas.append(mascara)
+        return m
+
+    def test_offset_por_instrumento(self):
+        """O terceiro modo de enderecamento (CTRL): um byte por instrumento
+        DENTRO de um bloco de kit."""
+        ent = {"off": 0x01, "off_por_inst": True}
+        self.assertEqual(L.Motor._fx_off(ent, 0), 0x01)    # BD
+        self.assertEqual(L.Motor._fx_off(ent, 10), 0x0B)   # RC
+        self.assertEqual(L.Motor._fx_off(ent, None), 0x01)
+        self.assertEqual(L.Motor._fx_off({"off": 0x10}, 5), 0x10,
+                         "sem off_por_inst o indice nao pode somar")
+
+
+class TesteServidorSemMotor(unittest.TestCase):
+    """O servidor de pe, sem TR-8S nenhuma - que e como ele nasce.
+
+    Pega o que teste de unidade nao pega: chave que nao serializa em JSON (o
+    cache_invalido e um set no motor), endpoint que sumiu, e a unica superficie
+    de rede do projeto aceitando POST sem token."""
+
+    @classmethod
+    def setUpClass(cls):
+        import http.server
+        import servidor
+        cls.servidor_mod = servidor
+        cls.httpd = http.server.ThreadingHTTPServer(("127.0.0.1", 0),
+                                                    servidor.Handler)
+        cls.porta = cls.httpd.server_address[1]
+        cls.thread = threading.Thread(target=cls.httpd.serve_forever,
+                                      daemon=True)
+        cls.thread.start()
+
+    @classmethod
+    def tearDownClass(cls):
+        cls.httpd.shutdown()
+        cls.httpd.server_close()
+
+    def url(self, rota):
+        return f"http://127.0.0.1:{self.porta}{rota}"
+
+    def test_estado_serializa_e_diz_que_esta_desligado(self):
+        import json
+        import urllib.request
+        with urllib.request.urlopen(self.url("/estado"), timeout=5) as r:
+            e = json.load(r)
+        self.assertFalse(e["ligado"], "sem motor, 'ligado' tem que ser False")
+        for chave in ("log", "fresco", "tem_tr8s", "tem_lp", "cache_invalido",
+                      "mapa_fx"):
+            self.assertIn(chave, e, f"/estado sem a chave '{chave}'")
+        self.assertIsInstance(e["cache_invalido"], list,
+                              "o set do motor tem que virar lista no JSON")
+
+    def test_dados_traz_o_que_a_pagina_monta(self):
+        import json
+        import urllib.request
+        with urllib.request.urlopen(self.url("/dados"), timeout=5) as r:
+            d = json.load(r)
+        for chave in ("instrumentos", "variacoes", "velocidades", "modos_step",
+                      "biblioteca", "catalogo_fx", "paineis_fx", "tones",
+                      "cores", "build"):
+            self.assertIn(chave, d, f"/dados sem a chave '{chave}'")
+        self.assertEqual(len(d["instrumentos"]), len(L.INSTRUMENTOS))
+
+    def test_estado_sobrevive_a_midi_quebrado(self):
+        """Achado pelo CI no primeiro dia dele (17/08/2026): sem motor, o
+        /estado enumera portas MIDI - e num runner sem ALSA isso levantava,
+        a excecao subia pelo handler e a conexao caia SEM RESPOSTA. A pagina
+        mostrava "sem contato com o servidor", o pior sintoma possivel para o
+        problema mais bobo. Vale para o Mac tambem: CoreMIDI reiniciando faria
+        o mesmo."""
+        import json
+        servidor = self.servidor_mod
+        original = L.listar_portas
+
+        def explode(entradas=True):
+            raise SystemError("subsistema de MIDI indisponivel")
+
+        L.listar_portas = explode
+        try:
+            e = servidor.HOST.estado()
+            json.dumps(e)                       # tem que continuar serializando
+            self.assertFalse(e["tem_tr8s"])
+            self.assertFalse(e["tem_lp"])
+            servidor.HOST.estado()              # de novo: nao pode logar duas
+            avisos = sum("enumerar portas" in l
+                         for l in servidor.HOST.log.ultimas())
+            self.assertEqual(avisos, 1,
+                             "o estado roda 4x/s: o aviso tem que sair UMA vez")
+        finally:
+            L.listar_portas = original
+            servidor.HOST._midi_mudo = False
+
+    def test_post_sem_token_e_recusado(self):
+        """O token e sorteado a cada boot e vive so no processo. Sem esta
+        recusa, qualquer pagina aberta no navegador escreveria na TR-8S."""
+        import urllib.error
+        import urllib.request
+        req = urllib.request.Request(
+            self.url("/acao"), data=b'{"acao":"reler"}', method="POST",
+            headers={"Content-Type": "application/json"})
+        with self.assertRaises(urllib.error.HTTPError) as ctx:
+            urllib.request.urlopen(req, timeout=5)
+        self.assertEqual(ctx.exception.code, 403)
+
+
+class TesteInstaladores(unittest.TestCase):
+    """As duas copias (LaunchAgent e .app) carregam a lista de arquivos a mao.
+
+    Modulo novo que o servidor importa e que ninguem acrescenta na lista some
+    da copia - e a copia e o que roda de verdade (CLAUDE.md)."""
+
+    def modulos_do_servidor(self):
+        """Todo modulo local que o servidor alcanca - TRANSITIVAMENTE.
+
+        A primeira versao so olhava os `import X` diretos do servidor.py:
+        modulo novo importado pelo lp_tr8s.py passava batido, e a copia do
+        LaunchAgent (a que costuma estar no ar) quebrava no primeiro uso.
+        Apontado na revisao de 17/08/2026."""
+        raiz = os.path.dirname(os.path.abspath(__file__))
+        locais = {a[:-3] for a in os.listdir(raiz) if a.endswith(".py")}
+        vistos, fila = set(), ["servidor"]
+        while fila:
+            mod = fila.pop()
+            if mod in vistos:
+                continue
+            vistos.add(mod)
+            try:
+                with open(os.path.join(raiz, mod + ".py"), encoding="utf-8") as f:
+                    fonte = f.read()
+            except OSError:
+                continue
+            for linha in fonte.splitlines():
+                linha = linha.strip()
+                m = (re.match(r'import (\w+)(?: as \w+)?$', linha)
+                     or re.match(r'from (\w+) import ', linha))
+                if m and m.group(1) in locais:
+                    fila.append(m.group(1))
+        # o servidor tambem DISPARA um script por subprocess (blackout): ele
+        # nao aparece em import nenhum e mesmo assim precisa estar na copia
+        return vistos | {"apagar_luzes"}
+
+    def test_os_dois_instaladores_copiam_o_que_o_servidor_importa(self):
+        raiz = os.path.dirname(os.path.abspath(__file__))
+        precisa = self.modulos_do_servidor()
+        for instalador in ("instalar_agente.py", "criar_app.py"):
+            with open(os.path.join(raiz, instalador), encoding="utf-8") as f:
+                fonte = f.read()
+            for mod in sorted(precisa):
+                with self.subTest(instalador=instalador, modulo=mod):
+                    self.assertIn(f"{mod}.py", fonte,
+                                  f"{instalador} nao copia {mod}.py, que o "
+                                  "servidor importa")
 
 
 if __name__ == "__main__":

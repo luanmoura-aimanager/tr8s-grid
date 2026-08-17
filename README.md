@@ -112,7 +112,7 @@ ocorrência, então os dois Launchpad viram um só. Por isso a enumeração e a 
 | `ferramentas.py` | Chain de patterns e ferramenta estocástica (probabilidade, densidade, humanize, ghosts) |
 | `criar_app.py` | Monta o `.app` do Desktop |
 | `instalar_agente.py` | Instala o LaunchAgent que sobe o servidor no login — é a cópia que costuma estar no ar |
-| `testes.py` | 31 testes de mesa (`unittest`, sem porta MIDI): a contagem da variação que toca, a resolução de portas do `learn`, a aritmética de endereço, os 54 patterns da biblioteca e a conversão da SCALE em pulsos por step. Guardam as regressões de 16 e 17/08 |
+| `testes.py` | Os testes de mesa (`unittest`, sem porta MIDI): a contagem da variação que toca, a resolução de portas do `learn`, a aritmética de endereço, os 54 patterns da biblioteca, a conversão da SCALE em pulsos por step, e os **contratos entre as camadas** (toda ação que a página chama existe no servidor, toda chave de estado que ela lê é produzida, todo `.mjs` compila). Guardam as regressões de 16 e 17/08 |
 | `apc_tr8s.py` | Versão anterior, para APC40 mkII — funcionando |
 | `tr8s_sysex.py` | Parser/diff de capturas do MIDI Monitor |
 | `gen_layout.py` → `layout.html` | Referência visual do mapeamento dos botões |
