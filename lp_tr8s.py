@@ -357,8 +357,12 @@ OFF_PATTERN_PROX  = 2
 # vizinhos (kit no 0, pattern no 1/2).
 OFF_FILL = 0x09
 
-# TEMPO. A LEITURA e solida: 3 nibbles a partir de 0x3A dao o BPM x 10, e isso
-# bate com o visor e com a taxa do MIDI clock. A ESCRITA nao foi descoberta.
+# TEMPO. Mora no NO DO PATTERN, quatro nibbles a partir do offset 0x10, e a
+# regiao de performance (0x3A) e ESPELHO - escrever no espelho nao muda nada.
+# O TR-EDITOR faz exatamente uma mensagem por mudanca:
+#     DT1  20 00 00 10   00 03 05 0D     (0x35D = 861 = 86.1 BPM)
+# Sniff de 17/08/2026: 40 mensagens subindo de 1 em 1, de 86.0 a 90.0, todas
+# nesse endereco e nada mais junto.
 #
 # Sequencia completa de 17/08/2026, porque o caminho importa mais que o
 # resultado:
@@ -375,7 +379,8 @@ OFF_FILL = 0x09
 # definir_fx ja logava ("o ouvido confirma, nao o round-trip"), agora com um
 # caso concreto. Quem for reabrir isto: o TR-EDITOR MUDA o tempo, entao existe
 # caminho; o proximo passo e sniffar o que ele manda (sessao M2).
-OFF_TEMPO = 0x3A
+OFF_TEMPO_NO = 0x10   # no do pattern: e AQUI que se escreve (4 nibbles)
+OFF_TEMPO = 0x3A      # performance: espelho, serve para LER
 
 # perf offset 0x40: alterna 0/1 a cada volta MESMO com A->B->C ciclando
 # (watch de 16/08) - e paridade de compasso ou algo do genero, NAO a
@@ -3148,20 +3153,26 @@ class Motor:
                  "visor da TR-8S)")
 
     def definir_bpm(self, bpm):
-        """NAO FUNCIONA - a TR-8S nao muda de andamento por aqui (17/08/2026).
+        """Escreve o TEMPO (40.0-300.0) no no do pattern - o Auto BPM.
 
-        Fica no lugar porque o alvo continua valendo e o caminho ja esta pronto
-        para quando o protocolo aparecer: o TR-EDITOR muda o tempo, entao
-        existe como. Ver o comentario de OFF_TEMPO para os cinco testes que
-        separaram "a maquina recusa" de "nos escrevemos errado" - e para o que
-        aconteceu quando a leitura de volta disse que tinha funcionado.
+        Quatro nibbles a partir de OFF_TEMPO_NO, o campo INTEIRO: escrita
+        parcial e recusada, e escrever no espelho da performance nao faz nada
+        (a maquina aceita o valor ali e nao aplica). Os dois erros custaram uma
+        sessao inteira em 17/08/2026 - o comentario de OFF_TEMPO_NO tem a
+        historia.
 
-        Nao escreve nada de proposito: escrever num campo que a maquina espelha
-        sem aplicar deixaria a leitura do proprio app mentindo sobre o
-        andamento ate a proxima releitura."""
-        self.log(f"(!) o alvo era {float(bpm):.1f} BPM, mas escrever o tempo "
-                 "nao funciona nesta maquina (17/08/2026): ela aceita o valor "
-                 "e ignora. Ajuste no painel - ou no TR-EDITOR, que consegue")
+        O tempo e por PATTERN: trocar de pattern troca o andamento."""
+        if self.modo_geral != MODO_ON or not self.tr_out:
+            self.log("(!) BPM so no modo ON")
+            return
+        if self._garantir_pattern() is None:
+            self.log("(!) sem saber o pattern, o tempo cairia no no errado")
+            return
+        v = int(round(max(40.0, min(300.0, float(bpm))) * 10))
+        self.tr_out.send(dt1(
+            addr_soma(addr_no_pattern(self.pattern_atual), OFF_TEMPO_NO),
+            [(v >> (4 * i)) & 0x0F for i in range(3, -1, -1)]))
+        self.log(f"TEMPO -> {v / 10:.1f}")
 
     def snapshot_escrita(self, rotulo):
         """Empilha o estado da variacao aberta antes de uma escrita em massa.

@@ -2217,36 +2217,51 @@ troca o intervalo do fill.
 knob em `2`, o fill medido entrou a cada **quatro** voltas de 16 steps (11,15 s
 a 86 bpm), não a cada duas. Fica a medição, não a interpretação.
 
-### Escrever o TEMPO: o round-trip mentiu
+### O TEMPO: nó do pattern `0x10`, quatro nibbles — e o caminho até achar
 
-A hipótese da manhã (o Auto BPM não funciona porque escrevemos na performance e
-o pattern recarrega o dele por cima) **estava errada**, e o caminho até
-descobrir isso vale mais que a conclusão:
+**Onde escrever:** `addr_no_pattern(p) + 0x10`, **quatro nibbles** com o BPM ×
+10. A região de performance (`0x3A`) é **espelho**: dá para ler, e escrever lá
+não faz nada. O tempo é **por pattern**.
+
+```
+DT1  20 00 00 10   00 03 05 0D      →  0x35D = 861 = 86.1 BPM
+```
+
+**Provado**: escrevendo 86.0 com a máquina em 90.0, o **clock medido** caiu de
+90.0 para 85.8 BPM.
+
+O caminho até aqui é o que vale guardar, porque cada passo errado tinha uma
+explicação plausível:
 
 | # | teste | resultado |
 |---|---|---|
-| 1 | 3 nibbles em `01 00 00 3A` (o que o `definir_bpm` fazia) | recusado — a leitura de volta nem mudou |
-| 2 | os mesmos 3 no nó do pattern (`0x11`) | recusado também |
+| 1 | 3 nibbles em `01 00 00 3A` (o que o `definir_bpm` fazia desde 16/08) | recusado — a leitura de volta nem mudou |
+| 2 | os mesmos 3 no nó do pattern, offset `0x11` | recusado também |
 | 3 | **a máscara de MUTE, no mesmo minuto** | **aceitou e restaurou** |
 | 4 | 4 nibbles em `01 00 00 39` | a leitura de volta **foi para 120.0** |
 | 5 | o visor e o **clock medido** | **continuaram em 86** |
+| 6 | sniff do TR-EDITOR: 40 mudanças de 0.1 BPM | **uma mensagem só, em `20 00 00 10`, 4 nibbles** |
+| 7 | escrever assim e medir o clock | **90.0 → 85.8** |
 
-O passo 3 existe pelo mesmo motivo que o autoteste do `escutar`: sem ele,
-"recusou" poderia ser o nosso script não mandando nada. E o **passo 5 é a
-lição**: entre o 4 e o 5 eu cheguei a escrever "PROVADO" no código, com base
-numa leitura de volta que dizia 120.0. **A máquina aceita o valor no espelho de
-SysEx e não o aplica.** O `definir_fx` já logava isso desde sempre — *"o ouvido
-confirma, não o round-trip"* — e aqui está o caso concreto que o justifica.
-Medir o **clock** foi o que decidiu, porque é a única testemunha independente do
-visor e do espelho.
+Três lições, e nenhuma delas é sobre o tempo:
 
-**O caminho existe:** o TR-EDITOR muda o tempo. Então isto não é limitação da
-máquina, é protocolo que ainda não achamos — e o próximo passo é o sniff (M2),
-que era o que o Luan tinha sugerido antes de eu sair testando.
+1. **O passo 3 é obrigatório.** Sem escrever num campo comprovadamente gravável
+   no mesmo minuto, "recusou" poderia ser o nosso script não mandando nada — o
+   mesmo raciocínio do autoteste do `escutar`.
+2. **Round-trip de leitura não prova efeito.** Entre o 4 e o 5 eu cheguei a
+   escrever "PROVADO" no código: a máquina aceitou o valor no espelho e não o
+   aplicou. O `definir_fx` já logava isso desde sempre — *"o ouvido confirma,
+   não o round-trip"* — e este é o caso concreto. **Medir o clock** foi o que
+   decidiu, por ser a única testemunha independente do visor e do espelho.
+3. **Errar por um byte duas vezes seguidas não é azar.** Nos dois lugares o
+   campo começa um byte antes de onde os dígitos significativos aparecem
+   (`0x39`/`0x10`, e não `0x3A`/`0x11`), e a máquina **recusa escrita parcial de
+   campo** — escrever um nibble só no `0x3C` também foi recusado. Ao mapear um
+   campo multi-nibble, achar onde o valor *aparece* não é achar onde ele
+   *começa*.
 
-O `definir_bpm` ficou no lugar **sem escrever nada**: escrever num campo que a
-máquina espelha sem aplicar deixaria a leitura do próprio app mentindo sobre o
-andamento até a releitura seguinte. Ele loga a verdade e aponta para cá.
+O sniff do TR-EDITOR (M2) respondeu em dois minutos o que três tentativas de
+dedução não resolveram — e foi o que o Luan sugeriu antes de eu sair testando.
 
 ### Esta máquina não transmite CC nenhum
 
