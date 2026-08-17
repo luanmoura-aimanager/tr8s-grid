@@ -2129,10 +2129,37 @@ que falha alto se alguém reordenar os códigos em vez de deslocar todos os
 rótulos em silêncio; e o comentário do `FAIXAS_MEDIDAS` passou a dizer que ele é
 documentação, não código vivo.
 
-**Ficou para o hardware** (a revisão listou, e concordo): mutar o TRIG no painel
-e clicar MUTE na mesa, para ver se o achado 1 era real na máquina; ler o visor
-do GAIN do EXT IN; e conferir que o rodízio de FX a cada 2 s somado ao polling
-de 120 ms não trouxe "BD não lido" de volta.
+#### O que o hardware disse sobre esses achados (17/08/2026, noite)
+
+**Os bits 11-15 da máscara de mute não têm dono conhecido.** Em todas as
+leituras — nada mutado, CH mutado pelo painel, BD mutado pela mesa — eles vieram
+`0x0000`. E o painel **só deixa mutar os 11 instrumentos** (vários em paralelo,
+mas só eles). Então o achado 1 **não era um bug observável**: era uma escrita em
+campo desconhecido que nunca teve efeito visível. A correção fica como seguro
+barato, e este parágrafo existe para ninguém "simplificar" ela de volta achando
+que é paranoia — o custo dela é uma máscara `AND`, e o custo do erro só
+apareceria numa máquina ou firmware em que esses bits tivessem função.
+
+**O caminho novo do MUTE está provado nos dois sentidos.** Com o CH mutado pelo
+painel, um clique no MUTE do BD na mesa deixou os dois mutados — na máquina e na
+tela:
+
+```
+18:46:38 mute no painel: CH  |  linhas: BD SD LT MT HT RS HC ch
+18:49:05 BD mutado pela mesa
+bits 0-10: 0x0081 (BD + CH)   bits 11-15: 0x0000
+```
+
+**Sem regressão de leitura** com tudo novo ligado ao mesmo tempo (rodízio de FX a
+cada 2 s + polling de 120 ms + máquina tocando): 554 amostras do `/estado` em
+150 s, **nenhuma linha não lida**, nenhuma linha `(!)` no log, e o BPM medido em
+553 das 554 amostras (de manhã ele vinha `None` por causa dos pulsos represados).
+6,1% dos quadros vieram `fresco=false` — é a janela em que o motor está com o
+lock, e é exatamente o que a adivinhação encadeada do navegador cobre.
+
+**Ficou em aberto:** ler o visor do GAIN do EXT IN (`SHIFT + [KIT]` → EXT IN →
+gain). O byte é 95; **se** a escala for a mesma do gain de instrumento, o visor
+diz `+7.0 dB`. Enquanto ninguém confirmar, o parâmetro segue sem escala.
 
 ### Três pendências que a sessão abriu (17/08/2026)
 
