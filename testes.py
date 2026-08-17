@@ -913,6 +913,35 @@ class TesteServidorSemMotor(unittest.TestCase):
             self.assertIn(chave, d, f"/dados sem a chave '{chave}'")
         self.assertEqual(len(d["instrumentos"]), len(L.INSTRUMENTOS))
 
+    def test_estado_sobrevive_a_midi_quebrado(self):
+        """Achado pelo CI no primeiro dia dele (17/08/2026): sem motor, o
+        /estado enumera portas MIDI - e num runner sem ALSA isso levantava,
+        a excecao subia pelo handler e a conexao caia SEM RESPOSTA. A pagina
+        mostrava "sem contato com o servidor", o pior sintoma possivel para o
+        problema mais bobo. Vale para o Mac tambem: CoreMIDI reiniciando faria
+        o mesmo."""
+        import json
+        servidor = self.servidor_mod
+        original = L.listar_portas
+
+        def explode(entradas=True):
+            raise SystemError("subsistema de MIDI indisponivel")
+
+        L.listar_portas = explode
+        try:
+            e = servidor.HOST.estado()
+            json.dumps(e)                       # tem que continuar serializando
+            self.assertFalse(e["tem_tr8s"])
+            self.assertFalse(e["tem_lp"])
+            servidor.HOST.estado()              # de novo: nao pode logar duas
+            avisos = sum("enumerar portas" in l
+                         for l in servidor.HOST.log.ultimas())
+            self.assertEqual(avisos, 1,
+                             "o estado roda 4x/s: o aviso tem que sair UMA vez")
+        finally:
+            L.listar_portas = original
+            servidor.HOST._midi_mudo = False
+
     def test_post_sem_token_e_recusado(self):
         """O token e sorteado a cada boot e vive so no processo. Sem esta
         recusa, qualquer pagina aberta no navegador escreveria na TR-8S."""

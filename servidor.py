@@ -116,6 +116,9 @@ class Host:
         self.rodando = False
         self.estocastica = F.Estocastica()
         self.ultimo_estado = {}
+        # ja avisei que nao consigo enumerar portas MIDI? (o estado roda 4x/s -
+        # sem esta memoria o log viraria a mesma linha para sempre)
+        self._midi_mudo = False
 
     # ── motor ───────────────────────────────────────────────
     def garantir_motor(self):
@@ -189,7 +192,24 @@ class Host:
         # fosse novo - justamente no momento em que mais importa
         e["fresco"] = bool(fresco)
         if not self.motor:
-            nomes = [n.upper() for _, n in L.listar_portas(True)]
+            # Enumerar portas fala com o subsistema de MIDI do sistema
+            # operativo, e ele pode nao existir (o CI do GitHub roda sem ALSA)
+            # ou engasgar (CoreMIDI reiniciando). Sem este guarda a excecao
+            # subia pelo handler, a conexao caia SEM RESPOSTA e a pagina
+            # inteira mostrava "sem contato com o servidor" - o pior sintoma
+            # possivel para o problema mais bobo. Achado pelo CI em 17/08/2026,
+            # no primeiro dia dele.
+            try:
+                nomes = [n.upper() for _, n in L.listar_portas(True)]
+            except Exception as exc:
+                if not self._midi_mudo:
+                    self._midi_mudo = True
+                    self.log(f"(!) nao consigo enumerar portas MIDI: {exc}. "
+                             "A tela vai dizer que nao ve aparelho nenhum - e "
+                             "e a verdade, do ponto de vista daqui")
+                nomes = []
+            else:
+                self._midi_mudo = False
             e["tem_tr8s"] = any(L.TR8S_MATCH.upper() in n for n in nomes)
             e["tem_clock"] = any("TR-8S" in n and L.TR8S_MATCH.upper() not in n
                                  for n in nomes)
