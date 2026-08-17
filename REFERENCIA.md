@@ -2194,6 +2194,43 @@ existissem.
 aqui; a interpretação fica em aberto até alguém medir os outros valores
 (32/16/12/8/4).
 
+### AUTO FILL IN: o intervalo mora no nó do pattern, `0x7F`
+
+Snapdiff com a máquina **parada** (tocando, o byte do fill e o do step viram
+ruído), mexendo **só** no knob. Três pontos, dois deles as pontas da lista:
+
+| knob | byte `0x7F` | |
+|---|---|---|
+| 32 | `0x00` | medido |
+| 16 | `0x01` | pela ordem |
+| 12 | `0x02` | pela ordem |
+| 8 | `0x03` | **medido** (previsto antes de ler) |
+| 4 | `0x04` | pela ordem |
+| 2 | `0x05` | medido |
+
+O byte é o **índice da posição do knob**, não o número. O knob **não tem OFF** —
+ligar/desligar é um botão separado. E, por morar no nó do pattern, **o intervalo
+é propriedade de cada pattern**, não uma configuração global: trocar de pattern
+troca o intervalo do fill.
+
+**O que o número conta continua desconhecido**, e isso é de propósito: com o
+knob em `2`, o fill medido entrou a cada **quatro** voltas de 16 steps (11,15 s
+a 86 bpm), não a cada duas. Fica a medição, não a interpretação.
+
+### Esta máquina não transmite CC nenhum
+
+Antes do snapdiff tentei o atalho: se o knob transmitisse CC, o valor apareceria
+de graça. Listener próprio, **3096 mensagens de clock provando que ele estava
+vivo**, e **nenhum CC** — nem o `CC 20` do TUNE do BD, que era o controle de
+referência e foi girado de propósito.
+
+Ou seja: a tabela de CCs da seção 6 veio do *MIDI Implementation Chart* da
+Roland — é o que a máquina **pode** fazer — e não descreve o que ela **faz**
+aqui. Deve haver um interruptor no `UTILITY:MIDI` (a seção 6 já registra um
+vizinho, o `Inst Note` em `---`). **Qualquer plano que dependa de ler o painel
+por CC está morto até alguém achar esse interruptor** — e o custo de descobrir
+isso tarde seria uma sessão inteira concluindo "o controle X não transmite".
+
 ### A variação que toca não está em lugar nenhum que a gente leia
 
 O mesmo watch trocou a variação tocando de **A → C → F** e **nenhum byte da

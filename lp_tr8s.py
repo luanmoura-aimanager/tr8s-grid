@@ -252,6 +252,21 @@ OFF_LAST_TRACK = 75    # +0 = BD ... +10 = RC, +11 = TRG
 # Quantos pulsos de MIDI clock (24 por seminima) cada step dura: e daqui que
 # vem a correcao do playhead que andava em METADE da velocidade da maquina
 # num pattern em 32nd (3-10, relatado em 17/08).
+# AUTO FILL IN - o INTERVALO, no no do pattern. Provado em 17/08/2026 por
+# snapdiff com tres pontos, dois deles as pontas da lista:
+#     knob 32 -> 0x00      knob 8 -> 0x03      knob 2 -> 0x05
+# O byte e o INDICE da posicao do knob, nao o numero: a lista fisica e
+# 32/16/12/8/4/2 e nao tem OFF (ligar/desligar e um botao separado).
+#
+# Mora no NO DO PATTERN, entao o intervalo e propriedade de CADA PATTERN, nao
+# uma configuracao global - trocar de pattern troca o intervalo do fill.
+#
+# ATENCAO: o que o numero do knob CONTA continua desconhecido. Com o knob em 2,
+# o fill medido entrou a cada QUATRO voltas de 16 steps (11,15 s a 86 bpm), nao
+# a cada duas. A medicao esta na REFERENCIA; a interpretacao nao.
+OFF_AUTO_FILL = 0x7F
+AUTO_FILL_VALORES = [32, 16, 12, 8, 4, 2]
+
 OFF_SCALE = 0x16
 PULSOS_POR_SCALE = {0: 8,   # 8th(T)  - colcheia de tercina: 24/3   (deduzido)
                     1: 4,   # 16th(T) - semicolcheia de tercina    (deduzido)
@@ -1951,6 +1966,7 @@ class Motor:
     mudo_bits_altos = 0
     # None = ainda nao lido; True/False = a maquina esta (ou nao) num fill
     fill_ativo = None
+    auto_fill = None      # intervalo do AUTO FILL IN (32/16/12/8/4/2)
 
     def __init__(self, cfg, log=print):
         self.cfg, self.log = cfg, log
@@ -2021,6 +2037,7 @@ class Motor:
         self.fx_rearmado = 0.0                  # quando a fila deu a ultima volta
         self.scale = None                       # SCALE do pattern (OFF_SCALE)
         self.fill_ativo = None                  # a maquina esta num fill?
+        self.auto_fill = None                   # intervalo do AUTO FILL IN
         self.cache_var = {}                     # (pattern, var) -> espelho lido
         self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
         self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
@@ -2295,6 +2312,11 @@ class Motor:
         # a SCALE vem no mesmo no, tambem de graca (nenhum RQ1 novo): e ela
         # que diz quantos pulsos dura um step. Sem isto o playhead andava em
         # metade da velocidade num pattern em 32nd
+        # o intervalo do AUTO FILL IN vem no mesmo no, tambem de graca
+        if len(d) > OFF_AUTO_FILL:
+            i = d[OFF_AUTO_FILL]
+            self.auto_fill = (AUTO_FILL_VALORES[i]
+                              if i < len(AUTO_FILL_VALORES) else None)
         if len(d) > OFF_SCALE and d[OFF_SCALE] != self.scale:
             antiga, self.scale = self.scale, d[OFF_SCALE]
             if antiga is not None:
@@ -4495,6 +4517,9 @@ class Motor:
                 # a maquina esta tocando um FILL IN (perf 0x09): o que soa nao
                 # e a variacao aberta no grid
                 "fill_ativo": self.fill_ativo,
+                # intervalo do AUTO FILL IN lido do no do pattern (e por
+                # pattern, nao global). O que o numero conta segue desconhecido
+                "auto_fill": self.auto_fill,
                 "last_var": self.last_var(),
                 "last_track": list(self.ultimo_track),
                 "armado": self.armado,
