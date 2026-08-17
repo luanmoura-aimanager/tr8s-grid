@@ -110,9 +110,16 @@ def p(rot, maximo=255, nbytes=2, opcoes=None, bipolar=False, unidade="",
 # catalogo, que aqui nao vale.
 GANHO_MAX = 161
 GANHO_CENTRO = 81
-GANHO_ESCALA = {0: "-INF"}
-GANHO_ESCALA.update({v: f"{(v - GANHO_CENTRO) / 2:+.1f} dB"
-                     for v in range(1, GANHO_MAX + 1)})
+def _ganho_rotulo(v):
+    if v == 0:
+        return "-INF"
+    d = (v - GANHO_CENTRO) / 2
+    # o visor mostra "0.0 dB" no centro, sem sinal - a tabela e para BATER com
+    # ele, e um "+0.0" seria a unica linha em que ela nao bate
+    return f"{d:.1f} dB" if d == 0 else f"{d:+.1f} dB"
+
+
+GANHO_ESCALA = {v: _ganho_rotulo(v) for v in range(GANHO_MAX + 1)}
 
 # ─────────────────────────────────────────────────────────────
 # PAN: tambem lido no visor, 17/08/2026. As pontas sao L127 e R127, e o
@@ -335,8 +342,11 @@ PAINEIS = [
         p("lfo depth", 255, 2, None, True),
         # o que o knob CTRL fisico da coluna controla; codigos = posicao na
         # lista (0-5 fixos + 6-23 parametros de tone, ver CTRL_FIXOS acima)
+        # indice na lista == codigo. Montar por INDICE (e nao concatenando os
+        # dois dicts) faz um KeyError alto se alguem reordenar ou tirar um
+        # codigo - o silencio ali deslocaria todos os rotulos do select
         p("ctrl select", None, 1,
-          list(CTRL_FIXOS.values()) + list(CTRL_TONE_PARAMS.values()))]},
+          [{**CTRL_FIXOS, **CTRL_TONE_PARAMS}[i] for i in range(24)])]},
 
     # 'amount' e o knob rotulado INST FX no TR-EDITOR (fica na coluna do
     # instrumento, mas escreve no bloco do INST FX - foi assim que se
@@ -385,10 +395,12 @@ PAINEIS = [
           ["BD", "SD", "LT", "MT", "HT", "RS", "HC", "CH", "OH", "CC", "RC",
            "?"]),
         p("side chn type", 7, 1),
-        # mesma escala do gain de instrumento (era o que o comentario do
-        # PARAMS_FIXOS ja dizia: "0-161 como o gain de inst")
-        p("side chn depth"), p("gain", GANHO_MAX, 2, None, True, "",
-                               GANHO_ESCALA),
+        # A faixa 0-161 e a mesma do gain de instrumento (o comentario do
+        # PARAMS_FIXOS ja dizia isso), mas a ESCALA em dB fica de fora: o visor
+        # deste gain nunca foi lido. Herdar a tabela do outro faria a tela dizer
+        # "+12.5 dB" com a autoridade de medicao que este parametro nao tem -
+        # o mesmo motivo que deixou o "extin pan" sem escala.
+        p("side chn depth"), p("gain", GANHO_MAX, 2, None, False, DB),
         p("pan", 255, 2, None, True),
         p("reverb send"), p("delay send")]},
 
@@ -617,7 +629,8 @@ PARAMS_FIXOS = {
     # interface precisar). ATENCAO: a ESCRITA no bloco 06 nunca saiu da
     # nossa ponta - so o TR-EDITOR foi visto escrevendo la; o primeiro teste
     # e girar o CTRL fisico depois de trocar o destino e OUVIR.
-    "inst ctrl select": {"bloco": "ctrl", "tipo": "inst", "off": 0x01,
+    "inst ctrl select": {"bloco": "ctrl", "tipo": "inst",
+                         "off": CTRL_OFF_BASE,
                          "bytes": 1, "off_por_inst": True,
                          "opcoes_do_catalogo": True},
 
@@ -718,8 +731,9 @@ def _derivados_por_tipo():
 
 PARAMS_FIXOS.update(_derivados_por_tipo())
 
-# Faixa que cada gesto varreu de fato (para conferencia futura; o catalogo e
-# quem manda no 'max' da tela). O gain e o unico que discordou do esperado.
+# Faixa que cada gesto varreu de fato. E DOCUMENTACAO: ninguem le este dict em
+# tempo de execucao - quem manda no 'max' da tela e no clamp da escrita e o
+# catalogo. Serve para conferir se o catalogo esta mentindo sobre a faixa. O gain e o unico que discordou do esperado.
 FAIXAS_MEDIDAS = {
     "reverb time": (0, 255), "reverb level": (0, 255),
     "reverb predelay": (0, 100), "reverb density": (0, 10),
@@ -745,8 +759,10 @@ def carregar():
     except (OSError, ValueError):
         pass
     for nome, ent in mapa.items():
-        # so o que veio do ~/.lp_tr8s_fx.json e esquecivel (apagar() nao
-        # alcanca PARAMS_FIXOS); a aba Avancado lista por esta flag
+        # de onde veio a entrada: True = capturada no app (mora no
+        # ~/.lp_tr8s_fx.json e o apagar() alcanca), False = fixa do sniff, imune.
+        # A aba que listava por esta flag saiu em 17/08/2026; a marca fica
+        # porque e a unica forma de a tela saber a procedencia de um offset
         ent["capturado"] = nome in capturados
         cat = POR_NOME.get(nome, {})
         # 'bloco' diz em QUAL bloco do kit o offset vive (BLOCOS). Entradas

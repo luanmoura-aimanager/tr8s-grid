@@ -470,7 +470,7 @@ function controle(nome, D) {
       });
     };
     raiz.addEventListener("click", () => {
-      if (!(ultimoMapa || {})[nome]) capturar(nome, cat);
+      if (!(ultimoMapa || {})[nome]) semMapa(nome);
     });
     controles.set(nome, { tipo: "enum", sel, raiz });
     return raiz;
@@ -486,7 +486,7 @@ function controle(nome, D) {
       rotuloValor({ ...cat, opcoes: {} }, v) +
       (cat.unidade ? " " + cat.unidade : ""),
     fantasma: true,
-    aoCapturar: () => capturar(nome, cat),
+    aoCapturar: () => semMapa(nome),
     aoSoltar: (v) =>
       agir({
         acao: "fx",
@@ -499,13 +499,18 @@ function controle(nome, D) {
   return k.raiz;
 }
 
-function capturar(nome, cat) {
+// Clicar num controle FANTASMA abria a captura guiada. O painel que a cancelava
+// morreu com a aba Avancado (17/08/2026), e captura sem cancelamento fica presa
+// relendo os 26 blocos de FX a cada 0,35 s ate reiniciar o app - caro demais
+// para um clique acidental na janela entre o montar() e o primeiro /estado, em
+// que todo knob nasce fantasma. Hoje o clique so explica o que aconteceu.
+function semMapa(nome) {
   toast(
-    `capturando “${nome}” — no painel: ${cat.dica || "?"}` +
-      (cat.bytes === 2 ? " · gire de ponta a ponta" : ""),
+    `“${nome}” não está no mapa: o offset dele nunca foi descoberto, então ` +
+      "este controle não escreve nada. A captura guiada saiu na reforma 3 " +
+      "(o catálogo está todo mapeado) e volta do git se precisar.",
     { ttl: 9000 },
   );
-  agir({ acao: "capturar", nome });
 }
 
 // guarda o mapa para os handlers (evita passar estado por closure velha)

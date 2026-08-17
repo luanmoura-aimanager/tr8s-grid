@@ -23,7 +23,14 @@ export function knob({
   dica = "",
   fantasma = false,
   aoCapturar = null,
+  // De onde o arrasto parte quando o knob esta em "—" (valor desconhecido).
+  // O padrao era o MINIMO, e o PROB da mesa mordia nisso: "—" ali significa
+  // steps com probabilidades DIFERENTES, e um arrasto de dois pixels comitava
+  // 10% em todos os steps ligados do instrumento. Quem tem valor neutro (o
+  // PROB tem: 100%) passa ele aqui.
+  baseNula = null,
 }) {
+  const base = () => (baseNula === null ? min : baseNula);
   const arco = svg("circle", {
     class: "arco",
     cx: 22,
@@ -100,7 +107,7 @@ export function knob({
     }
     if (e.button !== 0) return;
     raiz.setPointerCapture(e.pointerId);
-    arrasto = { y: e.clientY, v: v === null ? min : v };
+    arrasto = { y: e.clientY, v: v === null ? base() : v };
     arrastando.add(chave);
     e.preventDefault();
   });
@@ -130,12 +137,12 @@ export function knob({
   raiz.addEventListener("keydown", (e) => {
     if (raiz.hasAttribute("data-fantasma")) return;
     const passo = e.shiftKey ? 1 : Math.max(1, Math.round((max - min) / 64));
-    const base = v === null ? min : v;
+    const partida = v === null ? base() : v;
     let nv = null;
-    if (e.key === "ArrowUp" || e.key === "ArrowRight") nv = base + passo;
-    else if (e.key === "ArrowDown" || e.key === "ArrowLeft") nv = base - passo;
-    else if (e.key === "PageUp") nv = base + passo * 8;
-    else if (e.key === "PageDown") nv = base - passo * 8;
+    if (e.key === "ArrowUp" || e.key === "ArrowRight") nv = partida + passo;
+    else if (e.key === "ArrowDown" || e.key === "ArrowLeft") nv = partida - passo;
+    else if (e.key === "PageUp") nv = partida + passo * 8;
+    else if (e.key === "PageDown") nv = partida - passo * 8;
     else if (e.key === "Home") nv = min;
     else if (e.key === "End") nv = max;
     else return;
@@ -154,7 +161,7 @@ export function knob({
         min,
         Math.min(
           max,
-          (v === null ? min : v) -
+          (v === null ? base() : v) -
             Math.sign(e.deltaY) * Math.max(1, Math.round((max - min) / 64)),
         ),
       );

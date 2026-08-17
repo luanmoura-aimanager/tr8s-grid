@@ -1930,6 +1930,9 @@ class Motor:
     # _ressincronizar pergunta a scale. Sem o default aqui, o teste de
     # regressao do playhead morria em AttributeError.
     scale = None
+    # bits 11-15 da mascara de mute, guardados crus: a 2.7 nao diz o que eles
+    # fazem, e alternar_mudo reescreve a mascara inteira
+    mudo_bits_altos = 0
 
     def __init__(self, cfg, log=print):
         self.cfg, self.log = cfg, log
@@ -2239,7 +2242,11 @@ class Motor:
             d = ler_bloco(self.tr_in, self.tr_out,
                           addr_bloco_rd(i, self.variacao, self.pattern_atual))
             if d and d != self.cache[i]:
-                self.cache[i] = d
+                # DENTRO da lista, nao rebind: o cache_var guarda a MESMA lista
+                # (ver _guardar_cache_var), e trocar o objeto aqui deixava o
+                # espelho da variacao envelhecido em silencio - a proxima troca
+                # pintaria o grid sem o step que o painel acabou de ligar
+                self.cache[i][:] = d
                 self.cache_invalido.discard(i)
                 mudou = True
         return mudou
@@ -2457,6 +2464,10 @@ class Motor:
                                  [n & 0x7F]))
         self.pattern_atual = novo_pat
         m = nibbles_para_mascara(d[OFF_MUTE:OFF_MUTE + 4])
+        # A mascara tem 16 bits e a 2.7 so decodificou os 11 dos instrumentos.
+        # Guardar os bits DE CIMA crus e o que permite reescrever a mascara sem
+        # apagar funcao que ninguem mapeou (ver alternar_mudo).
+        self.mudo_bits_altos = m & ~((1 << len(INSTRUMENTOS)) - 1)
         novo = [bool(m >> i & 1) for i in range(len(INSTRUMENTOS))]
         mudou = novo != self.mudo
         self.mudo = novo
@@ -2597,12 +2608,29 @@ class Motor:
         if not 0 <= i < len(INSTRUMENTOS):
             self.log(f"(!) instrumento {i} fora da faixa")
             return
+        # RELER, e SO seguir se a releitura funcionou. ler_mudos devolve False
+        # tanto quando nada mudou quanto quando a leitura falhou - e no segundo
+        # caso ele deixa self.mudo intacto. Seguir ali escreveria a mascara
+        # montada a partir de um espelho velho, que e exatamente o que esta
+        # releitura existe para evitar: um mute feito no painel no ultimo
+        # segundo e meio seria desfeito por um clique noutro instrumento.
+        # O contador de falhas e o unico sinal que distingue os dois casos.
+        falhas_antes = self.leituras_falhas
         self.ler_mudos(quieto=True)
+        if self.leituras_falhas > falhas_antes:
+            self.log("(!) nao consegui reler os mutes - nao vou escrever a "
+                     "mascara por cima de um espelho velho. Tente de novo")
+            return
         mascara = 0
         for j, m in enumerate(self.mudo):
             if m:
                 mascara |= 1 << j
         mascara ^= 1 << i
+        # os bits acima dos 11 instrumentos vao de volta COMO ESTAVAM: a 2.7 nao
+        # diz o que eles fazem, e mandar zero neles seria escrever num campo que
+        # ninguem mapeou. Este e o primeiro caminho do projeto que reescreve
+        # esta mascara - antes dele, o definir_mudos nao tinha nenhum caller
+        mascara |= self.mudo_bits_altos
         self.definir_mudos(mascara)
         self.log(f"{INSTRUMENTOS[i]} "
                  + ("mutado" if mascara >> i & 1 else "desmutado")
@@ -2621,8 +2649,12 @@ class Motor:
         troca a cada volta: a 40 bpm em 32nd isso e a cada 3 s. Foi assim que
         o Luan viu "atrasado e travando" em 17/08/2026.
 
-        Pintar LED no meio da leitura e seguro: os Launchpad tem porta propria,
-        nenhum byte vai para a TR-8S aqui, e o lock e reentrante."""
+        ONDE CHAMAR: sempre ANTES de um ler_bloco, nunca entre o RQ1 e a
+        resposta dele. Nao e verdade que "nenhum byte vai para a TR-8S aqui":
+        pelo _atender_var_pedida isto pode mandar um DT1 na porta CTRL, e um
+        DT1 no meio de uma leitura embaralharia o casamento pedido/resposta.
+        Pintar LED e inofensivo (os Launchpad tem porta propria) e o lock e
+        reentrante, mas a ordem das chamadas nao e detalhe de estilo."""
         if self.modo_geral == MODO_ON and self.clk:
             self._ler_clock()
 
@@ -2917,7 +2949,7 @@ class Motor:
                 self.log(f"(!) {INSTRUMENTOS[i]}: cache invalido e releitura "
                          "falhou - escrita abortada")
                 return False
-            self.cache[i] = d
+            self.cache[i][:] = d      # dentro da lista: ver _guardar_cache_var
             self.cache_invalido.discard(i)
         b = step * BYTES_P_STEP
         self.cache[i][b+VEL_HI]   = (vel >> 4) & 0x0F

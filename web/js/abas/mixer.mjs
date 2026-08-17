@@ -71,6 +71,10 @@ export default {
           rotulo: "PROB",
           min: 10,
           max: 100,
+          // partindo de "—" o arrasto sai de 100% (o neutro da maquina), nao do
+          // minimo: escrever 10% em todos os steps por um arrasto de dois
+          // pixels era o acidente mais barato desta mesa
+          baseNula: 100,
           chave: "mx-prob:" + i,
           formatar: (v) => v + "%",
           dica:

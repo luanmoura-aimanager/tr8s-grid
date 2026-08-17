@@ -2083,6 +2083,57 @@ valendo como rede — o bombeamento protege qualquer leitura longa, o cache de
 variação deixa a troca **manual** instantânea, e o polling de 120 ms serve a
 qualquer step curto.
 
+### O que a revisão de código achou depois (17/08/2026)
+
+A revisão do diff inteiro achou oito coisas, todas corrigidas antes do merge.
+As duas primeiras são do tipo que este projeto não pode ter:
+
+1. **`alternar_mudo` zerava os bits 11-15 da máscara de mute.** A máscara tem 16
+   bits e a 2.7 decodificou 11; o toggle remontava a máscara dos 11 booleanos e
+   escrevia os 16 — **mandando zero num campo que ninguém mapeou**. É a mesma
+   regra que fez o índice ganhar checagem de faixa, e este é o primeiro caminho
+   do projeto que reescreve essa máscara (o `definir_mudos` não tinha caller
+   nenhum antes). Agora `ler_mudos` guarda os bits de cima crus
+   (`mudo_bits_altos`) e o toggle devolve eles como estavam.
+2. **O toggle escrevia mesmo quando a releitura falhava.** `ler_mudos` devolve
+   `False` tanto para "nada mudou" quanto para "não consegui ler", e no segundo
+   caso deixa o espelho intacto — então a máscara velha era escrita de volta,
+   exatamente o que a releitura existia para evitar. O contador
+   `leituras_falhas` é o único sinal que separa os dois casos; hoje o toggle
+   aborta e diz por quê.
+3. **O cache de variação apostava num aliasing que dois caminhos quebravam.**
+   `_reler_pattern_rodizio` e `escrever_step` faziam `self.cache[i] = d`
+   (rebind), e o espelho guardado envelhecia calado: ligar um step no painel e
+   trocar de variação pintava o grid **sem** aquele step por ~500 ms. Virou
+   `self.cache[i][:] = d`.
+4. **A captura guiada ficou sem cancelamento.** O botão que a cancelava morreu
+   com a aba Avançado, mas o gatilho continuava nos controles fantasma — e
+   captura sem cancelamento relê os 26 blocos a cada 0,35 s até reiniciar o app.
+   Um clique acidental na janela entre o `montar()` e o primeiro `/estado` (em
+   que todo knob nasce fantasma) custava isso. Hoje o clique só explica.
+5. **O `extin gain` tinha ganhado a escala em dB por dedução** — dez linhas
+   depois do comentário que recusa fazer isso com o `extin pan`. Ficou só com a
+   faixa 0-161 (que já estava documentada) até alguém ler o visor dele.
+6. A tabela do GAIN dizia `+0.0 dB` no centro; **o visor mostra `0.0 dB`**.
+7. **O PROB da mesa, partindo de "—", escrevia 10%** em todos os steps ligados
+   com um arrasto de dois pixels: o knob partia do mínimo. Agora parte de 100%
+   (`baseNula`), que é o neutro da máquina.
+8. A docstring do `_bombear_clock` garantia que "nenhum byte vai para a TR-8S
+   aqui" — e pelo `_atender_var_pedida` pode ir um DT1. A garantia errada é
+   convite para mover a chamada para depois de um `ler_bloco`, e aí um DT1
+   entraria entre o RQ1 e a resposta. A docstring agora diz **onde** chamar.
+
+Junto: `CTRL_OFF_BASE` passou a ser usado no lugar do `0x01` escrito à mão; a
+lista de opções do CTRL é montada por índice (`[{...}[i] for i in range(24)]`),
+que falha alto se alguém reordenar os códigos em vez de deslocar todos os
+rótulos em silêncio; e o comentário do `FAIXAS_MEDIDAS` passou a dizer que ele é
+documentação, não código vivo.
+
+**Ficou para o hardware** (a revisão listou, e concordo): mutar o TRIG no painel
+e clicar MUTE na mesa, para ver se o achado 1 era real na máquina; ler o visor
+do GAIN do EXT IN; e conferir que o rodízio de FX a cada 2 s somado ao polling
+de 120 ms não trouxe "BD não lido" de volta.
+
 ### Três pendências que a sessão abriu (17/08/2026)
 
 1. ~~**SCALE — o playhead anda em metade da velocidade.**~~ **RESOLVIDA na
