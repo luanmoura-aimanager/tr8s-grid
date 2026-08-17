@@ -4464,6 +4464,12 @@ class Motor:
                 "carregado": self.carregado,
                 "acc": self.acc,
                 "mudo": list(self.mudo),
+                # os bits 11-15 da mascara de mute, CRUS. A 2.7 decodificou os
+                # 11 dos instrumentos e nunca olhou o resto; expor aqui e a
+                # unica forma de responder "a maquina usa esses bits?" sem
+                # fechar o app para rodar um snap. Ver alternar_mudo, que os
+                # devolve como estavam em vez de mandar zero.
+                "mudo_bits_altos": self.mudo_bits_altos,
                 "last_var": self.last_var(),
                 "last_track": list(self.ultimo_track),
                 "armado": self.armado,

@@ -395,12 +395,13 @@ PAINEIS = [
           ["BD", "SD", "LT", "MT", "HT", "RS", "HC", "CH", "OH", "CC", "RC",
            "?"]),
         p("side chn type", 7, 1),
-        # A faixa 0-161 e a mesma do gain de instrumento (o comentario do
-        # PARAMS_FIXOS ja dizia isso), mas a ESCALA em dB fica de fora: o visor
-        # deste gain nunca foi lido. Herdar a tabela do outro faria a tela dizer
-        # "+12.5 dB" com a autoridade de medicao que este parametro nao tem -
-        # o mesmo motivo que deixou o "extin pan" sem escala.
-        p("side chn depth"), p("gain", GANHO_MAX, 2, None, False, DB),
+        # MEDIDO em 17/08/2026: com o byte em 95, o visor mostrou +7.0 dB -
+        # exatamente o que a escala do gain de instrumento previa ((95-81)/2).
+        # A previsao foi feita ANTES da leitura, que e o que faz dela um teste.
+        # Com a faixa 0-161 ja documentada, os dois pontos fecham a reta: e a
+        # mesma tabela. (O "extin pan" continua sem escala - esse ninguem leu.)
+        p("side chn depth"), p("gain", GANHO_MAX, 2, None, True, "",
+                               GANHO_ESCALA),
         p("pan", 255, 2, None, True),
         p("reverb send"), p("delay send")]},
 

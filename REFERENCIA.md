@@ -2157,9 +2157,12 @@ cada 2 s + polling de 120 ms + máquina tocando): 554 amostras do `/estado` em
 6,1% dos quadros vieram `fresco=false` — é a janela em que o motor está com o
 lock, e é exatamente o que a adivinhação encadeada do navegador cobre.
 
-**Ficou em aberto:** ler o visor do GAIN do EXT IN (`SHIFT + [KIT]` → EXT IN →
-gain). O byte é 95; **se** a escala for a mesma do gain de instrumento, o visor
-diz `+7.0 dB`. Enquanto ninguém confirmar, o parâmetro segue sem escala.
+**O GAIN do EXT IN usa a mesma escala do gain de instrumento — medido.** A
+previsão foi escrita **antes** da leitura, que é o que faz dela um teste: com o
+byte em 95, a tabela do gain de instrumento prevê `(95-81)/2 = +7.0 dB`. O visor
+mostrou **`+7.0 dB`**. Com a faixa 0-161 já documentada, os dois pontos fecham a
+reta, e o parâmetro ganhou a tabela. O `extin pan` continua sem escala: esse
+ninguém leu.
 
 ### Três pendências que a sessão abriu (17/08/2026)
 
