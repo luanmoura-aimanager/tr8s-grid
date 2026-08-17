@@ -2217,6 +2217,37 @@ troca o intervalo do fill.
 knob em `2`, o fill medido entrou a cada **quatro** voltas de 16 steps (11,15 s
 a 86 bpm), não a cada duas. Fica a medição, não a interpretação.
 
+### Escrever o TEMPO: o round-trip mentiu
+
+A hipótese da manhã (o Auto BPM não funciona porque escrevemos na performance e
+o pattern recarrega o dele por cima) **estava errada**, e o caminho até
+descobrir isso vale mais que a conclusão:
+
+| # | teste | resultado |
+|---|---|---|
+| 1 | 3 nibbles em `01 00 00 3A` (o que o `definir_bpm` fazia) | recusado — a leitura de volta nem mudou |
+| 2 | os mesmos 3 no nó do pattern (`0x11`) | recusado também |
+| 3 | **a máscara de MUTE, no mesmo minuto** | **aceitou e restaurou** |
+| 4 | 4 nibbles em `01 00 00 39` | a leitura de volta **foi para 120.0** |
+| 5 | o visor e o **clock medido** | **continuaram em 86** |
+
+O passo 3 existe pelo mesmo motivo que o autoteste do `escutar`: sem ele,
+"recusou" poderia ser o nosso script não mandando nada. E o **passo 5 é a
+lição**: entre o 4 e o 5 eu cheguei a escrever "PROVADO" no código, com base
+numa leitura de volta que dizia 120.0. **A máquina aceita o valor no espelho de
+SysEx e não o aplica.** O `definir_fx` já logava isso desde sempre — *"o ouvido
+confirma, não o round-trip"* — e aqui está o caso concreto que o justifica.
+Medir o **clock** foi o que decidiu, porque é a única testemunha independente do
+visor e do espelho.
+
+**O caminho existe:** o TR-EDITOR muda o tempo. Então isto não é limitação da
+máquina, é protocolo que ainda não achamos — e o próximo passo é o sniff (M2),
+que era o que o Luan tinha sugerido antes de eu sair testando.
+
+O `definir_bpm` ficou no lugar **sem escrever nada**: escrever num campo que a
+máquina espelha sem aplicar deixaria a leitura do próprio app mentindo sobre o
+andamento até a releitura seguinte. Ele loga a verdade e aponta para cá.
+
 ### Esta máquina não transmite CC nenhum
 
 Antes do snapdiff tentei o atalho: se o knob transmitisse CC, o valor apareceria

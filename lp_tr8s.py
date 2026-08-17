@@ -356,6 +356,25 @@ OFF_PATTERN_PROX  = 2
 # 40.0-300.0. LEITURA provada; escrita e a mesma hipotese ja confirmada nos
 # vizinhos (kit no 0, pattern no 1/2).
 OFF_FILL = 0x09
+
+# TEMPO. A LEITURA e solida: 3 nibbles a partir de 0x3A dao o BPM x 10, e isso
+# bate com o visor e com a taxa do MIDI clock. A ESCRITA nao foi descoberta.
+#
+# Sequencia completa de 17/08/2026, porque o caminho importa mais que o
+# resultado:
+#   1. 3 nibbles em 0x3A            -> recusado: a leitura de volta nem mudou
+#   2. os mesmos 3 no no do pattern -> recusado tambem
+#   3. a mascara de MUTE, no mesmo minuto -> aceitou e restaurou. Prova de que
+#      a porta, o dt1 e o caminho de escrita estavam bons - sem isso, "recusou"
+#      poderia ser o nosso script nao mandando nada
+#   4. 4 nibbles em 0x39            -> a leitura de volta FOI para 120.0
+#   5. e o visor continuou em 86, e o CLOCK MEDIDO continuou em 85.8 BPM
+#
+# O passo 5 e a licao: a maquina ACEITA o valor no espelho de SysEx e NAO o
+# aplica. Round-trip de leitura nao prova efeito - e exatamente o que o
+# definir_fx ja logava ("o ouvido confirma, nao o round-trip"), agora com um
+# caso concreto. Quem for reabrir isto: o TR-EDITOR MUDA o tempo, entao existe
+# caminho; o proximo passo e sniffar o que ele manda (sessao M2).
 OFF_TEMPO = 0x3A
 
 # perf offset 0x40: alterna 0/1 a cada volta MESMO com A->B->C ciclando
@@ -3129,17 +3148,20 @@ class Motor:
                  "visor da TR-8S)")
 
     def definir_bpm(self, bpm):
-        """Escreve o TEMPO da maquina (40.0-300.0) - o Auto BPM de verdade.
+        """NAO FUNCIONA - a TR-8S nao muda de andamento por aqui (17/08/2026).
 
-        tempo x 10 em 3 nibbles no perf (OFF_TEMPO); primeira escrita em
-        16/08/2026, conferir o visor no primeiro uso."""
-        if self.modo_geral != MODO_ON or not self.tr_out:
-            self.log("(!) BPM so no modo ON")
-            return
-        v = int(round(max(40.0, min(300.0, float(bpm))) * 10))
-        self.tr_out.send(dt1(addr_soma(ADDR_PERF, OFF_TEMPO),
-                             [(v >> 8) & 0x0F, (v >> 4) & 0x0F, v & 0x0F]))
-        self.log(f"TEMPO -> {v / 10:.1f} (confira o visor)")
+        Fica no lugar porque o alvo continua valendo e o caminho ja esta pronto
+        para quando o protocolo aparecer: o TR-EDITOR muda o tempo, entao
+        existe como. Ver o comentario de OFF_TEMPO para os cinco testes que
+        separaram "a maquina recusa" de "nos escrevemos errado" - e para o que
+        aconteceu quando a leitura de volta disse que tinha funcionado.
+
+        Nao escreve nada de proposito: escrever num campo que a maquina espelha
+        sem aplicar deixaria a leitura do proprio app mentindo sobre o
+        andamento ate a proxima releitura."""
+        self.log(f"(!) o alvo era {float(bpm):.1f} BPM, mas escrever o tempo "
+                 "nao funciona nesta maquina (17/08/2026): ela aceita o valor "
+                 "e ignora. Ajuste no painel - ou no TR-EDITOR, que consegue")
 
     def snapshot_escrita(self, rotulo):
         """Empilha o estado da variacao aberta antes de uma escrita em massa.

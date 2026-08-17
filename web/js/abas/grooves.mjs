@@ -8,9 +8,12 @@
 // Honestidade em dois pontos que a tela repete:
 // - groove ESCREVE na variacao aberta do pattern corrente da maquina; vindo
 //   depois de uma entrada de pattern, altera aquele pattern. Desfazer volta.
-// - "Auto BPM" escreve o TEMPO (perf, OFF_TEMPO) junto com o pattern. O
-//   endereco foi achado em 16/08/2026, mas em 17/08 o Luan relatou que a
-//   maquina NAO mudou de andamento - suspeita aberta na REFERENCIA
+// - "Auto BPM" NAO funciona, e o motivo esta medido: a TR-8S aceita o valor
+//   do tempo e nao muda de andamento (17/08/2026, cinco testes - ver
+//   lp_tr8s.OFF_TEMPO). O toggle e o numero do BPM ficam porque o alvo
+//   continua valendo, e o motor loga a verdade quando alguem tenta; o
+//   TR-EDITOR consegue trocar o tempo, entao existe caminho e ele sai num
+//   sniff (sessao M2)
 //   (REFERENCIA 7). O tempo continua sendo o knob da maquina.
 import { h, texto, attr } from "../nucleo/dom.mjs";
 import { painel, campo, toggle } from "../comp/painel.mjs";
