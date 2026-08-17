@@ -53,6 +53,10 @@ trabalho é entregue:
   onde o LaunchAgent (quem responde em `127.0.0.1:8733`) roda; o `criar_app.py`
   atualiza o bundle do Desktop. Rodar só um deixa o outro na versão velha —
   e o que está no ar costuma ser o do LaunchAgent
+- **Mexeu só em `web/`** (html/css/mjs) → `python3 instalar_agente.py --so-web`:
+  copia sem reiniciar o agente, e um Cmd+R na página pega a versão nova **com o
+  motor ainda ligado**. Reiniciar no meio de uma sessão de hardware derruba o
+  motor e obriga a reler tudo do zero (aconteceu três vezes em 17/08/2026)
 - `gui.py` (Tk) **não é copiado por nenhum dos dois** — é legado; a tela viva é a web
 - Rodar os testes de mesa: `python3 testes.py` (sem porta MIDI, sem hardware)
 - Mexeu em `gen_layout.py` ou `gen_adesivo.py` → regerar. O adesivo precisa da

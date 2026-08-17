@@ -27,7 +27,7 @@ o LAST STEP (variação e track) e a PROBABILITY, e confirmou o TRG. A persistê
 que parecia bloqueio, nunca foi: basta apertar `[WRITE]` no painel (ver 2.6).
 
 O que sobra é **opcional**, e nenhum item impede usar o controlador: os bytes 0, 1 e
-2 do step, o last step dos Fill In, SCALE/SHUFFLE, os blocos `0C`–`18`, e o comando
+2 do step, o last step dos Fill In, SHUFFLE, os blocos `0C`–`18`, e o comando
 WRITE por SysEx — este último só útil para automação sem ninguém na frente da máquina.
 
 Arquitetura (não muda):
@@ -457,7 +457,8 @@ sobreviveu.
   descobrem-se um a um pelo botão "Anotar opção" — põe a opção no visor,
   escolhe o rótulo, e o app associa o valor lido ao nome.
   Três caminhos de decodificação, todos passivos: a sessão K
-  (`python3 lp_tr8s.py kit_watch BD`), a **captura guiada da aba Mixer & FX**
+  (`python3 lp_tr8s.py kit_watch BD`), a **captura guiada da aba Avançado**
+  (morava na Mixer & FX até a reforma 3, 16/08/2026)
   (M1: nomear o parâmetro, Capturar, mexer só naquele knob — o app registra o
   offset em `~/.lp_tr8s_fx.json` e o fader nasce) e o **sniff do TR-EDITOR**
   (M2: MIDI Monitor + `.mmon`, cobre o que o painel não alcança; o resultado
@@ -541,7 +542,8 @@ tijolar a máquina.
 - Bytes 0, 1 e 2 de cada step — os três últimos sem nome, agora que o 4 fechou
 - ~~Comando WRITE~~ — candidato forte no utility (`50 00 00 01`, ver 2.9), falta a
   sessão
-- SCALE, SHUFFLE — com suspeitos em 2.3.1 (os bytes 17-19 do nó de pattern)
+- ~~SCALE~~ — **resolvida em 17/08/2026**: nó do pattern, offset `0x16`
+  (2 = `16th`, 3 = `32nd`, medidos). SHUFFLE segue desconhecido
 - O last step dos dois **Fill In**
 - ~~Onde mora o mute de track~~ — **resolvido em 14/08/2026**, ver 2.7. Os CCs de
   LEVEL continuam não servindo; o mute nunca esteve neles.
@@ -659,12 +661,12 @@ quando o Luan ouviu os chimbais sumirem.
 |---|---|
 | `apc_tr8s.py` | **Funcionando e testado** — APC40 mkII |
 | `lp_tr8s.py` | Dois Launchpad Mini MK3. O motor virou `class Motor`; o `run` do terminal só instancia e chama `tick()` num laço. Desde 14/08/2026: fila de comandos da janela (`enfileirar`), probability (`PROB_BYTE`/`ler_prob`/`escrever_step(prob=)`), guarda do cache inválido, `escrever_pattern`+`desfazer_escrita`, luz da borda escurecida (`BRILHO_BORDA`), comandos utility (2.9) e as CLIs de sessão `prob_watch`/`pattern`/`pc`/`var_mask` |
-| `web/` | **A interface, desde 15/08/2026.** `index.html` + `css/` (tokens, base, componentes, grade, abas) + `js/` (nucleo: rede/store/dom/paleta/formato · comp: knob, fader, LED, grade-steps, toast, tooltip · abas: pattern, mixer, instrumento, biblioteca, chain, estocastica, avancado). Módulos ES nativos, zero build, zero dependência. Cada aba monta uma vez e só a visível é atualizada |
+| `web/` | **A interface, desde 15/08/2026.** `index.html` + `css/` (tokens, base, componentes, grade, abas) + `js/` (nucleo: rede/store/dom/paleta/formato · comp: knob, fader, LED, grade-steps, toast, tooltip, secao · abas: pattern, fx "Efeitos", mixer "a mesa", instrumento, grooves, estocastica, avancado). Módulos ES nativos, zero build, zero dependência. Cada aba monta uma vez e só a visível é atualizada |
 | `servidor.py` + `pagina.html` | **A tela, desde 15/08/2026.** (`pagina.html` virou fallback: o servidor prefere `web/index.html`) Servidor HTTP local (só stdlib, 127.0.0.1) + página. O `.app` sobe o servidor e abre o navegador. Motor, SysEx e Launchpads inalterados: a página fala com o Motor pelas mesmas chamadas (`enfileirar`) que a janela Tk fazia. Segunda instância só reabre a página em vez de brigar pela porta CTRL |
 | ~~`gui.py`~~ | **Obsoleto** — a janela Tk. Não é mais empacotada; ver a nota sobre o Tk 8.5.9 abaixo |
 | `gui.py` (histórico) | **Reescrita em 14/08/2026** (a anterior quebrava no Tk 8.5.9 Aqua, que ignora cores de `tk.Button`/`tk.Checkbutton`). Janela fixa, botões de modo em Canvas com indicação do ativo, log em `~/Library/Logs/TR8S-Grid.log`. **Sem grid**: o físico já mostra steps; as abas são o que o físico não tem — Mixer & FX (captura guiada + fileira PROB), Instrumento (troca de tone), Biblioteca, Chain, Estocástica (com régua de probability por step), Avançado. A UI só fala com o Motor via `enfileirar` + `estado()`. Nada de Toplevel: o Tk 8.5.9 Aqua trava ao atualizar um recém-criado |
 | `efeitos.py` | Duas metades: o **catálogo** (o que a máquina tem — LFO, sends, INST, reverb/delay/master — com faixa, opções e o gesto que chega nele no painel, tirado do manual p. 24–33) e o **mapa decodificado** (offsets capturados em `~/.lp_tr8s_fx.json` + fixos do sniff M2). Nenhum offset vem de chute; parâmetro de 2 bytes e código de opção de lista são tratados explicitamente |
-| `biblioteca.py` | Puro-dados: 20 patterns clássicos em 14 estilos, com kit sugerido e preview. `python3 biblioteca.py` valida e imprime ASCII |
+| `biblioteca.py` | Puro-dados: 54 patterns clássicos em 34 estilos, com kit sugerido e preview. `python3 biblioteca.py` valida e imprime ASCII; o `testes.py` roda o `validar()` em toda suíte |
 | `tones.py` | Puro-dados: a Preset Tone List (514 tones, 19 categorias) para a aba Instrumento. **Não editar na mão** — regerar com `gen_tones.py`. O `BASE_ID` carrega a hipótese de id (2.9) |
 | `gen_tones.py` | Extrai a Preset Tone List do PDF da Roland e gera o `tones.py` (trata as 3 linhas quebradas do extrator de texto) |
 | `ferramentas.py` | `Chain` (reescrita perseguindo o playhead — provada em mesa; modos pattern/variação/PC aguardam as sessões B/C) e `Estocastica` (densidade/humanize/retrig/ghosts com seed reprodutível) |
@@ -943,7 +945,9 @@ desde 14/08 ele também **entra em fase com a máquina já tocando**, e se corri
 sozinho a cada 1,5 s, pelo byte de step da seção 2.8.
 Repinta só as duas colunas afetadas (16 mensagens/step, não 128). **Desde 13/08 dá a
 volta no last step da variação**, o que conserta a dessincronização em pattern curto;
-ainda assume scale de semicolcheia, então scale diferente continua dessincronizando.
+**Desde 17/08 lê a SCALE do pattern** (nó `0x16`) e usa os pulsos por step dela —
+antes assumia semicolcheia sempre, e um pattern em `32nd` andava em metade da
+velocidade da máquina.
 
 **Cores fora da paleta.** A paleta indexada não chega ao escuro que os steps fora do
 LAST STEP e as notas mutadas precisam. Para essas, o SysEx de LED em RGB:
@@ -1823,6 +1827,285 @@ nomes dos 128 patterns e dos 128 kits estão legíveis nas capturas de tela de
   como no TR-EDITOR); separar visualmente o que é por instrumento do que é
   master; reforma geral da UI usando os prints do TR-EDITOR como referência.
 
+### Reforma 3 da interface — 16/08/2026, tarde (nada testado em hardware ainda)
+
+Atende os pedidos de 15/08 acima e o de 16/08 (mesa + CTRL estilo TR-EDITOR):
+
+- **A aba "Mixer & FX" virou a MESA**: 11 canais (GAIN, PAN, sends RVB/DLY,
+  fader LEVEL, knob PROB, botão MUTE) + canal MASTER (reverb/delay level,
+  MFX sw+tipo, KIT level), num quadro só. O dump alfabético dos 252
+  parâmetros morreu — o catálogo completo mora só na aba Efeitos. A
+  ferramenta de captura (Capturar / anotar opção / Reler) foi para a aba
+  Avançado, e o "esquecer" virou um select que lista **só** o que veio do
+  `~/.lp_tr8s_fx.json` (flag `capturado` que o `efeitos.carregar()` marca).
+- **Fileira CTRL na aba Efeitos**, como no TR-EDITOR: 11 dropdowns (um por
+  instrumento, posição fixa como os Sends) + o select global do kit ao lado.
+  Fiação nova: entrada `"inst ctrl select"` em `PARAMS_FIXOS` com
+  `off_por_inst` — o **terceiro modo de endereçamento** (um byte por
+  instrumento DENTRO de um bloco de kit, offset `0x01+i` no bloco 06), que
+  também servirá para COLOR/OUTPUT/choke quando a interface precisar. A
+  leitura cai de graça no `ler_fx` (o bloco 06 já era lido inteiro).
+  Códigos 0–5 fixos + 6–23 de tone; o 13 exibe **"Attack (sample)"** para
+  o select não colidir com o 6 (medido em ACB). **Morph (tones FM) fica de
+  fora** — segue sem código medido.
+- **MUTE pela mesa**: ação nova `"mudo"` → `Motor.alternar_mudo(i)`, que
+  **relê a máscara antes de inverter o bit** (o espelho `self.mudo` pode ter
+  1,5 s de idade; toggle sobre máscara velha ressuscitaria um mute feito no
+  painel nesse intervalo).
+- **Master/Kit da Efeitos dobra**: `comp/secao.mjs` (`<details>` vestido de
+  painel, estado por seção no localStorage). REVERB e DELAY nascem abertos,
+  MASTER FX/LFO/EXT IN/KIT fechados, com o placar "N/N mapeados" visível no
+  summary. Trocar de instrumento no seletor BD..RC repinta na hora (antes
+  esperava o polling, até 250 ms).
+- **Biblioteca: 34 → 54 patterns** — trance, psytrance, ambient, dubstep,
+  tech house, minimal, dub techno + baião, xote, maracatu, frevo, ijexá,
+  samba-reggae, partido alto, bossa nova, coco e carimbó. Regra nova de
+  autenticidade: **CH e OH se sufocam** (choke do par), então o fechado abre
+  buraco onde o aberto toca — salvo o triângulo do baião, que usa o choke de
+  propósito. `testes.py` ganhou `TesteBiblioteca` (o `validar()` não rodava
+  em teste nenhum).
+- **Busca textual de tone** na aba Instrumento (com texto, ignora a
+  categoria e varre os 514 por nome ou id).
+
+Conferido de mesa: 253 params no catálogo, 54 patterns validados, 28 testes,
+página inteira renderizando com o motor desligado (mesa em "—", selects
+populados, colapsáveis persistindo). **Nada disso tocou a máquina** — a fila
+de hardware está em 7.2, e o passo crítico é a primeira escrita no bloco 06.
+
+A revisão do código achou três coisas de comportamento, já corrigidas:
+
+- **`alternar_mudo` escrevia em standby.** Sair do modo ON não fecha a porta
+  CTRL, e o botão MUTE era o único controle da página sem o guarda
+  `modo_geral != MODO_ON` que o `definir_fx`/`definir_prob_inst` têm. Ganhou
+  o guarda e uma checagem de faixa do índice (a máscara tem 16 bits e só 11
+  são conhecidos — bit fora da faixa seria escrita em bit de função ignorada).
+- **A fileira CTRL ficava muda num código que a lista não tem.** Com um tone
+  FM em "Morph" (sem código medido), o select caía calado no "—" e a tela
+  dizia "não lido" onde o visor mostra um destino de verdade. Agora aparece
+  `código N ?`, mesmo critério do "?" das opções presumidas.
+- A dica do PROB da mesa dizia que "—" era só "steps com valores diferentes";
+  também é **nenhum step ligado** (`_prob_inst` devolve `None` nos dois casos).
+
+### Sessão de hardware 17/08/2026 — a mesa na frente da máquina
+
+Primeira vez que a reforma 3 encostou na TR-8S. **Dois testes passaram, dois
+achados novos, e uma escala decifrada.**
+
+**H1 MUTE — PASSOU, nos dois sentidos.** O botão da mesa muta e desmuta de
+verdade (o Luan ouviu), e mutar no painel acende o MUTE na tela. O caminho
+UI → `alternar_mudo` → máscara de performance está provado.
+
+**H2 escrita — PASSOU.** LEVEL, GAIN, PAN, os dois sends e o KIT LEVEL, todos
+mexidos pela mesa, mudam a máquina. **A leitura de volta é que estava quebrada**
+— ver abaixo.
+
+**GAIN: a escala inteira, lida no visor.**
+
+| byte | visor |
+|---|---|
+| 0 | `-INF` |
+| 1 | `-40.0 dB` |
+| **81** | **`0.0 dB`** |
+| 132 | `+25.5 dB` |
+| **161** | **`+40.0 dB`** (fim da faixa) |
+
+Meio decibel por passo a partir do 81, e o 0 é um valor especial. Isto **fecha a
+pendência do `FAIXAS_MEDIDAS`**, que registrava "parou em 161, não em 255" sem
+explicação: 161 é o fim da faixa mesmo. Mandamos 255 de propósito e a máquina
+grampeou em 161 com o visor em +40.0 dB — sem estrago. Até aqui a tela mostrava
+o desvio de 128 (o byte 81 aparecia como **−47** com a máquina dizendo 0.0 dB);
+agora a tabela mora no catálogo (`efeitos.GANHO_ESCALA`) e alimenta a mesa, a
+aba Efeitos e o log de uma vez. O `extin gain`, que o comentário já dizia ter
+"a mesma escala 0-161", herdou a tabela.
+
+**Achado 1 — os blocos de FX só eram relidos na troca de kit.** Mexer no GAIN,
+LEVEL, PAN ou nos sends **pelo painel da máquina nunca chegava à tela**: a
+`fx_fila` era armada só quando `kit_trocou` subia, então o espelho congelava no
+estado do momento do ON e a mesa mentia. Consertado com um **rodízio**
+(`INTERVALO_FX`), no mesmo espírito do `_reler_pattern_rodizio`: poucos blocos
+por ciclo, para nunca disputar um tick com a releitura do pattern — foi ela que
+virou "BD não lido" quando o `ler_kit` rodava inteiro num tick só. A mesa também
+ganhou um **Reler** para quem não quer esperar a volta da fila.
+
+**Achado 2 — a ação `reler` não tinha botão.** No boot desta sessão a leitura do
+número do pattern falhou (`nao consegui ler em que pattern a maquina esta`), o
+motor marcou as 11 linhas como não lidas — de propósito, porque escrever com
+endereço de pattern errado é pior — e **a escrita ficou bloqueada sem saída pela
+página**: `ACOES["reler"]` existia e nenhum elemento a chamava. Agora a própria
+tarja vermelha traz o botão **Reler tudo**.
+
+**H3 probability — PASSOU.** CH a 50% pela mesa falha em cerca de metade das
+voltas; de volta a 100% ele fica constante.
+
+## H4 — a escrita no bloco 06 FUNCIONA (17/08/2026)
+
+**O passo crítico da reforma 3 passou, nos dois sentidos.** Era a primeira vez
+que a nossa ponta escrevia no bloco `10 KK 06 00`: até aqui só o TR-EDITOR
+tinha sido *visto* escrevendo lá.
+
+1. A leitura já batia com o painel antes de qualquer escrita: `inst ctrl select`
+   = `[6, 7, 8, 8, 8, 5, 5, 5, 5, 5, 5]` — BD=Attack, SD=Snappy, LT/MT/HT=Color,
+   RS…RC=InstFX — com o global em 6 (User). **O Luan conferiu na máquina: está
+   certo.**
+2. Trocar o destino no dropdown **muda na máquina**.
+3. Trocar o destino **no painel da máquina** muda na tela (o rodízio novo).
+4. Com o destino em ReverbSend, girar o knob CTRL físico do BD **mudou o reverb,
+   audivelmente**.
+
+Ou seja: `DT1` de um byte em `0x01+i` do bloco 06 é tudo o que o TR-EDITOR faz
+ali — não há gesto escondido. O endereçamento `off_por_inst` está provado, e com
+ele o mesmo mecanismo serve para COLOR (`0x42+i`), OUTPUT (bloco 07) e choke
+(bloco 08) quando a interface precisar.
+
+**Limite conhecido do select:** os códigos 0–5 valem em qualquer instrumento;
+do 6 em diante são parâmetros de TONE, e **cada tone expõe só alguns** (o BD não
+tem Snappy). Não existe tabela tone → parâmetros em lugar nenhum — o
+`ToneDetailsConfigTable.dat` da Roland só traz número/categoria/tipo/nome —
+então a lista não tem como filtrar. O que ela faz é não mentir: os códigos 6+
+ficam num grupo separado, "do tone — só se este tone tiver".
+
+### PAN: a escala, também lida no visor
+
+| byte | visor |
+|---|---|
+| 0 | `L127` |
+| 118 | `L9` |
+| 126 | `L1` |
+| **127 e 128** | **`CENTER`** (dois bytes) |
+| 129 | `R1` |
+| 255 | `R127` |
+
+O CENTER ocupar **dois** bytes é o que explicava o erro de um: a tela mostrava
+`-10` (o desvio de 128) onde a máquina dizia `L9`. Serve para `inst pan`; o
+`extin pan` provavelmente é igual, mas isso é **dedução** e ficou sem escala até
+alguém ler o visor dele.
+
+**H5 MASTER FX — PASSOU** (liga, desliga e troca de tipo, pelo canal MASTER da
+mesa). **H6 caiu**: a aba Avançado foi removida a pedido do Luan no mesmo dia
+("o programa tem que ficar mais simples") — com o catálogo 253/253 mapeado, a
+captura guiada estava sem trabalho. O **WRITE** mudou para a aba Pattern; o log
+continua no rodapé e em `~/Library/Logs/TR8S-Grid-app.log`; a captura volta do
+git se um parâmetro novo aparecer.
+
+## SCALE decifrada — nó do pattern, offset `0x16` (17/08/2026)
+
+**Provada por `snapdiff` com ida e volta**, com a máquina parada e nada mais
+mexido:
+
+```
+32nd -> 16th :  no do pattern, offset 22 (0x16):  03 -> 02
+16th -> 32nd :  no do pattern, offset 22 (0x16):  02 -> 03
+```
+
+O segundo diff veio **limpo**: só esse byte e o step atual da performance (que
+anda sozinho). A ordem dos códigos é a lista do Reference:
+
+| código | scale | pulsos por step | como se sabe |
+|---|---|---|---|
+| 0 | `8th(T)` | 8 | **deduzido** da ordem da lista |
+| 1 | `16th(T)` | 4 | **deduzido** da ordem da lista |
+| 2 | `16th` | 6 | **medido** |
+| 3 | `32nd` | 3 | **medido** |
+
+O byte vem **de graça** no nó de 193 bytes que o `ler_last_steps` já lê a cada
+1,5 s — nenhum RQ1 novo. O `PULSOS_P_STEP = 6` deixou de ser constante:
+`Motor.pulsos_p_step()` lê a scale, e a barra de estado mostra um display
+`scale` **só quando não é `16th`** — porque é exatamente aí que o playhead anda
+em outra velocidade, e foi essa invisibilidade que fez o grid "andar em metade
+do tempo" sem ninguém saber por quê. Três testes de mesa guardam a conversão.
+
+**Ainda não testado em hardware:** o playhead com o pattern em `32nd`. A conta
+está certa e os testes passam, mas quem confirma é o olho no grid ao lado da
+máquina.
+
+### O TEMPO do pattern, de brinde
+
+O mesmo diff (o sujo, com a máquina reiniciada no meio) mostrou o **mesmo par de
+nibbles mudando em dois lugares ao mesmo tempo**: nó do pattern offsets 18-19 e
+performance offsets 59-60, de `0E 0E` para `0D 0A`. Com o offset 58 em `02`:
+`2 E E` = 750 → **75.0 BPM** antes, `2 D A` = 730 → **73.0 BPM** depois — e 73
+era o que o visor mostrava. Ou seja: o `OFF_TEMPO` (`0x3A`) da performance está
+certo **e o pattern guarda o próprio tempo no nó dele (offsets 17-19)**.
+
+Isso dá a **hipótese mais provável para o Auto BPM não funcionar**: escrevemos
+só na performance, e a máquina recarrega o tempo do pattern por cima. Falta
+testar escrevendo no nó.
+
+### O playhead em `32nd`: quatro consertos, um deles de política
+
+Com o pattern em `32nd` a 40 bpm (step de 187 ms) o playhead ficou "atrasado e
+travando". Não era um bug, eram quatro:
+
+1. **O clock represado.** Reler uma variação são 11 blocos de SysEx (~500 ms)
+   com o lock na mão; o clock ficava na fila e era aplicado **todo de uma vez**
+   no fim. O playhead congelava, pulava os steps que passaram e o **BPM medido
+   desaparecia** — porque lote > 1 zera a janela de medição de propósito. Foi o
+   `bpm: None` no `/estado`, com a máquina tocando, que entregou o diagnóstico.
+   `Motor._bombear_clock()` processa o clock **entre** os blocos (o LED tem
+   porta própria, nenhum byte vai para a TR-8S ali).
+2. **A tela só sabia adivinhar um step.** O relógio do navegador mede a duração
+   do step e anda sozinho entre quadros, mas parava no primeiro. Com step de
+   187 ms contra 250 ms de polling, cada quadro cobre mais de um step: agora a
+   adivinhação **encadeia**, com limite em **tempo** (600 ms), não em steps.
+3. **O polling era lento demais para step curto.** 250 → **120 ms enquanto a
+   máquina toca**. Decidido com número: o `/estado` responde em **13 ms**
+   (mediana de 164 amostras) e pega o lock sem bloquear.
+4. **O conteúdo da variação nova demorava ~500 ms para aparecer.** O motor
+   passou a guardar o espelho de cada variação (`_guardar_cache_var`) e mostra
+   na hora, com a releitura confirmando atrás. Guarda as **mesmas listas**, não
+   uma cópia, então editar um step aparece nos dois lugares sem sincronizar
+   nada; espelho com linha não lida não entra.
+
+### O grid não segue mais a variação que toca — decisão de 17/08/2026
+
+O *follow* nasceu em 16/08 por um motivo real (o visor em `2-04B` com o grid na
+A: editar não soava, o painel não aparecia no grid e a estocástica caía no
+vazio). Só que **seguir custa uma releitura de 11 blocos, ~500 ms**, e com
+várias variações habilitadas a máquina troca a cada volta — a 40 bpm em `32nd`,
+a cada 3 s. A vista pulava debaixo da mão de quem edita.
+
+Decisão do Luan, e ela vale mais que o mecanismo: *"o grid tem função principal
+inspecionar e editar o que está tocando e o que vai ser tocado"* e *"vai ser
+suficiente a luzinha verde indicando o que está tocando"*. O
+`_seguir_variacao` **foi removido** (e com ele o `_var_seguida`). A vista fica
+onde o Luan deixou.
+
+Quem diz o que soa são **três sinais honestos**, todos já existentes: o ponto
+verde na coluna das variações, os displays `toca` × `edita` na barra de estado,
+e a **ausência de playhead** quando a variação exibida não é a que soa (regra do
+`playhead_visivel` — desenhar verde sobre o que não está soando seria a única
+cor da tela mentindo sobre o som). Três sinais parados valem mais que uma vista
+que se mexe.
+
+Isso também **removeu a causa raiz** dos engasgos: sem troca de variação a cada
+3 s, não há releitura de 500 ms a cada 3 s. Os quatro consertos acima continuam
+valendo como rede — o bombeamento protege qualquer leitura longa, o cache de
+variação deixa a troca **manual** instantânea, e o polling de 120 ms serve a
+qualquer step curto.
+
+### Três pendências que a sessão abriu (17/08/2026)
+
+1. ~~**SCALE — o playhead anda em metade da velocidade.**~~ **RESOLVIDA na
+   mesma sessão**: o byte apareceu no `snapdiff` (nó do pattern `0x16`) e o
+   playhead passou a ler a scale. Ver a seção acima. Falta só o olho no grid
+   com a máquina em `32nd`.
+2. **AUTO FILL IN.** Quando a máquina cai no fill, o grid não acompanha e a
+   contagem se perde. É consequência conhecida: **os Fill In não aparecem na
+   máscara 63-66** (2.3.2, medido em 14/08), então nada no que lemos hoje diz
+   "a máquina está tocando o fill". Os dois botões de AUTO FILL IN também são
+   **transmit-only** por CC. O knob de intervalo (32/16/12/8/4/2) é
+   **dedução**: parece ser de quantos em quantos compassos o fill entra, e isso
+   ainda não foi confirmado nem no manual nem na máquina.
+3. **Escrever o TEMPO não funcionou.** O `definir_bpm` (perf, `OFF_TEMPO`,
+   3 nibbles) nasceu em 16/08 com o aviso "conferir o visor no primeiro uso".
+   Em 17/08 o Auto BPM da aba Grooves foi acionado e **a máquina não mudou de
+   andamento** — primeiro teste, resultado negativo. Falta isolar (clicar no
+   BPM do groove direto, com o visor à vista) antes de cravar.
+
+O `snap` passou a incluir a **região de performance** (`01 00 00 00`, 128 B —
+a mesma leitura que o tick já faz), justamente porque as três pendências acima
+moram lá ou no nó do pattern, e o snapshot era cego para elas.
+
 ### Onde parou antes disso
 
 Os botões estão mapeados (seção 5), o app está no Desktop, e o HIDE e o LAST STEP
@@ -1932,7 +2215,7 @@ precedência de cor, wrap do playhead, lote de SysEx de LED, desenhos, ondinha) 
    | — | Tone: abrir a aba Instrumento, conferir se o nome mostrado bate com o visor da máquina (valida a hipótese de id do tones.py); trocar o BD por outro tone e OUVIR | aba Instrumento | baixo (leitura provada; escrita DT1 nova) |
    | K | Decodificar CTRL SELECT / INST FX / knobs do kit: watch nos 128 B de params do instrumento, um gesto por vez | `python3 lp_tr8s.py kit_watch BD` | zero (leitura provada) |
    | ~~grid da tela~~ | ~~Comparar o grid da aba Pattern com os Launchpads e o painel~~ — **FEITO 15/08/2026: o grid está igual.** Valida a tradução inteira de `cor_do_step()` para CSS (nota forte/fraca, flam, sub step, ALT, accent, linha muda, step além do last step) e a régua de last step. A escrita pela tela fica liberada para teste | aba Pattern | — |
-   | M1 | Mixer: escolher o parâmetro na lista do catálogo (ela mostra o gesto), Capturar, mexer SÓ nesse controle — **girando de ponta a ponta** nos de 2 bytes. Nas listas (waveform, destino do LFO, tipos de FX), depois de capturar, anotar cada opção com o visor na opção. Depois mover o controle novo e OUVIR | aba Mixer & FX | baixo (leitura passiva + escrita em offset capturado) |
+   | M1 | Escolher o parâmetro na lista do catálogo (ela mostra o gesto), Capturar, mexer SÓ nesse controle — **girando de ponta a ponta** nos de 2 bytes. Nas listas (waveform, destino do LFO, tipos de FX), depois de capturar, anotar cada opção com o visor na opção. Depois mover o controle novo (na aba Efeitos, onde ele nasce) e OUVIR | aba Avançado, painel "Mapear parâmetro novo" | baixo (leitura passiva + escrita em offset capturado) |
    | M2 | Sniff do TR-EDITOR (.app FECHADO): MIDI Monitor na porta CTRL + TR-EDITOR; mexer UM controle por vez nas abas EFX e INST, anotando a ordem; salvar o `.mmon` — o `tr8s_sysex.py` lê direto e os offsets viram entradas fixas do `efeitos.py` | MIDI Monitor + TR-EDITOR | zero (escuta passiva) |
    | — | Probability fácil (depois da sessão A): fader PROB do CH a ~50% com a máquina tocando → o chimbal falha metade das voltas; régua por step da Estocástica confere com o painel | abas Mixer / Estocástica | zero |
    | C | Escrita da máscara de variação | `python3 lp_tr8s.py var_mask B` | baixo |
@@ -1940,6 +2223,7 @@ precedência de cor, wrap do playhead, lote de SysEx de LED, desenhos, ondinha) 
    | — | Chain reescrita de ponta a ponta: 2 entradas × 2 reps trocando na virada sem furo audível | aba Chain | zero |
    | — | Estocástica: densidade audível; mesma seed = mesmo resultado; Reverter | aba Estocástica | zero |
    | — | Utility: está tocando? / versão / visor / WRITE (religar depois!) | aba Avançado | baixo (2.9) |
+   | — | **Reforma 3 (mesa + CTRL)**: H1 MUTE pela mesa (ouvir o CH sumir e voltar; LED de MUTE no painel); H2 LEVEL/PAN/sends/KIT LEVEL da mesa (mexer, ouvir, devolver); H3 PROB do CH a 50% (falha metade das voltas; "—" = steps mistos); **H4 primeira escrita no bloco 06**: global CTRL → User (conferir no painel), dropdown do BD → ReverbSend, girar o knob CTRL físico do BD e OUVIR o send mudar + conferir o destino no visor, depois devolver os dois valores; H5 MFX sw/tipo (ouvir entrar/sair, nome no visor); H6 capturar/cancelar/anotar na aba Avançado | página: abas Mixer, Efeitos e Avançado | baixo (DT1 em endereços provados pelo sniff; H1/H2/H3/H4 PASSARAM em 17/08/2026 — inclusive a primeira escrita no bloco 06; faltam H5 e H6) |
 
    As CLIs de sessão exigem o `.app` **fechado** (porta CTRL única). Registrar cada
    resultado aqui, positivo ou negativo, como manda o Método.

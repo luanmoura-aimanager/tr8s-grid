@@ -246,3 +246,39 @@
         overflow:hidden; width:120px }
 .barra > i{ display:block; height:100%; background:var(--ok);
             width:calc(var(--p,0) * 100%); transition:width var(--media) }
+
+/* ── mensagens que entram e saem: o espaco JA EXISTE ───────
+ * Pedido de 17/08/2026: aviso que aparece do nada empurra tudo embaixo dele e
+ * o botao que a mao ia clicar muda de lugar. Mesmo truque que o .chips-estado
+ * ja usava. Duas ferramentas:
+ *   .reserva-*    a caixa nasce com a altura da mensagem que vai chegar
+ *   [data-oculto] some SEM sair do fluxo (guarda a largura tambem) */
+.reserva-chip{ min-height:22px; display:flex; align-items:center;
+               gap:var(--e1) }
+.reserva-linha{ min-height:1.4em }
+.reserva-2linhas{ min-height:2.9em }
+[data-oculto]{ visibility:hidden }
+
+/* ── secao colapsavel (comp/secao.mjs) ────────────────────
+ * <details class="painel colapsavel">: o summary veste o visual do
+ * .painel > header e ganha um chevron que gira com [open]. Sem animacao de
+ * altura - abrir/fechar e instantaneo de proposito (atualizar roda 4x/s). */
+details.colapsavel > summary{
+  display:flex; align-items:center; gap:var(--e2);
+  padding:var(--e2) var(--e3);
+  background:var(--painel-cab);
+  font-size:var(--t-micro); font-weight:var(--peso-rot);
+  letter-spacing:var(--esp-rot); text-transform:uppercase;
+  color:var(--acento); cursor:pointer; list-style:none; user-select:none;
+}
+details.colapsavel > summary::-webkit-details-marker{ display:none }
+details.colapsavel > summary::before{
+  content:"\25B8"; font-size:var(--t-min); color:var(--fraco);
+  transition:transform var(--rapida);
+}
+details.colapsavel[open] > summary{ border-bottom:1px solid var(--linha) }
+details.colapsavel[open] > summary::before{ transform:rotate(90deg) }
+details.colapsavel > summary .h-dir{
+  margin-left:auto; display:flex; gap:var(--e2); align-items:center;
+  text-transform:none; letter-spacing:normal; color:var(--fraco);
+}

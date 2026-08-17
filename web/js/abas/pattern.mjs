@@ -144,6 +144,30 @@ export default {
       agir({ acao: "exec", tipo: "limpar_var" }); // o motor pede 2x pra valer
     };
 
+    // WRITE veio da aba Avancado quando ela foi removida (17/08/2026): salvar
+    // o pattern e gesto de pattern, e este e o lugar dele. Dois cliques em 2 s,
+    // como o CLEAR variacao - escrever na memoria da maquina nao se desfaz
+    let armadoWrite = 0;
+    const bWrite = chip("WRITE (salvar)", null, { class: "bt-perigo" });
+    bWrite.onclick = () => {
+      const agora = Date.now();
+      if (agora - armadoWrite > 2000) {
+        armadoWrite = agora;
+        bWrite.setAttribute("data-armado", "");
+        bWrite.style.setProperty("--ms", "2000ms");
+        texto(bWrite, "clique de novo (2s)");
+        setTimeout(() => {
+          bWrite.removeAttribute("data-armado");
+          texto(bWrite, "WRITE (salvar)");
+        }, 2000);
+        return;
+      }
+      armadoWrite = 0;
+      bWrite.removeAttribute("data-armado");
+      texto(bWrite, "WRITE (salvar)");
+      agir({ acao: "util", op: "write" });
+    };
+
     const selLastVar = h("select", {
       id: "last-var",
       "aria-label": "last step da variação",
@@ -212,6 +236,13 @@ export default {
         bClearInst,
         bClearVar,
         bAcc,
+        bWrite,
+        h(
+          "p.dica",
+          {},
+          "o WRITE grava o pattern na memória da máquina — o teste de verdade " +
+            "é religar a TR-8S depois",
+        ),
       ),
       grupo(
         "janela dos Launchpads",

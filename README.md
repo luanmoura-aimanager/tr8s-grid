@@ -98,10 +98,10 @@ ocorrência, então os dois Launchpad viram um só. Por isso a enumeração e a 
 | Arquivo | O que é |
 |---|---|
 | `lp_tr8s.py` | O motor e a CLI: launchpads, SysEx, grid ao vivo, sessões de hardware (`prob_watch`, `pattern`, `pc`, `var_mask`) |
-| `web/` | A interface: HTML/CSS/módulos ES sem build nem dependência. Aba **Pattern** com o grid 12×16 editável (espelho do TR-EDITOR, com probability que o hardware não exibe), barra de estado com displays e LEDs, Mixer & FX, Instrumento, Biblioteca, Chain, Estocástica, Avançado |
-| `servidor.py` + `pagina.html` | A tela: servidor local (só stdlib, 127.0.0.1, com token/Origin/CSP) + página no navegador, com o que o grid físico não tem — Mixer & FX (sends/knobs/LFO por captura guiada + probability), Instrumento (troca de tone), Biblioteca, Chain, Estocástica, Avançado. Log em `~/Library/Logs/TR8S-Grid-app.log`. Saiu do Tkinter porque o Tk 8.5.9 do Python do CLT trava no macOS atual (medições na REFERENCIA §4) |
+| `web/` | A interface: HTML/CSS/módulos ES sem build nem dependência. Aba **Pattern** com o grid 12×16 editável (espelho do TR-EDITOR, com probability que o hardware não exibe), barra de estado com displays e LEDs, **Mixer** (a mesa: 11 canais + master), **Efeitos** (catálogo por painel + fileira CTRL), Instrumento, Grooves, Estocástica, Avançado |
+| `servidor.py` + `pagina.html` | A tela: servidor local (só stdlib, 127.0.0.1, com token/Origin/CSP) + página no navegador, com o que o grid físico não tem — Mixer (level/gain/pan/sends/probability/mute dos 11), Efeitos (reverb/delay/master FX/LFO/INST FX e o CTRL de cada instrumento), Instrumento (troca de tone), Grooves, Estocástica, Avançado (captura guiada de offset + utility). Log em `~/Library/Logs/TR8S-Grid-app.log`. Saiu do Tkinter porque o Tk 8.5.9 do Python do CLT trava no macOS atual (medições na REFERENCIA §4) |
 | `efeitos.py` | Mapa dos parâmetros de kit/FX decodificados por observação (captura no app + sniff do TR-EDITOR) |
-| `biblioteca.py` | 20 patterns clássicos em 14 estilos musicais, com kit sugerido — `python3 biblioteca.py` valida e mostra previews |
+| `biblioteca.py` | 54 patterns clássicos em 34 estilos musicais, com kit sugerido — `python3 biblioteca.py` valida e mostra previews |
 | `gen_tones.py` → `tones.py` | Preset Tone List da Roland como dados, para a aba Instrumento (trocar o tone de cada track) |
 | `ferramentas.py` | Chain de patterns e ferramenta estocástica (probabilidade, densidade, humanize, ghosts) |
 | `criar_app.py` | Monta o `.app` do Desktop |

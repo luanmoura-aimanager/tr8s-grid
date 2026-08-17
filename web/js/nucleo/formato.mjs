@@ -26,6 +26,26 @@ export function rotuloValor(ent, valor) {
   return String(valor);
 }
 
+/**
+ * Faixa e formato de um parametro, DIRETO DO CATALOGO (efeitos.py) - pronto
+ * para espalhar num knob(): {min, max, bipolar, formatar}.
+ *
+ * Nenhuma tela redigita 0-255 nem repete a formula: o GAIN mostrou o preco
+ * disso em 17/08/2026 (a mesa dizia "-47" no que a maquina chamava de
+ * 0.0 dB, porque supunha centro em 128, e a faixa real e 0-161 em meio
+ * decibel). Quando o hardware corrige uma faixa, o conserto e num lugar so.
+ */
+export function faixaDoCatalogo(D, nome) {
+  const c = ((D && D.catalogo_fx) || []).find((x) => x.nome === nome) || {};
+  return {
+    min: 0,
+    max: c.max == null ? 255 : c.max,
+    bipolar: !!c.bipolar,
+    formatar: (v) =>
+      rotuloValor({ ...c, opcoes: {} }, v) + (c.unidade ? " " + c.unidade : ""),
+  };
+}
+
 export function pct(v, min, max) {
   if (max === min) return 0;
   return Math.max(0, Math.min(1, (v - min) / (max - min)));

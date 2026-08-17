@@ -135,3 +135,44 @@ main{ padding:var(--e4); padding-bottom:56px }
           color:var(--fraco) }
 .prev .g{ display:grid; grid-template-columns:repeat(16,14px); gap:2px }
 .prev .g i{ height:12px; border-radius:2px; background:var(--c-vazio,#26221e) }
+
+/* ── fileira CTRL (aba Efeitos): 11 selects, um por instrumento ──
+ * Uma linha so, alinhada com as fileiras de knobs dos Sends: os selects
+ * dividem a largura por igual e encolhem juntos (quebrar em duas linhas com
+ * "CC RC" sobrando embaixo ficou feio - 17/08/2026). Abaixo de 64px cada, a
+ * propria fileira rola de lado. */
+.fila-ctrl{ flex-wrap:nowrap; overflow-x:auto; align-items:flex-end }
+.fila-ctrl .campo{ flex:1 1 0; min-width:64px }
+.fila-ctrl .campo select{ width:100%; min-width:0; max-width:none;
+                          font-size:var(--t-min); padding-left:4px }
+.fila-ctrl .rot-fila{ flex:0 0 auto }
+.fila-ctrl[data-atenuado]{ opacity:.55 }
+
+/* ── aba Mixer: a mesa (reforma 3) ─────────────────────────
+ * 11 canais + master num quadro so. O scroll lateral mora AQUI: o body tem
+ * overflow-x:hidden de proposito (base.css). */
+.mesa{ display:flex; gap:var(--e1); align-items:stretch;
+       overflow-x:auto; padding-bottom:var(--e2) }
+.canal{ display:flex; flex-direction:column; align-items:center;
+        gap:var(--e2); min-width:66px; padding:var(--e2) var(--e1);
+        border-right:1px solid var(--linha) }
+.canal:last-child{ border-right:0 }
+.canal-nome{ font-family:var(--f-mono); font-size:var(--t-min);
+             font-weight:600; color:var(--tinta2) }
+.canal-master{ border-left:2px solid var(--linha2); border-right:0;
+               margin-left:var(--e2); min-width:104px }
+/* fader LEVEL mais alto que o padrao de 92px - e o controle principal */
+.mesa .fader-cx{ height:150px }
+.mesa .fader-cx input[type=range]{ width:150px }
+.canal .bt-mute{ min-width:44px; font-family:var(--f-mono) }
+.canal .bt-mute[aria-pressed="true"]{ background:#101a26;
+  border-color:#1e3a5f; color:var(--info) }
+.canal-master select{ max-width:96px; font-size:var(--t-min) }
+
+/* "agora: 86.5" x "sem clock": largura reservada para a linha do BPM do
+   groove selecionado nao mudar de tamanho a cada leitura do clock */
+.medida-bpm{ display:inline-block; min-width:96px }
+/* o fader do kit e o unico que mexe no volume de tudo: a legenda em cima
+   dele responde "que fader e esse?" sem precisar de tooltip */
+.canal-master .dica-kit{ font-size:var(--t-micro); text-align:center;
+                         max-width:96px; line-height:1.2; margin-top:var(--e2) }

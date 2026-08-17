@@ -65,9 +65,16 @@ export function gradeSteps({
     raiz.append(h("div.num", { "data-tempo": s % 4 === 0 ? "" : null }, s + 1));
   }
 
-  // ACC primeiro (como no TR-EDITOR), depois os instrumentos
+  // A ACC desceu para o FIM da tela (pedido de 17/08/2026: o olho procura os
+  // instrumentos, e o accent atravessado no topo empurrava o BD pra baixo).
+  // Ela continua sendo a LINHA LOGICA 0 - data-l, os indices de celulas[] e
+  // rotulos[] e o "+1 da ACC" de quem chama a marcarJanela nao mudam; o que
+  // muda e so a ordem de insercao no grid. A folga acima dela e CSS
+  // (margin-top no data-l="0").
   const nomes = ["ACC", ...instrumentos];
-  nomes.forEach((nome, l) => {
+  const ordemVisual = [...instrumentos.map((_, i) => i + 1), 0];
+  ordemVisual.forEach((l) => {
+    const nome = nomes[l];
     const rot = h(
       "button.rot",
       { type: "button", "data-l": l, title: l === 0 ? "accent" : nome },
@@ -192,11 +199,25 @@ export function gradeSteps({
   // depois cair no 2 em vez do 1 - o servidor confirmava o step 1, mas o
   // relogio ja tinha disparado o passo seguinte. Era o "playhead maluco" de
   // 16/08/2026, e nao estava no motor: o motor sempre mandou 0..11.
+  // QUANTO a tela pode andar sozinha antes de uma confirmacao do servidor.
+  // A versao anterior adivinhava UM step e parava. Isso bastava enquanto o
+  // step era mais longo que o polling; num step CURTO (scale 32nd, ou BPM
+  // alto) cada quadro de /estado cobre varios steps, e o playhead: pulava
+  // steps, travava no ultimo e reaparecia atrasado - os tres sintomas que o
+  // Luan relatou em 17/08/2026, a 40 bpm em 32nd, onde o step dura 187 ms
+  // contra 250 ms de polling.
+  //
+  // O limite e em TEMPO, nao em numero de steps: step longo continua ganhando
+  // uma adivinhacao so, step curto ganha quantas couberem. Se a maquina parar,
+  // o pior caso e ~2 steps fantasmas ate o quadro seguinte dizer que parou.
+  const ADIVINHACAO_MS = 600;
+
   let passoReal = -1,
     tPasso = 0,
     durStep = 0,
     timer = 0,
-    ciclo = 16;
+    ciclo = 16,
+    adivinhados = 0;
 
   function pararRelogio() {
     if (timer) {
@@ -204,7 +225,33 @@ export function gradeSteps({
       timer = 0;
     }
     passoReal = -1;
+    adivinhados = 0;
     limparColuna();
+  }
+
+  // agenda a PROXIMA adivinhacao e, quando ela acontece, agenda a seguinte -
+  // e assim a tela acompanha step curto sem depender do polling
+  function agendarAdivinhacao() {
+    if (timer) {
+      clearTimeout(timer);
+      timer = 0;
+    }
+    if (!durStep || passoReal < 0) return;
+    const n = adivinhados + 1;
+    if (durStep * n > ADIVINHACAO_MS) return; // longe demais: espera o servidor
+    const falta = durStep * n - (performance.now() - tPasso);
+    timer = setTimeout(
+      () => {
+        timer = 0;
+        if (passoReal < 0) return;
+        adivinhados = n;
+        const p = (passoReal + n) % ciclo;
+        prop(playhead, "--p", p);
+        pintarColuna(p);
+        agendarAdivinhacao();
+      },
+      Math.max(10, falta),
+    );
   }
 
   function marcarPasso(p) {
@@ -219,23 +266,11 @@ export function gradeSteps({
       }
       passoReal = p;
       tPasso = agora;
+      adivinhados = 0;
       prop(playhead, "--p", p);
       pintarColuna(p);
     }
-    if (timer) clearTimeout(timer);
-    if (!durStep) return;
-    const falta = durStep - (performance.now() - tPasso);
-    timer = setTimeout(
-      () => {
-        timer = 0;
-        if (passoReal >= 0) {
-          const prox = (passoReal + 1) % ciclo;
-          prop(playhead, "--p", prox);
-          pintarColuna(prox);
-        }
-      },
-      Math.max(10, falta),
-    );
+    agendarAdivinhacao();
   }
 
   // ── um unico listener para as 208 celulas ──
