@@ -449,6 +449,271 @@ PATTERNS = [
             "CH": "o.o.o.o.o.o.o.o.",
         },
     },
+    # ════ expansao 3 (16/08/2026): trance/psy/ambient + brasil ═══
+    # Regra nova de autenticidade: CH e OH se sufocam na TR-8S (choke do
+    # par de chimbal), entao o CH abre buraco onde o OH toca - salvo quando
+    # o abafado e o efeito desejado (o triangulo do baiao usa isso).
+    # ── trance ───────────────────────────────────────────────
+    {
+        "id": "trance_uplifting", "nome": "Trance (uplifting)",
+        "estilo": "trance", "bpm": 138, "kit": "estilo TR-909 brilhante", "kit_num": 2,
+        "accent": 0x1111,
+        # kick 4/4, hat aberto no contratempo, 16ths no fechado (com buraco
+        # pro aberto respirar) e o rolo de caixa da virada em sub step
+        "obs": "o rolo de caixa nos steps 15-16 e a virada de oito em oito "
+               "compassos do uplifting",
+        "steps": {
+            "BD": "x...x...x...x...",
+            "CH": "oo.ooo.ooo.ooo.o",
+            "OH": "..x...x...x...x.",
+            "HC": "....x.......x...",
+            "SD": [None, None, None, None, None, None, None, None,
+                   None, None, None, None, None, None,
+                   {"vel": FRACA, "sub": 2}, {"vel": FORTE, "sub": 4}],
+        },
+    },
+    {
+        "id": "trance_progressive", "nome": "Trance (progressive)",
+        "estilo": "trance", "bpm": 132, "kit": "estilo TR-909 abafado", "kit_num": 2,
+        # o "rolling": chimbal em pares que empurram, rim sincopado
+        "steps": {
+            "BD": "x...x...x...x...",
+            "CH": "o..oo..oo..oo..o",
+            "OH": "..x...x...x...x.",
+            "RS": "...o..o....o..o.",
+            "HC": "....o.......o...",
+        },
+    },
+    # ── psytrance ────────────────────────────────────────────
+    {
+        "id": "psy_fullon", "nome": "Psytrance (full-on)",
+        "estilo": "psytrance", "bpm": 145, "kit": "estilo TR-909 seco", "kit_num": 2,
+        "accent": 0x1111,
+        # kick seco 4/4 e hat aberto no contratempo; o grave offbeat do psy
+        # e o BAIXO, nao a bateria - o pattern fica limpo de proposito
+        "obs": "o rolling bass do psy e o sintetizador; aqui so o esqueleto",
+        "steps": {
+            "BD": "x...x...x...x...",
+            "CH": "oo.ooo.ooo.ooo.o",
+            "OH": "..x...x...x...x.",
+            "HC": "............x...",
+        },
+    },
+    {
+        "id": "psy_prog", "nome": "Psytrance (progressivo)",
+        "estilo": "psytrance", "bpm": 140, "kit": "estilo TR-909 seco", "kit_num": 2,
+        # prog-psy: fechado so no "e" de cada tempo, aberto no contratempo
+        "steps": {
+            "BD": "x...x...x...x...",
+            "CH": ".o...o...o...o..",
+            "OH": "..x...x...x...x.",
+            "RS": ".......o.......o",
+        },
+    },
+    # ── ambient ──────────────────────────────────────────────
+    {
+        "id": "ambient_mare", "nome": "Ambient (maré)",
+        "estilo": "ambient", "bpm": 76, "kit": "tones eterios, ataque lento",
+        # quase nada, de proposito: um pulso que aparece e some
+        "obs": "reverb time e sends bem altos - o espaco e o instrumento",
+        "steps": {
+            "BD": "x.........o.....",
+            "RC": "....o.......o...",
+            "CC": "........o.......",
+            "RS": "......o.........",
+            "CH": "..o.....o.....o.",
+        },
+    },
+    {
+        "id": "ambient_pulso", "nome": "Ambient (pulso)",
+        "estilo": "ambient", "bpm": 90, "kit": "tones macios, sem transiente",
+        # batida de coracao em colcheia larga; a caixa fraca no 4 e a unica
+        # gravidade do compasso
+        "steps": {
+            "BD": "x.......x.......",
+            "CH": "o...o...o...o...",
+            "RC": "..o...o...o...o.",
+            "SD": "............o...",
+            "OH": "......o.........",
+        },
+    },
+    # ── dubstep ──────────────────────────────────────────────
+    {
+        "id": "dubstep_halftime", "nome": "Dubstep (meio tempo)",
+        "estilo": "dubstep", "bpm": 140, "kit": "estilo TR-808 grave", "kit_num": 1,
+        # 140 com caixa SO no 3: o meio tempo e o que da o peso
+        "obs": "o groove esta no que NAO toca - resistir a encher os vazios",
+        "steps": {
+            "BD": "x.....x.........",
+            "SD": "........x.......",
+            "CH": "o..o..o..o..o..o",
+            "OH": "..........x.....",
+            "RS": "..............o.",
+        },
+    },
+    # ── tech house / minimal / dub techno ────────────────────
+    {
+        "id": "tech_house", "nome": "Tech house",
+        "estilo": "tech house", "bpm": 126, "kit": "estilo TR-909", "kit_num": 2,
+        # o shuffle do rim e o vai-e-vem do hat fazem o groove
+        "steps": {
+            "BD": "x...x...x...x...",
+            "CH": "o...o.o.o...o.o.",
+            "OH": "..x.......x.....",
+            "RS": "...o..o......o..",
+            "HC": "....x.......x...",
+            "LT": "..............o.",
+        },
+    },
+    {
+        "id": "minimal", "nome": "Minimal",
+        "estilo": "minimal", "bpm": 128, "kit": "estilo TR-606 seco", "kit_num": 5,
+        # tres linhas e so: minimal e o que se tira, nao o que se poe
+        "steps": {
+            "BD": "x...x...x...x...",
+            "CH": "..o...o...o...o.",
+            "RS": "o..o.o..o..o.o..",
+        },
+    },
+    {
+        "id": "dub_techno", "nome": "Dub techno",
+        "estilo": "dub techno", "bpm": 118, "kit": "estilo TR-909 abafado", "kit_num": 2,
+        "obs": "reverb e delay send altos no chimbal e no rim - o dub mora "
+               "nos efeitos, nao nos steps",
+        "steps": {
+            "BD": "x...x...x...x...",
+            "CH": "..o...o...o...o.",
+            "RS": ".......o......o.",
+            "OH": ".............o..",
+            "CC": "o...............",
+        },
+    },
+    # ── brasil: forro, maracatu, frevo, afoxe, samba, bossa... ─
+    {
+        "id": "baiao", "nome": "Baião",
+        "estilo": "forró", "bpm": 104,
+        "kit": "zabumba no BD, triangulo no par CH/OH",
+        # zabumba: grave na cabeca, resposta fraca no contratempo (meia-lua).
+        # Triangulo = OH aberto no tempo + CH fechado nas semicolcheias: o
+        # choke do par faz o abafado sozinho - aqui a colisao E o gesto.
+        "obs": "triangulo usa o choke CH/OH de proposito; zabumba pede tune "
+               "grave no BD",
+        "steps": {
+            "BD": "x.....o.x.....o.",
+            "OH": "x...x...x...x...",
+            "CH": ".ooo.ooo.ooo.ooo",
+            "RS": "....o.......o...",
+        },
+    },
+    {
+        "id": "xote", "nome": "Xote",
+        "estilo": "forró", "bpm": 92, "kit": "zabumba + caixa seca",
+        # o xote anda em colcheia; zabumba com pickup fraco pro proximo tempo
+        "steps": {
+            "BD": "x......ox......o",
+            "RS": "....x.......x...",
+            "CH": "o.o.o.o.o.o.o.o.",
+        },
+    },
+    {
+        "id": "maracatu", "nome": "Maracatu (baque virado)",
+        "estilo": "maracatu", "bpm": 105,
+        "kit": "estilo TR-808, toms com tune la embaixo", "kit_num": 1,
+        # alfaias no BD/LT (grave que pergunta, virada que responde), caixa
+        # em semicolcheia com acento deslocado, gongue no rim
+        "obs": "baque virado simplificado ao que cabe em 16; alfaia = tune "
+               "grave e decay longo",
+        "steps": {
+            "BD": "x..x..x.x..x....",
+            "LT": "..............xx",
+            "SD": "ooxoooxoooxoooxo",
+            "RS": "x..x..x.x..x..x.",
+            "CH": "o.o.o.o.o.o.o.o.",
+        },
+    },
+    {
+        "id": "frevo", "nome": "Frevo",
+        "estilo": "frevo", "bpm": 152, "kit": "acustico seco (bloco de rua)",
+        # a caixa carrega o 3+3+2 dobrado; surdo empurra a virada do tempo
+        "steps": {
+            "BD": "x......xx.......",
+            "SD": "xooxooxoxooxooxo",
+            "HC": "....x.......x...",
+            "CC": "x...............",
+        },
+    },
+    {
+        "id": "ijexa", "nome": "Ijexá (afoxé)",
+        "estilo": "afoxé", "bpm": 96, "kit": "estilo TR-727 (atabaques)", "kit_num": 4,
+        # agogo no rim (metade sincopada, metade andando), atabaques nos
+        # toms, xequere varrendo em semicolcheia
+        "steps": {
+            "RS": "x..x..x.x.x.x.x.",
+            "BD": "......x.......x.",
+            "MT": "..o..o....o..o..",
+            "CH": "oooooooooooooooo",
+        },
+    },
+    {
+        "id": "samba_reggae", "nome": "Samba-reggae",
+        "estilo": "samba", "bpm": 96,
+        "kit": "estilo TR-808, surdos nos graves", "kit_num": 1,
+        # surdos em dialogo (BD pergunta no 1, LT responde no 2 e no 4),
+        # repique costurando em 3, caixa fraca preenchendo
+        "steps": {
+            "BD": "x.......x.......",
+            "LT": "....x.......x...",
+            "SD": "..o...o...o...x.",
+            "RS": "x..x..x..x..x...",
+            "CH": "o.o.o.o.o.o.o.o.",
+        },
+    },
+    {
+        "id": "partido_alto", "nome": "Partido alto",
+        "estilo": "samba", "bpm": 100, "kit": "pandeiro + tamborim (percussao)",
+        # a figura do tamborim e o partido alto; surdo responde no 2 e no 4;
+        # palmas de roda no clap
+        "steps": {
+            "RS": ".x..x.x...x..x..",
+            "BD": "o...x...o...x...",
+            "CH": "oooooooooooooooo",
+            "HC": "x......x..x.....",
+        },
+    },
+    {
+        "id": "bossa_nova", "nome": "Bossa nova",
+        "estilo": "bossa nova", "bpm": 132, "kit": "acustico seco, rim = clave",
+        # clave da bossa no rim; surdo pontuado (tempo + pickup) no bumbo
+        "steps": {
+            "RS": "x..x..x...x..x..",
+            "BD": "x..xx..xx..xx..x",
+            "CH": "o.o.o.o.o.o.o.o.",
+        },
+    },
+    {
+        "id": "coco", "nome": "Coco",
+        "estilo": "coco", "bpm": 104, "kit": "estilo TR-727 + ganza", "kit_num": 4,
+        # o ganza carrega o coco; caixeta/palmas respondem no contratempo
+        "steps": {
+            "BD": "x.....x...x.....",
+            "SD": "....x.......x...",
+            "CH": "oooooooooooooooo",
+            "RS": "..x...x...x...x.",
+        },
+    },
+    {
+        "id": "carimbo", "nome": "Carimbó",
+        "estilo": "carimbó", "bpm": 110, "kit": "estilo TR-727, curimbo nos toms", "kit_num": 4,
+        # curimbo: o tom grave pergunta, o medio responde; milheiro varre em
+        # semicolcheia por cima
+        "steps": {
+            "LT": "x.x...x.x.x...x.",
+            "BD": "x.......x.......",
+            "MT": "....o..o.....o..",
+            "CH": "oooooooooooooooo",
+            "RS": "....x.......x...",
+        },
+    },
 ]
 
 

@@ -341,7 +341,7 @@ ACOES = {
     "exec": _acao_exec,
     # duplo clique na variacao: pede que ela TOQUE (o clique simples so a abre
     # no grid pra editar). Ver Motor.pedir_variacao - a escrita da mascara
-    # 63-66 ainda nao foi provada em hardware
+    # 63-66 foi PROVADA em hardware em 16/08/2026 (tres trocas obedecidas)
     "tocar_variacao": lambda a: HOST.enfileirar(HOST.motor.pedir_variacao,
                                                 int(a["var"])),
     # Alt-clique: liga/desliga a variacao no RODIZIO, sem zerar as outras -
@@ -369,6 +369,11 @@ ACOES = {
     "reler": lambda a: HOST.enfileirar(HOST.motor.recarregar),
     "prob_inst": lambda a: HOST.enfileirar(HOST.motor.definir_prob_inst,
                                            int(a["inst"]), int(a["pct"])),
+    # toggle do mute de UM instrumento (botao da mesa). Escrita da mascara
+    # provada em hardware (REFERENCIA 2.7); o toggle mora no Motor para
+    # reler a mascara fresca antes de inverter (corrida com o painel).
+    "mudo": lambda a: HOST.enfileirar(HOST.motor.alternar_mudo,
+                                      int(a["inst"])),
     "prob_step": lambda a: HOST.enfileirar(HOST.motor.definir_prob,
                                            int(a["inst"]), int(a["step"]),
                                            int(a["pct"])),

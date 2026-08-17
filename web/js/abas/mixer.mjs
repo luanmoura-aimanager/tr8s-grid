@@ -1,307 +1,250 @@
-// abas/mixer.mjs - probability por instrumento + os parametros ja mapeados +
-// a ferramenta de captura.
+// abas/mixer.mjs - a MESA: 11 canais (GAIN, PAN, sends, LEVEL, PROB, MUTE)
+// e um canal MASTER, tudo num quadro so.
 //
-// E a sala de maquinas da engenharia reversa: nenhum offset de FX e
-// documentado, entao cada controle aqui existe porque alguem (o Luan, no
-// painel) o revelou. O que ainda nao foi revelado aparece na lista de captura,
-// com o gesto do painel ao lado - nunca como um knob que finge funcionar.
-import { h, $, texto, attr, reconciliar } from "../nucleo/dom.mjs";
+// Reforma 3: a versao anterior desta aba despejava os 252 parametros do
+// mapa_fx em ordem alfabetica (uma fileira de 11 faders POR parametro) e
+// duplicava a aba Efeitos inteira. O catalogo completo continua la, por
+// painel e com so o tipo ativo visivel; aqui ficam os gestos de mixagem.
+// A ferramenta de captura foi para a aba Avancado.
+//
+// Todos os offsets desta mesa sao provados (sniff M2, 15/08/2026). O MUTE e
+// o unico que nao passa pelo definir_fx: ele escreve a mascara de
+// performance (REFERENCIA 2.7) pela acao "mudo", e o estado vem de e.mudo.
+// Sem otimismo local em nada: o poll de 250 ms reflete o que a maquina diz.
+import { h, attr } from "../nucleo/dom.mjs";
 import { painel } from "../comp/painel.mjs";
-import { fader } from "../comp/fader.mjs";
 import { knob } from "../comp/knob.mjs";
-import { rotuloValor } from "../nucleo/formato.mjs";
+import { fader } from "../comp/fader.mjs";
+// faixa, bipolaridade e formato vem do CATALOGO (efeitos.py), nunca digitados
+// aqui - foi o GAIN que mostrou o preco de repetir faixa na tela (17/08/2026)
+import { faixaDoCatalogo as doCat } from "../nucleo/formato.mjs";
 import { agir } from "../app.mjs";
-import { toast } from "../comp/toast.mjs";
 
-let faderProb = [],
-  elFx,
-  elCat,
-  selCat,
-  dicaCat,
-  bCapturar,
-  selEnum,
-  selRot,
-  selInst,
-  montados = "",
-  controles = new Map();
+const canais = []; // [{gain, pan, rvb, dly, level, prob, mute}]
+let master = null; // {rvb, dly, kit, mfxSw, mfxTipo, chaveTipos}
 
 export default {
   id: "mixer",
-  rotulo: "Mixer & FX",
+  rotulo: "Mixer",
 
   montar(raiz, D) {
-    // ── probability por instrumento ──
-    const fila = h("div.fila-inst", {}, h("div.rot-fila", {}, "PROB %"));
-    D.instrumentos.forEach((nome, i) => {
-      const f = fader({
-        rotulo: nome,
-        min: 10,
-        max: 100,
-        chave: "prob" + i,
-        aoSoltar: (v) => agir({ acao: "prob_inst", inst: i, pct: v }),
-      });
-      faderProb.push(f);
-      fila.append(f.raiz);
+    const mesa = h("div.mesa");
+
+    D.instrumentos.forEach((n, i) => {
+      const fx = (nome) => (v) => agir({ acao: "fx", nome, valor: v, inst: i });
+      const c = {
+        gain: knob({
+          rotulo: "GAIN",
+          ...doCat(D, "inst gain"),
+          chave: "mx-gain:" + i,
+          dica: "inst gain do " + n + " — 0.0 dB no meio, -INF no fim",
+          aoSoltar: fx("inst gain"),
+        }),
+        pan: knob({
+          rotulo: "PAN",
+          ...doCat(D, "inst pan"),
+          chave: "mx-pan:" + i,
+          dica: "inst pan do " + n,
+          aoSoltar: fx("inst pan"),
+        }),
+        rvb: knob({
+          rotulo: "RVB",
+          ...doCat(D, "inst reverb send"),
+          chave: "mx-rvb:" + i,
+          dica: "reverb send do " + n,
+          aoSoltar: fx("inst reverb send"),
+        }),
+        dly: knob({
+          rotulo: "DLY",
+          ...doCat(D, "inst delay send"),
+          chave: "mx-dly:" + i,
+          dica: "delay send do " + n,
+          aoSoltar: fx("inst delay send"),
+        }),
+        level: fader({
+          rotulo: "LEVEL",
+          ...doCat(D, "inst level"),
+          chave: "mx-level:" + i,
+          aoSoltar: fx("inst level"),
+        }),
+        prob: knob({
+          rotulo: "PROB",
+          min: 10,
+          max: 100,
+          // partindo de "—" o arrasto sai de 100% (o neutro da maquina), nao do
+          // minimo: escrever 10% em todos os steps por um arrasto de dois
+          // pixels era o acidente mais barato desta mesa
+          baseNula: 100,
+          chave: "mx-prob:" + i,
+          formatar: (v) => v + "%",
+          dica:
+            "solta e escreve em todos os steps ligados do " +
+            n +
+            "; “—” = steps com probabilidades diferentes, ou nenhum step ligado",
+          aoSoltar: (v) => agir({ acao: "prob_inst", inst: i, pct: v }),
+        }),
+        mute: h(
+          "button.bt.bt-peq.bt-mute",
+          {
+            type: "button",
+            "aria-pressed": "false",
+            "data-dica": "muta o " + n + " na maquina (mascara de performance)",
+          },
+          "MUTE",
+        ),
+      };
+      c.mute.onclick = () => agir({ acao: "mudo", inst: i });
+      canais.push(c);
+      mesa.append(
+        h(
+          "div.canal",
+          {},
+          h("div.canal-nome", {}, n),
+          c.gain.raiz,
+          c.pan.raiz,
+          c.rvb.raiz,
+          c.dly.raiz,
+          c.level.raiz,
+          c.prob.raiz,
+          c.mute,
+        ),
+      );
     });
 
-    elFx = h("div");
-
-    // ── captura ──
-    selCat = h("select", { id: "sel-cat", "aria-label": "parâmetro a mapear" });
-    selCat.onchange = () => pintarDica(D);
-    dicaCat = h("p.aviso");
-    bCapturar = h("button.bt", { type: "button" }, "Capturar");
-    bCapturar.onclick = () => {
-      if (ultimoEstado && ultimoEstado.captura_fx)
-        agir({ acao: "cancelar_captura" });
-      else if (selCat.value) agir({ acao: "capturar", nome: selCat.value });
-      else toast("escolha um parâmetro na lista");
+    // canal master: niveis de kit/reverb/delay + o MASTER FX de performance
+    const fxk = (nome) => (v) =>
+      agir({ acao: "fx", nome, valor: v, inst: null });
+    master = {
+      rvb: knob({
+        rotulo: "RVB LVL",
+        ...doCat(D, "reverb level"),
+        chave: "mx-rvblvl",
+        dica: "level do reverb do kit — em 0 os sends não soam",
+        aoSoltar: fxk("reverb level"),
+      }),
+      dly: knob({
+        rotulo: "DLY LVL",
+        ...doCat(D, "delay level"),
+        chave: "mx-dlylvl",
+        dica: "level do delay do kit — em 0 os sends não soam",
+        aoSoltar: fxk("delay level"),
+      }),
+      kit: fader({
+        rotulo: "KIT LVL",
+        ...doCat(D, "kit level"),
+        // o catalogo marca dB neste, mas o visor da maquina nunca foi lido
+        // aqui: melhor o numero cru do que uma unidade que ninguem conferiu
+        formatar: String,
+        chave: "mx-kitlvl",
+        aoSoltar: fxk("kit level"),
+      }),
+      mfxSw: h(
+        "button.bt.bt-peq.bt-mute",
+        {
+          type: "button",
+          "aria-pressed": "false",
+          "data-dica": "MASTER FX on/off",
+        },
+        "MFX",
+      ),
+      mfxTipo: h("select", { "aria-label": "tipo do MASTER FX" }),
+      chaveTipos: "",
     };
-    selEnum = h("select", { "aria-label": "parâmetro de lista" });
-    selEnum.onchange = () => pintarSugestoes(D);
-    selRot = h("select", { "aria-label": "opção que está no visor" });
-    const bAnotar = h("button.bt.bt-peq", { type: "button" }, "Anotar");
-    bAnotar.onclick = () => {
-      const nome = selEnum.value;
-      if (!nome) {
-        toast("capture um parâmetro de lista primeiro");
-        return;
-      }
-      const ent = (ultimoEstado.mapa_fx || {})[nome] || {};
+    master.mfxSw.onclick = () => {
+      const ligado = master.mfxSw.getAttribute("aria-pressed") === "true";
+      agir({ acao: "fx", nome: "mfx sw", valor: ligado ? 0 : 1, inst: null });
+    };
+    master.mfxTipo.onchange = () => {
+      if (master.mfxTipo.value === "") return;
       agir({
-        acao: "anotar_opcao",
-        nome,
-        rotulo: selRot.value,
-        inst: ent.tipo === "kit" ? null : +selInst.value,
+        acao: "fx",
+        nome: "mfx tipo",
+        valor: +master.mfxTipo.value,
+        inst: null,
       });
     };
-    selInst = h("select", { "aria-label": "instrumento das listas" });
-    D.instrumentos.forEach((n, i) => selInst.append(new Option(n, i)));
-    const bReler = h("button.bt.bt-peq", { type: "button" }, "Reler valores");
-    bReler.onclick = () => agir({ acao: "ler_fx" });
-
-    elCat = painel(
-      "Mapear parâmetro novo",
+    // ordem pedida em 17/08: o MASTER FX em cima (e um botao, nao um knob -
+    // liderar a coluna com ele evita o pulo de leitura), depois os dois niveis
+    // de envio e, no pe, o fader do kit inteiro - que e o unico que mexe no
+    // volume de TUDO, entao ganhou rotulo e dica proprios
+    mesa.append(
       h(
-        "p.dica",
+        "div.canal.canal-master",
         {},
-        "A Roland não documenta nenhum offset de efeito. " +
-          "Escolha o parâmetro, clique Capturar e mexa SÓ nesse controle no " +
-          "painel da TR-8S — o app acha o byte que mudou. Nos de 2 bytes, " +
-          "gire de ponta a ponta.",
-      ),
-      h("div.linha", {}, selCat, bCapturar),
-      dicaCat,
-      h(
-        "div.linha",
-        {},
-        h("label", {}, "anotar opção de lista"),
-        selEnum,
-        selRot,
-        bAnotar,
-      ),
-      h(
-        "div.linha",
-        {},
-        h("label", {}, "instrumento das listas"),
-        selInst,
-        bReler,
+        h("div.canal-nome", {}, "MASTER"),
+        h("div.linha", {}, master.mfxSw, master.mfxTipo),
+        master.rvb.raiz,
+        master.dly.raiz,
+        h(
+          "div.dica.dica-kit",
+          { "data-dica": "o mesmo do SHIFT + [KIT] → LEVEL na máquina" },
+          "volume do kit inteiro",
+        ),
+        master.kit.raiz,
       ),
     );
+
+    // o motor rele os blocos de FX em rodizio (INTERVALO_FX), entao mexer no
+    // painel da maquina chega aqui em alguns segundos; este botao e o atalho
+    // para quem nao quer esperar a volta da fila
+    const bReler = h(
+      "button.bt.bt-peq",
+      { type: "button", "data-dica": "rele os 26 blocos de efeito agora" },
+      "Reler",
+    );
+    bReler.onclick = () => agir({ acao: "ler_fx" });
 
     raiz.append(
       painel(
-        "Probability por instrumento",
+        "Mesa",
+        { dir: [bReler] },
         h(
           "p.dica",
           {},
-          "solta o fader e escreve em todos os steps ligados do " +
-            "instrumento; “—” quer dizer que os steps têm valores diferentes",
+          "level, gain, pan, sends, probability e mute dos 11 instrumentos — " +
+            "o resto dos parâmetros mora na aba Efeitos",
         ),
-        fila,
+        mesa,
       ),
-      painel("Parâmetros mapeados", elFx),
-      elCat,
     );
   },
 
-  atualizar(e, D) {
-    ultimoEstado = e;
-    (e.probs_inst || []).forEach(
-      (p, i) =>
-        faderProb[i] &&
-        faderProb[i].definir(p === null ? null : p, { off: p === null }),
-    );
-    montarMapeados(e, D);
-    montarCatalogo(e, D);
-    texto(bCapturar, e.captura_fx ? `Cancelar “${e.captura_fx}”` : "Capturar");
-    attr(bCapturar, "aria-pressed", e.captura_fx ? "true" : "false");
+  atualizar(e) {
+    const fx = e.fx || {};
+    const arr = (nome) => (Array.isArray(fx[nome]) ? fx[nome] : []);
+    const g = arr("inst gain"),
+      p = arr("inst pan"),
+      r = arr("inst reverb send"),
+      d = arr("inst delay send"),
+      l = arr("inst level");
+    const probs = e.probs_inst || [];
+    const mudos = e.mudo || [];
+    canais.forEach((c, i) => {
+      c.gain.definir(g[i] ?? null);
+      c.pan.definir(p[i] ?? null);
+      c.rvb.definir(r[i] ?? null);
+      c.dly.definir(d[i] ?? null);
+      c.level.definir(l[i] ?? null);
+      c.prob.definir(probs[i] ?? null);
+      attr(c.mute, "aria-pressed", mudos[i] ? "true" : "false");
+    });
+    master.rvb.definir(fx["reverb level"] ?? null);
+    master.dly.definir(fx["delay level"] ?? null);
+    master.kit.definir(fx["kit level"] ?? null);
+    attr(master.mfxSw, "aria-pressed", fx["mfx sw"] === 1 ? "true" : "false");
+    // tipos do MASTER FX: opcoes anotadas do mapa, populadas so quando mudam
+    const ent = (e.mapa_fx || {})["mfx tipo"];
+    const opts = (ent && ent.opcoes) || {};
+    const chave = Object.keys(opts).sort().join(",");
+    if (chave && master.chaveTipos !== chave) {
+      master.chaveTipos = chave;
+      master.mfxTipo.replaceChildren(new Option("—", ""));
+      Object.entries(opts)
+        .sort((a, b) => a[0] - b[0])
+        .forEach(([cod, rot]) => master.mfxTipo.append(new Option(rot, cod)));
+    }
+    const vt = fx["mfx tipo"];
+    const alvo = vt == null ? "" : String(vt);
+    if (master.mfxTipo.value !== alvo) master.mfxTipo.value = alvo;
   },
 };
-
-let ultimoEstado = {};
-
-function montarMapeados(e, D) {
-  const mapa = e.mapa_fx || {};
-  const chave = JSON.stringify(Object.keys(mapa).sort());
-  if (chave !== montados) {
-    montados = chave;
-    controles.clear();
-    elFx.replaceChildren();
-    const nomes = Object.keys(mapa).sort();
-    if (!nomes.length) {
-      elFx.append(
-        h(
-          "p.vazio",
-          {},
-          "nada mapeado ainda — use a caixa abaixo, " +
-            "ou faça a sessão de sniff do TR-EDITOR para destravar vários de uma vez",
-        ),
-      );
-    }
-    const grupos = {};
-    nomes.forEach((n) => (grupos[mapa[n].grupo || "OUTROS"] ||= []).push(n));
-    Object.keys(grupos)
-      .sort()
-      .forEach((g) => {
-        const cx = h("div.secao", {}, h("h3", {}, g));
-        grupos[g].forEach((nome) => cx.append(linhaParam(nome, mapa[nome], D)));
-        elFx.append(cx);
-      });
-  }
-  // valores
-  const fx = e.fx || {};
-  for (const [nome, ctl] of controles) {
-    const ent = mapa[nome];
-    if (!ent) continue;
-    const v = fx[nome];
-    if (ent.forma === "enum") {
-      const val = Array.isArray(v) ? v[+selInst.value] : v;
-      const rot = (ent.opcoes || {})[String(val)] || "";
-      if (ctl.el.value !== rot) ctl.el.value = rot;
-    } else if (ent.tipo === "inst") {
-      (Array.isArray(v) ? v : []).forEach(
-        (vi, i) =>
-          ctl.faders[i] && ctl.faders[i].definir(vi === undefined ? null : vi),
-      );
-    } else if (ctl.knob) {
-      ctl.knob.definir(v === undefined ? null : v);
-    }
-  }
-}
-
-function linhaParam(nome, ent, D) {
-  const fmt = (v) => rotuloValor(ent, v);
-  if (ent.forma === "enum") {
-    const sel = h("select", { "aria-label": nome });
-    const ops = ent.opcoes || {};
-    if (!Object.keys(ops).length)
-      sel.append(new Option("(nenhuma opção anotada)", ""));
-    Object.entries(ops)
-      .sort((a, b) => a[0] - b[0])
-      .forEach(([cod, rot]) => sel.append(new Option(rot, rot)));
-    sel.onchange = () => {
-      const cod = Object.entries(ops).find(([, r]) => r === sel.value);
-      if (cod)
-        agir({
-          acao: "fx",
-          nome,
-          valor: +cod[0],
-          inst: ent.tipo === "kit" ? null : +selInst.value,
-        });
-    };
-    controles.set(nome, { el: sel });
-    return h(
-      "div.linha",
-      {},
-      h("label", {}, nome),
-      sel,
-      ent.tipo === "inst"
-        ? h("span.dica", {}, "(do instrumento escolhido)")
-        : null,
-      botaoEsquecer(nome),
-    );
-  }
-  if (ent.tipo === "inst") {
-    const fila = h("div.fila-inst", {}, h("div.rot-fila", {}, nome));
-    const faders = D.instrumentos.map((n, i) => {
-      const f = fader({
-        rotulo: n,
-        min: ent.min,
-        max: ent.max,
-        chave: nome + i,
-        formatar: fmt,
-        aoSoltar: (v) => agir({ acao: "fx", nome, valor: v, inst: i }),
-      });
-      fila.append(f.raiz);
-      return f;
-    });
-    fila.append(botaoEsquecer(nome));
-    controles.set(nome, { faders });
-    return fila;
-  }
-  const k = knob({
-    rotulo: nome,
-    min: ent.min,
-    max: ent.max,
-    chave: nome,
-    bipolar: !!ent.bipolar,
-    formatar: fmt,
-    aoSoltar: (v) => agir({ acao: "fx", nome, valor: v, inst: null }),
-  });
-  controles.set(nome, { knob: k });
-  return h("div.linha", {}, k.raiz, botaoEsquecer(nome));
-}
-
-function botaoEsquecer(nome) {
-  const b = h(
-    "button.bt.bt-peq",
-    { type: "button", "data-dica": "tira do mapa para recapturar do zero" },
-    "esquecer",
-  );
-  b.onclick = () => agir({ acao: "esquecer_fx", nome });
-  return b;
-}
-
-function montarCatalogo(e, D) {
-  const mapa = e.mapa_fx || {};
-  const faltam = (D.catalogo_fx || []).filter((p) => !(p.nome in mapa));
-  const chave = faltam.map((p) => p.nome).join("|");
-  if (selCat.dataset.chave !== chave) {
-    selCat.dataset.chave = chave;
-    selCat.replaceChildren();
-    faltam.forEach((p) =>
-      selCat.append(new Option(`${p.grupo} · ${p.nome}`, p.nome)),
-    );
-    pintarDica(D);
-  }
-  const enums = Object.entries(mapa)
-    .filter(([, x]) => x.forma === "enum")
-    .map(([n]) => n);
-  if (selEnum.dataset.chave !== enums.join("|")) {
-    selEnum.dataset.chave = enums.join("|");
-    selEnum.replaceChildren();
-    enums.forEach((n) => selEnum.append(new Option(n, n)));
-    pintarSugestoes(D);
-  }
-}
-
-function pintarDica(D) {
-  const p = (D.catalogo_fx || []).find((x) => x.nome === selCat.value);
-  texto(
-    dicaCat,
-    p
-      ? `no painel: ${p.dica}` +
-          (p.bytes === 2 ? " · 2 bytes: gire de ponta a ponta" : "") +
-          (p.forma === "enum"
-            ? " · é uma LISTA: capture e depois anote as opções"
-            : "")
-      : "",
-  );
-}
-function pintarSugestoes(D) {
-  const cat = (D.catalogo_fx || []).find((x) => x.nome === selEnum.value);
-  selRot.replaceChildren();
-  ((cat && cat.opcoes) || []).forEach((o) => selRot.append(new Option(o, o)));
-  if (!selRot.options.length) selRot.append(new Option("(sem sugestão)", ""));
-}

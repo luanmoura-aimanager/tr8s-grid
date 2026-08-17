@@ -126,6 +126,12 @@ export function lacoEstado({ aoEstado, aoFalhar, aoVoltar }) {
     falhas = 0,
     parado = false;
   const RAPIDO = 250,
+    // TOCANDO: com a maquina rodando, o quadro precisa ser mais fresco - num
+    // pattern em 32nd a 40 bpm o step dura 187 ms, e pedir a cada 250 ms
+    // deixava a tela sempre extrapolando. Medido em 17/08/2026: o /estado
+    // responde em 13 ms (mediana de 164 amostras) e pega o lock do motor sem
+    // bloquear, entao dobrar a frequencia nao disputa com o tick.
+    TOCANDO = 120,
     LENTO = 2000,
     TETO = 4000;
 
@@ -137,7 +143,7 @@ export function lacoEstado({ aoEstado, aoFalhar, aoVoltar }) {
         falhas = 0;
         aoVoltar && aoVoltar();
       }
-      atraso = document.hidden ? LENTO : RAPIDO;
+      atraso = document.hidden ? LENTO : e && e.tocando ? TOCANDO : RAPIDO;
       aoEstado(e);
     } catch (err) {
       falhas++;

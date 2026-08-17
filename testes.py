@@ -415,5 +415,67 @@ class TesteEnderecoDePattern(unittest.TestCase):
                                 f"{a} estourou os 7 bits")
 
 
+# ─────────────────────────────────────────────────────────────
+# A biblioteca de patterns
+# ─────────────────────────────────────────────────────────────
+class TesteBiblioteca(unittest.TestCase):
+    """biblioteca.validar() existia mas nada a rodava: um pattern quebrado
+    passava calado ate a UI (linha torta no preview, escrita errada na
+    maquina). Entrou na expansao 3, junto com os 20 patterns novos."""
+
+    def test_todos_validam(self):
+        import biblioteca as B
+        for p in B.PATTERNS:
+            with self.subTest(id=p.get("id", "?")):
+                B.validar(p)
+
+    def test_ids_unicos(self):
+        import biblioteca as B
+        ids = [p["id"] for p in B.PATTERNS]
+        self.assertEqual(len(ids), len(set(ids)),
+                         "id duplicado na biblioteca")
+
+    def test_expandir_da_11_por_16(self):
+        """expandir() e o contrato que escrever_pattern consome: sempre 11
+        instrumentos, cada um com 16 tuplas (vel, sub, prob, alt)."""
+        import biblioteca as B
+        for p in B.PATTERNS:
+            with self.subTest(id=p["id"]):
+                grade = B.expandir(p)
+                self.assertEqual(sorted(grade), list(range(11)))
+                for linha in grade.values():
+                    self.assertEqual(len(linha), 16)
+                    for tupla in linha:
+                        self.assertEqual(len(tupla), 4)
+
+
+class TesteScale(unittest.TestCase):
+    """A SCALE do pattern (lp_tr8s.OFF_SCALE), provada em 17/08/2026 por
+    snapdiff com ida e volta: 32nd->16th mudou o byte 0x16 do no do pattern de
+    03 para 02, e a volta o devolveu. Antes disso o motor assumia semicolcheia
+    sempre, e num pattern em 32nd o playhead andava em METADE da velocidade da
+    maquina - foi assim que o bug apareceu."""
+
+    def motor(self, scale):
+        m = L.Motor.__new__(L.Motor)     # sem __init__: nao precisa de MIDI
+        m.scale = scale
+        return m
+
+    def test_pulsos_de_cada_scale(self):
+        # 24 pulsos por seminima: semicolcheia = 6, fusa = 3, tercinas 8 e 4
+        for cod, esperado in ((0, 8), (1, 4), (2, 6), (3, 3)):
+            with self.subTest(scale=cod):
+                self.assertEqual(self.motor(cod).pulsos_p_step(), esperado)
+
+    def test_scale_nao_lida_vale_semicolcheia(self):
+        """Enquanto o no do pattern nao foi lido, o comportamento e o antigo."""
+        self.assertEqual(self.motor(None).pulsos_p_step(), L.PULSOS_P_STEP)
+
+    def test_codigo_desconhecido_nao_quebra(self):
+        """Codigo fora dos quatro conhecidos nao pode zerar nem explodir: a
+        conta do playhead divide por este numero."""
+        self.assertEqual(self.motor(0x7F).pulsos_p_step(), L.PULSOS_P_STEP)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

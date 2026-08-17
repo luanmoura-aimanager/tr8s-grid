@@ -57,6 +57,9 @@
 .grade .rot[data-mudo]{ color:var(--fraco); text-decoration:line-through }
 .grade .rot[data-invalido]{ color:var(--erro) }
 .grade .rot small{ font-size:var(--t-micro); color:var(--fraco) }
+/* a ACC (linha logica 0) e desenhada por ultimo: a folga em cima dela separa
+   o accent dos 11 instrumentos, que e o que se le de fato */
+.grade .rot[data-l="0"], .grade .cel[data-l="0"]{ margin-top:var(--e3) }
 
 .cel{
   height:var(--cel-h); border:0; border-radius:var(--r1); padding:0;

@@ -19,6 +19,7 @@ const CAT_INST = {
 };
 let inst = 0,
   selCat,
+  inBusca,
   corpo,
   elAtual,
   tbody,
@@ -59,6 +60,16 @@ export default {
     selCat.value = CAT_INST[0];
     selCat.onchange = () => montarTones(D);
 
+    // busca textual: com texto, ignora a categoria e varre os 514 (a lista
+    // ja tem scroll proprio; achar "808" ou "clap" nao devia exigir saber a
+    // categoria de cor)
+    inBusca = h("input", {
+      type: "search",
+      placeholder: "buscar tone (nome ou id)",
+      "aria-label": "buscar tone",
+    });
+    inBusca.oninput = () => montarTones(D);
+
     const bReler = h("button.bt.bt-peq", { type: "button" }, "Reler kit");
     bReler.onclick = () => agir({ acao: "ler_kit" });
     const bAplicar = h("button.bt", { type: "button" }, "Trocar o tone");
@@ -95,7 +106,15 @@ export default {
 
     raiz.append(
       h("div.linha", {}, tabs),
-      h("div.linha", {}, h("label", {}, "categoria"), selCat, bReler, bAplicar),
+      h(
+        "div.linha",
+        {},
+        h("label", {}, "categoria"),
+        selCat,
+        inBusca,
+        bReler,
+        bAplicar,
+      ),
       elAtual,
       h(
         "p.aviso",
@@ -127,12 +146,18 @@ export default {
 
 function montarTones(D) {
   const cat = selCat.value;
-  if (catMontada === cat) return;
-  catMontada = cat;
+  const q = (inBusca ? inBusca.value : "").trim().toLowerCase();
+  const chave = cat + "|" + q;
+  if (catMontada === chave) return;
+  catMontada = chave;
   escolhido = null;
   tbody.replaceChildren();
   D.tones
-    .filter((t) => t.cat === cat)
+    .filter((t) =>
+      q
+        ? t.nome.toLowerCase().includes(q) || String(t.id) === q
+        : t.cat === cat,
+    )
     .forEach((t) => {
       const tr = h(
         "tr",

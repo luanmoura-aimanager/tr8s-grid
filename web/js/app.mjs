@@ -16,14 +16,19 @@ import mixer from "./abas/mixer.mjs";
 import instrumento from "./abas/instrumento.mjs";
 import grooves from "./abas/grooves.mjs";
 import estocastica from "./abas/estocastica.mjs";
-import avancado from "./abas/avancado.mjs";
 
-const ABAS = [pattern, fx, mixer, instrumento, grooves, estocastica, avancado];
+const ABAS = [pattern, fx, mixer, instrumento, grooves, estocastica];
 
 // Biblioteca e Chain viraram a aba Grooves (reforma 2): quem tinha uma das
 // duas salva volta na fusao, nao na primeira aba
 if (["biblioteca", "chain"].includes(localStorage.getItem("aba")))
   localStorage.setItem("aba", "grooves");
+// A aba AVANCADO saiu em 17/08/2026 ("o programa tem que ficar mais simples"):
+// o WRITE mudou para a aba Pattern, o log continua no rodape e no arquivo, e a
+// captura guiada saiu do ar com o catalogo 253/253 mapeado - ela volta do git
+// se um parametro novo aparecer. Quem estava nela cai no Pattern.
+if (localStorage.getItem("aba") === "avancado")
+  localStorage.setItem("aba", "pattern");
 let atual = null;
 
 /** acao() com toast automatico no erro - ninguem clica no escuro. */
@@ -178,6 +183,22 @@ function trocar(id, focar) {
 // ── pintura do chrome ────────────────────────────────────
 let ultimoLog = 0;
 
+// A acao "reler" (Motor.recarregar: rele em que pattern a maquina esta e as 11
+// linhas, com duas tentativas cada) existia no servidor sem NENHUM botao na
+// pagina. Quando uma leitura falha, a escrita fica bloqueada e a unica saida
+// era esperar o tick se curar sozinho ou reiniciar o app - achado na sessao de
+// hardware de 17/08/2026, com tres linhas nao lidas na tela.
+const btRelerTudo = h(
+  "button.bt.bt-peq",
+  {
+    type: "button",
+    style: { marginLeft: "8px" },
+    "data-dica": "rele o pattern inteiro da maquina e destrava a escrita",
+  },
+  "Reler tudo",
+);
+btRelerTudo.onclick = () => agir({ acao: "reler" });
+
 // "maquina ocupada" e um estado que PISCA: o motor fica indisponivel por
 // fracoes de segundo a cada releitura. Mostrar isso na fita fazia a fita
 // aparecer e sumir varias vezes por segundo, e como a fita esta no fluxo,
@@ -242,6 +263,15 @@ function pintar(e, dados) {
     2,
   );
 
+  // SCALE (17/08/2026): so aparece quando o pattern NAO esta em semicolcheia,
+  // porque e exatamente quando o playhead anda em outra velocidade - deixar
+  // isso invisivel foi o que fez o grid "andar em metade do tempo" sem
+  // ninguem saber por que
+  const segScale = $("#d-scale");
+  const scale = e.scale && e.scale !== "16th" ? e.scale : null;
+  segScale.hidden = !scale;
+  if (scale) texto(segScale.querySelector(".seg-val"), scale);
+
   attr($("#led-ctrl"), "data-estado", e.tem_tr8s ? "on" : "off");
   attr($("#led-lp"), "data-estado", e.tem_lp ? "on" : "off");
   attr($("#led-clock"), "data-estado", e.tem_clock ? "on" : "off");
@@ -305,6 +335,7 @@ function pintar(e, dados) {
     aviso = [
       "erro",
       "leitura falhou em alguma linha: o que aparece pode estar errado, e a escrita nela está bloqueada",
+      true, // este e o unico aviso que uma releitura resolve
     ];
   // a variacao que toca nao existe em no SysEx nenhum: e contada a partir do
   // clock, e sem um start nao ha de onde ancorar a conta.
@@ -324,7 +355,13 @@ function pintar(e, dados) {
   if (aviso) {
     fita.hidden = false;
     attr(fita, "data-tipo", aviso[0] || null);
-    texto(fita, aviso[1]);
+    // reescreve so quando a mensagem muda: a fita roda 4x/s e o botao de
+    // releitura mora dentro dela (texto() apagaria o botao todo quadro)
+    if (fita.dataset.msg !== aviso[1]) {
+      fita.dataset.msg = aviso[1];
+      fita.replaceChildren(document.createTextNode(aviso[1]));
+      if (aviso[2]) fita.append(btRelerTudo);
+    }
   } else fita.hidden = true;
 
   const log = e.log || [];
@@ -376,6 +413,10 @@ async function iniciar() {
         f,
         `sem contato com o servidor — nova tentativa em ${Math.round(ms / 1000)}s`,
       );
+      // este caminho escreve na tarja por fora do pintar(): zerar o cache do
+      // texto, senao a mensagem de "sem contato" ficaria colada na tela quando
+      // o contato voltasse com o MESMO aviso de antes ativo
+      delete f.dataset.msg;
     },
     aoVoltar: () => toast("contato restabelecido", { tipo: "ok" }),
   });

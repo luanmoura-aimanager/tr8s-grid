@@ -32,7 +32,9 @@ que separa explicitamente **o que foi provado do que é dedução**.
 | **LAST STEP** da variação e do track | 2.3.1 |
 | **MUTE de track** — estado de sistema, fora do pattern | 2.7 |
 | **Step atual do sequenciador** | 2.8 |
-| O que ainda falta: bytes 0–2 do step, WRITE, SCALE/SHUFFLE | 3 |
+| **SCALE do pattern** — e por que o playhead andava em metade da velocidade | 2.3.1 |
+| As escalas que o visor mostra: **GAIN em dB**, **PAN em L/R**, o tempo do pattern | 7.2 |
+| O que ainda falta: bytes 0–2 do step, WRITE, SHUFFLE | 3 |
 
 A seção **3.2 (Método)** vale por si: as regras que fizeram a diferença entre meses de
 itens parados e três achados numa tarde.
@@ -68,6 +70,10 @@ python3 criar_app.py        # TR-8S Grid.app no Desktop, com ícone
 Depois de editar o código, rode **os dois** — quem costuma estar no ar é o do
 LaunchAgent, e atualizar só o `.app` deixa a versão velha respondendo.
 
+Mexeu **só em `web/`**? `python3 instalar_agente.py --so-web` copia sem reiniciar o
+agente: um Cmd+R na página pega a versão nova e o motor continua ligado. Reiniciar no
+meio de uma sessão de hardware derruba o motor e obriga a reler tudo do zero.
+
 Feche o **TR-EDITOR** antes. O CoreMIDI deixa os dois abrirem a porta `TR-8S CTRL` ao
 mesmo tempo, mas aí ambos mandam RQ1 nela e cada um pega a resposta do outro — as
 leituras saem trocadas, sem erro nenhum aparecendo.
@@ -98,15 +104,15 @@ ocorrência, então os dois Launchpad viram um só. Por isso a enumeração e a 
 | Arquivo | O que é |
 |---|---|
 | `lp_tr8s.py` | O motor e a CLI: launchpads, SysEx, grid ao vivo, sessões de hardware (`prob_watch`, `pattern`, `pc`, `var_mask`) |
-| `web/` | A interface: HTML/CSS/módulos ES sem build nem dependência. Aba **Pattern** com o grid 12×16 editável (espelho do TR-EDITOR, com probability que o hardware não exibe), barra de estado com displays e LEDs, Mixer & FX, Instrumento, Biblioteca, Chain, Estocástica, Avançado |
-| `servidor.py` + `pagina.html` | A tela: servidor local (só stdlib, 127.0.0.1, com token/Origin/CSP) + página no navegador, com o que o grid físico não tem — Mixer & FX (sends/knobs/LFO por captura guiada + probability), Instrumento (troca de tone), Biblioteca, Chain, Estocástica, Avançado. Log em `~/Library/Logs/TR8S-Grid-app.log`. Saiu do Tkinter porque o Tk 8.5.9 do Python do CLT trava no macOS atual (medições na REFERENCIA §4) |
+| `web/` | A interface: HTML/CSS/módulos ES sem build nem dependência. Aba **Pattern** com o grid 12×16 editável (espelho do TR-EDITOR, com probability que o hardware não exibe), barra de estado com displays e LEDs, **Mixer** (a mesa: 11 canais + master), **Efeitos** (catálogo por painel + fileira CTRL), Instrumento, Grooves e Estocástica |
+| `servidor.py` + `pagina.html` | A tela: servidor local (só stdlib, 127.0.0.1, com token/Origin/CSP) + página no navegador, com o que o grid físico não tem — Mixer (level/gain/pan/sends/probability/mute dos 11), Efeitos (reverb/delay/master FX/LFO/INST FX e o CTRL de cada instrumento), Instrumento (troca de tone), Grooves e Estocástica. O WRITE (salvar o pattern na máquina) mora na aba Pattern. Log em `~/Library/Logs/TR8S-Grid-app.log`. Saiu do Tkinter porque o Tk 8.5.9 do Python do CLT trava no macOS atual (medições na REFERENCIA §4) |
 | `efeitos.py` | Mapa dos parâmetros de kit/FX decodificados por observação (captura no app + sniff do TR-EDITOR) |
-| `biblioteca.py` | 20 patterns clássicos em 14 estilos musicais, com kit sugerido — `python3 biblioteca.py` valida e mostra previews |
+| `biblioteca.py` | 54 patterns clássicos em 34 estilos musicais, com kit sugerido — `python3 biblioteca.py` valida e mostra previews |
 | `gen_tones.py` → `tones.py` | Preset Tone List da Roland como dados, para a aba Instrumento (trocar o tone de cada track) |
 | `ferramentas.py` | Chain de patterns e ferramenta estocástica (probabilidade, densidade, humanize, ghosts) |
 | `criar_app.py` | Monta o `.app` do Desktop |
 | `instalar_agente.py` | Instala o LaunchAgent que sobe o servidor no login — é a cópia que costuma estar no ar |
-| `testes.py` | Testes de mesa (`unittest`, sem porta MIDI): a contagem da variação que toca e a resolução de portas do `learn`. Guardam as duas regressões de 16/08 |
+| `testes.py` | 31 testes de mesa (`unittest`, sem porta MIDI): a contagem da variação que toca, a resolução de portas do `learn`, a aritmética de endereço, os 54 patterns da biblioteca e a conversão da SCALE em pulsos por step. Guardam as regressões de 16 e 17/08 |
 | `apc_tr8s.py` | Versão anterior, para APC40 mkII — funcionando |
 | `tr8s_sysex.py` | Parser/diff de capturas do MIDI Monitor |
 | `gen_layout.py` → `layout.html` | Referência visual do mapeamento dos botões |

@@ -8,7 +8,9 @@
 // Honestidade em dois pontos que a tela repete:
 // - groove ESCREVE na variacao aberta do pattern corrente da maquina; vindo
 //   depois de uma entrada de pattern, altera aquele pattern. Desfazer volta.
-// - "Auto BPM" e so aviso: escrever BPM nao tem endereco conhecido
+// - "Auto BPM" escreve o TEMPO (perf, OFF_TEMPO) junto com o pattern. O
+//   endereco foi achado em 16/08/2026, mas em 17/08 o Luan relatou que a
+//   maquina NAO mudou de andamento - suspeita aberta na REFERENCIA
 //   (REFERENCIA 7). O tempo continua sendo o knob da maquina.
 import { h, texto, attr } from "../nucleo/dom.mjs";
 import { painel, campo, toggle } from "../comp/painel.mjs";
@@ -164,7 +166,13 @@ export default {
 
     // ── FILA (loop persistente) ──────────────────────────
     elFilaCards = h("div.fila-cards");
-    elFilaEstado = h("span.chip", { hidden: true });
+    // texto fixo, visibilidade alternada: assim o botao "Limpar" ao lado nao
+    // desliza quando o chip entra (o grupo do cabecalho e alinhado a direita)
+    elFilaEstado = h(
+      "span.chip",
+      { "data-oculto": "" },
+      "esperando play na TR-8S",
+    );
     bArmar = h("button.bt", { type: "button" }, "Tocar loop");
     bArmar.onclick = armarFila;
     bParar = h("button.bt.bt-perigo", { type: "button" }, "Parar");
@@ -230,9 +238,7 @@ export default {
     // fornece a posicao ativa e os ciclos restantes do card em destaque
     const c = e.chain;
     const armadoAgora = !!(c && c.ativo);
-    elFilaEstado.hidden = !armadoAgora || e.tocando;
-    if (armadoAgora && !e.tocando)
-      texto(elFilaEstado, "esperando play na TR-8S");
+    attr(elFilaEstado, "data-oculto", armadoAgora && !e.tocando ? null : "");
     attr(bParar, "aria-disabled", armadoAgora ? null : "true");
     const chave =
       (armadoAgora ? `arm:${c.posicao}:${c.reps_restantes}|` : "solto|") +
@@ -275,7 +281,9 @@ function montarSelGroove(p) {
     { type: "button", "data-escrever": "" },
     "Escrever",
   );
-  const avisoAlvo = h("p.dica");
+  // o aviso de "vai sobrescrever a variacao X" aparece por 2 s no arme e sai:
+  // a altura fica reservada para o botao Escrever nao pular debaixo do dedo
+  const avisoAlvo = h("p.dica.reserva-2linhas");
   bEscrever.onclick = () => escrever(p, bEscrever, avisoAlvo);
   const bDesfazer = h("button.bt", { type: "button" }, "Desfazer");
   bDesfazer.onclick = () => agir({ acao: "desfazer" });
@@ -322,11 +330,19 @@ function montarSelGroove(p) {
             b.onclick = () => agir({ acao: "bpm", valor: p.bpm });
             return b;
           })(),
-          h("span.dica", { "data-bpm-medido": "" }, ""),
+          // "agora: 86.5" e "sem clock" tem larguras diferentes: largura
+          // minima para o resto da linha nao dancar a cada leitura
+          h("span.dica.medida-bpm", { "data-bpm-medido": "" }, ""),
         ),
       ),
     ),
-    h("span.chip", { "data-chip-bpm": "", hidden: true }),
+    // o chip "maquina em 86.5 - clique no BPM..." entra e sai conforme o clock
+    // se aproxima do BPM do groove: a linha fica reservada
+    h(
+      "div.reserva-chip",
+      {},
+      h("span.chip", { "data-chip-bpm": "", hidden: true }),
+    ),
     h(
       "div.linha",
       {},

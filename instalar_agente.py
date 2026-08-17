@@ -88,12 +88,21 @@ def _uid():
     return os.getuid()
 
 
-def instalar():
+def instalar(reiniciar=True):
     if not os.path.exists(os.path.join(AQUI, "servidor.py")):
         print(f"(!) nao achei o servidor.py em {AQUI}")
         return 1
     alvo = copiar()
     print(f"scripts copiados para {DESTINO}")
+    # --so-web: mexeu SO em web/ (html, css, mjs). O servidor le esses arquivos
+    # do disco a cada pedido, entao um Cmd+R na pagina ja pega a versao nova -
+    # e o motor continua ligado. Reiniciar o agente derruba o motor no meio de
+    # uma sessao de hardware, e isso custou tres releituras do zero em
+    # 17/08/2026. Mexeu em .py? Ai precisa reiniciar (sem o --so-web).
+    if not reiniciar:
+        print("agente NAO reiniciado (--so-web): recarregue a pagina (Cmd+R). "
+              "O motor continua como estava.")
+        return 0
     os.makedirs(os.path.dirname(PLIST), exist_ok=True)
     with open(PLIST, "w") as f:
         f.write(MODELO.format(rotulo=ROTULO, python=sys.executable,
@@ -152,4 +161,4 @@ if __name__ == "__main__":
         sys.exit(remover())
     if "--estado" in sys.argv:
         sys.exit(estado())
-    sys.exit(instalar())
+    sys.exit(instalar(reiniciar="--so-web" not in sys.argv))

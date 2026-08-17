@@ -80,11 +80,65 @@ BLOCOS = {
 #   p(rot, None, 1, opcoes=[])  -> lista
 #   p(..., bipolar=True)        -> -128..+127 com centro em 128
 # ─────────────────────────────────────────────────────────────
-def p(rot, maximo=255, nbytes=2, opcoes=None, bipolar=False, unidade=""):
-    return {"rot": rot, "max": 255 if maximo is None else maximo,
-            "bytes": nbytes, "opcoes": opcoes or [],
-            "forma": "enum" if opcoes else "fader",
-            "bipolar": bipolar, "unidade": unidade}
+def p(rot, maximo=255, nbytes=2, opcoes=None, bipolar=False, unidade="",
+      escala=None):
+    d = {"rot": rot, "max": 255 if maximo is None else maximo,
+         "bytes": nbytes, "opcoes": opcoes or [],
+         "forma": "enum" if opcoes else "fader",
+         "bipolar": bipolar, "unidade": unidade}
+    # 'escala' = tabela byte -> o que o VISOR da maquina mostra, para o caso em
+    # que a conta nao e linear nem centrada em 128 (o GAIN). So entra no dict
+    # quando existe: ele viaja para a pagina no /dados.
+    if escala:
+        d["escala"] = escala
+    return d
+
+
+# ─────────────────────────────────────────────────────────────
+# GAIN: a escala que o visor mostra, LIDA NO HARDWARE em 17/08/2026
+#
+#   byte 0   = -INF        byte 81 = 0.0 dB        byte 161 = +40.0 dB
+#
+# ou seja meio decibel por passo a partir do 81, e o byte 0 e um valor
+# especial (-INF, silencio). Foi isto que fechou a pendencia da varredura de
+# 15/08, que "parou em 161 e nao em 255" sem explicacao: 161 e o fim da faixa
+# de verdade. Mandamos 255 de proposito e a maquina grampeou em 161 com o
+# visor em +40.0 dB.
+#
+# Sem esta tabela a tela mostrava o desvio de 128 (o byte 81 aparecia como
+# "-47" com a maquina dizendo 0.0 dB) - a conta de bipolar do resto do
+# catalogo, que aqui nao vale.
+GANHO_MAX = 161
+GANHO_CENTRO = 81
+def _ganho_rotulo(v):
+    if v == 0:
+        return "-INF"
+    d = (v - GANHO_CENTRO) / 2
+    # o visor mostra "0.0 dB" no centro, sem sinal - a tabela e para BATER com
+    # ele, e um "+0.0" seria a unica linha em que ela nao bate
+    return f"{d:.1f} dB" if d == 0 else f"{d:+.1f} dB"
+
+
+GANHO_ESCALA = {v: _ganho_rotulo(v) for v in range(GANHO_MAX + 1)}
+
+# ─────────────────────────────────────────────────────────────
+# PAN: tambem lido no visor, 17/08/2026. As pontas sao L127 e R127, e o
+# CENTER ocupa DOIS bytes (127 e 128) - e por isso que o desvio de 128
+# errava por um: o visor dizia L9 onde a conta dava -10.
+#
+#   byte 0 = L127 ... byte 126 = L1 | 127 e 128 = CENTER | 129 = R1 ... 255 = R127
+#
+# Serve para "inst pan". O "extin pan" provavelmente e igual, mas isso e
+# DEDUCAO: fica sem escala ate alguem ler o visor dele.
+def _pan_rotulo(v):
+    if v <= 126:
+        return f"L{127 - v}"
+    if v <= 128:
+        return "CENTER"
+    return f"R{v - 128}"
+
+
+PAN_ESCALA = {v: _pan_rotulo(v) for v in range(256)}
 
 
 DB = "dB"
@@ -236,6 +290,35 @@ _DELAY_POR_TIPO = {
 }
 
 # ─────────────────────────────────────────────────────────────
+# CTRL POR INSTRUMENTO - bloco 06, um byte por instrumento a partir de 0x01
+# (BD=0x01, SD=0x02 - sequencial provado em 15/08/2026). Codigos 0..5 fixos:
+#     0 OFF   1 Pan   2 ReverbSend   3 DelaySend   4 LFO Depth   5 InstFX
+# Do 6 em diante sao PARAMETROS DE TONE num espaco de codigos GLOBAL e
+# estavel: cada tone so mostra os que ele expoe, mas o codigo de cada nome
+# nao muda. Medido em 15/08/2026 em dois kits: o LT do kit 089 (sample)
+# percorreu 0-5 e depois 9-23 - o pulo 6/7/8 e exatamente Attack/Snappy/
+# Color dos ACB do TR-707 (6 e 7 medidos direto; 8=Color fecha por
+# eliminacao, unico nome restante da faixa). "Morph" (tones FM) segue sem
+# codigo medido e fica fora do select ate ser medido. O offset 0x00 do
+# bloco e o SELECT global ("kit ctrl select").
+# A lista CTRL_FIXOS + CTRL_TONE_PARAMS alimenta o catalogo ("inst ctrl
+# select", fileira CTRL da aba Efeitos): indice na lista == codigo.
+CTRL_OFF_BASE = 0x01
+CTRL_FIXOS = {0: "OFF", 1: "Pan", 2: "ReverbSend", 3: "DelaySend",
+              4: "LFO Depth", 5: "InstFX"}
+CTRL_TONE_PARAMS = {
+    6: "Attack", 7: "Snappy", 8: "Color", 9: "Coarse", 10: "Rate",
+    11: "Spread", 12: "BitReduce",
+    # o visor mostra "Attack" nos codigos 6 e 13: o 6 foi medido em tone
+    # ACB, o 13 na varredura do tone de SAMPLE do LT (vizinho de BitReduce
+    # e HoldMode). Rotulo distinto SO na exibicao, para o select nao mentir.
+    13: "Attack (sample)", 14: "HoldMode",
+    15: "HoldTime", 16: "HoldStep", 17: "FltType", 18: "FltCutoff",
+    19: "FltReso", 20: "FltEnvAtk", 21: "FltEnvDecay", 22: "FltEnvDepth",
+    23: "FltVelo",
+}
+
+# ─────────────────────────────────────────────────────────────
 # Os paineis da interface (a ordem espelha o fluxo de audio, p. 56:
 # TONE -> INST FX -> LEVEL -> GAIN -> PAN -> sends -> MIX -> MASTER FX -> OUT)
 # ─────────────────────────────────────────────────────────────
@@ -246,13 +329,24 @@ PAINEIS = [
         # attack: o TR-EDITOR mostra numa coluna propria da aba INST; e
         # parametro do tone, entao nem todo tone o expoe no painel fisico
         p("tune", 255, 2, None, True), p("decay"), p("attack"), p("level"),
-        p("gain", 255, 2, None, True, DB), p("pan", 255, 2, None, True),
+        # o gain para em 161 e fala em dB (GANHO_ESCALA, lido no visor em
+        # 17/08/2026); bipolar aqui e so o desenho do arco, que cresce a
+        # partir do 0.0 dB - o centro da faixa 0-161 cai justo nele
+        p("gain", GANHO_MAX, 2, None, True, "", GANHO_ESCALA),
+        p("pan", 255, 2, None, True, "", PAN_ESCALA),
         p("reverb send"), p("delay send"),
         # "Attack" so aparece no TR-EDITOR; o manual lista sete destinos
         p("lfo destino", None, 1, ["Tune", "Decay", "Level", "Pan",
                                    "ReverbSend", "DelaySend", "InstFX",
                                    "Attack"]),
-        p("lfo depth", 255, 2, None, True)]},
+        p("lfo depth", 255, 2, None, True),
+        # o que o knob CTRL fisico da coluna controla; codigos = posicao na
+        # lista (0-5 fixos + 6-23 parametros de tone, ver CTRL_FIXOS acima)
+        # indice na lista == codigo. Montar por INDICE (e nao concatenando os
+        # dois dicts) faz um KeyError alto se alguem reordenar ou tirar um
+        # codigo - o silencio ali deslocaria todos os rotulos do select
+        p("ctrl select", None, 1,
+          [{**CTRL_FIXOS, **CTRL_TONE_PARAMS}[i] for i in range(24)])]},
 
     # 'amount' e o knob rotulado INST FX no TR-EDITOR (fica na coluna do
     # instrumento, mas escreve no bloco do INST FX - foi assim que se
@@ -301,7 +395,12 @@ PAINEIS = [
           ["BD", "SD", "LT", "MT", "HT", "RS", "HC", "CH", "OH", "CC", "RC",
            "?"]),
         p("side chn type", 7, 1),
-        p("side chn depth"), p("gain", 161, 2, None, False, DB),
+        # A faixa 0-161 e a mesma do gain de instrumento (o comentario do
+        # PARAMS_FIXOS ja dizia isso), mas a ESCALA em dB fica de fora: o visor
+        # deste gain nunca foi lido. Herdar a tabela do outro faria a tela dizer
+        # "+12.5 dB" com a autoridade de medicao que este parametro nao tem -
+        # o mesmo motivo que deixou o "extin pan" sem escala.
+        p("side chn depth"), p("gain", GANHO_MAX, 2, None, False, DB),
         p("pan", 255, 2, None, True),
         p("reverb send"), p("delay send")]},
 
@@ -522,6 +621,18 @@ PARAMS_FIXOS = {
                         "opcoes": {"0": "OFF", "1": "Pan", "2": "ReverbSend",
                                    "3": "DelaySend", "4": "LFO Depth",
                                    "5": "InstFX", "6": "User"}},
+    # CTRL de CADA instrumento: bloco 06, offsets 0x01+i (sniff 15/08/2026,
+    # capturas/ctrl-por-inst e ctrl-lt-codigos). "off_por_inst" marca o
+    # terceiro caso de enderecamento que BLOCOS nao cobria: um byte por
+    # instrumento DENTRO de um bloco de kit (COLOR 0x42+i, OUTPUT bloco 07 e
+    # choke bloco 08 sao o mesmo padrao e podem usar a flag quando a
+    # interface precisar). ATENCAO: a ESCRITA no bloco 06 nunca saiu da
+    # nossa ponta - so o TR-EDITOR foi visto escrevendo la; o primeiro teste
+    # e girar o CTRL fisico depois de trocar o destino e OUVIR.
+    "inst ctrl select": {"bloco": "ctrl", "tipo": "inst",
+                         "off": CTRL_OFF_BASE,
+                         "bytes": 1, "off_por_inst": True,
+                         "opcoes_do_catalogo": True},
 
     # --- INSTRUMENTO: bloco 10 KK 1I 00, um por instrumento ----------
     # Os 11 blocos (BD..RC) tem layout identico: mapear o BD mapeou todos.
@@ -574,27 +685,6 @@ COLOR_OFF_BASE = 0x42
 CORES_INST = ["RED", "ORANGE", "YELLOW", "LIME", "GREEN", "SKYBLUE",
               "LIGHTBLUE", "BLUE", "PURPLE", "MAGENTA", "PINK", "WHITE"]
 
-# CTRL POR INSTRUMENTO - bloco 06, um byte por instrumento a partir de 0x01
-# (BD=0x01, SD=0x02 - sequencial provado em 15/08/2026). Codigos 0..5 fixos:
-#     0 OFF   1 Pan   2 ReverbSend   3 DelaySend   4 LFO Depth   5 InstFX
-# Do 6 em diante sao PARAMETROS DE TONE num espaco de codigos GLOBAL e
-# estavel: cada tone so mostra os que ele expoe, mas o codigo de cada nome
-# nao muda. Medido em 15/08/2026 em dois kits: o LT do kit 089 (sample)
-# percorreu 0-5 e depois 9-23 - o pulo 6/7/8 e exatamente Attack/Snappy/
-# Color dos ACB do TR-707 (6 e 7 medidos direto; 8=Color fecha por
-# eliminacao, unico nome restante da faixa). "Morph" (tones FM) segue sem
-# codigo medido. O offset 0x00 do bloco e o SELECT global.
-CTRL_OFF_BASE = 0x01
-CTRL_FIXOS = {0: "OFF", 1: "Pan", 2: "ReverbSend", 3: "DelaySend",
-              4: "LFO Depth", 5: "InstFX"}
-CTRL_TONE_PARAMS = {
-    6: "Attack", 7: "Snappy", 8: "Color", 9: "Coarse", 10: "Rate",
-    11: "Spread", 12: "BitReduce", 13: "Attack", 14: "HoldMode",
-    15: "HoldTime", 16: "HoldStep", 17: "FltType", 18: "FltCutoff",
-    19: "FltReso", 20: "FltEnvAtk", 21: "FltEnvDecay", 22: "FltEnvDepth",
-    23: "FltVelo",
-}
-
 # ─────────────────────────────────────────────────────────────
 # DERIVADOS DE UMA REGRA MEDIDA (nao de um gesto proprio)
 #
@@ -641,14 +731,17 @@ def _derivados_por_tipo():
 
 PARAMS_FIXOS.update(_derivados_por_tipo())
 
-# Faixa que cada gesto varreu de fato (para conferencia futura; o catalogo e
-# quem manda no 'max' da tela). O gain e o unico que discordou do esperado.
+# Faixa que cada gesto varreu de fato. E DOCUMENTACAO: ninguem le este dict em
+# tempo de execucao - quem manda no 'max' da tela e no clamp da escrita e o
+# catalogo. Serve para conferir se o catalogo esta mentindo sobre a faixa. O gain e o unico que discordou do esperado.
 FAIXAS_MEDIDAS = {
     "reverb time": (0, 255), "reverb level": (0, 255),
     "reverb predelay": (0, 100), "reverb density": (0, 10),
     "inst reverb send": (0, 255), "inst delay send": (0, 255),
     "inst level": (0, 255), "inst tune": (0, 255), "inst decay": (0, 255),
     "inst pan": (0, 255), "inst lfo depth": (0, 255),
+    # 17/08/2026 fechou o porque: 161 e o fim da faixa DE VERDADE (+40.0 dB) e
+    # o 0 e -INF. Ver GANHO_ESCALA no alto do arquivo
     "inst gain": (1, 161),   # parou em 161, nao em 255 - medido, nao deduzido
     "ifx amount": (0, 255),
 }
@@ -657,12 +750,20 @@ FAIXAS_MEDIDAS = {
 def carregar():
     """Mapa completo: fixos + capturados, ja enriquecidos pelo catalogo."""
     mapa = dict(PARAMS_FIXOS)
+    capturados = set()
     try:
         with open(ARQ_FX) as f:
-            mapa.update(json.load(f))
+            do_arquivo = json.load(f)
+            capturados = set(do_arquivo)
+            mapa.update(do_arquivo)
     except (OSError, ValueError):
         pass
     for nome, ent in mapa.items():
+        # de onde veio a entrada: True = capturada no app (mora no
+        # ~/.lp_tr8s_fx.json e o apagar() alcanca), False = fixa do sniff, imune.
+        # A aba que listava por esta flag saiu em 17/08/2026; a marca fica
+        # porque e a unica forma de a tela saber a procedencia de um offset
+        ent["capturado"] = nome in capturados
         cat = POR_NOME.get(nome, {})
         # 'bloco' diz em QUAL bloco do kit o offset vive (BLOCOS). Entradas
         # capturadas antes de 15/08/2026 nao tem o campo; ai vale o do
@@ -723,6 +824,7 @@ def registrar(nome, tipo, off, nbytes=None, bloco=None):
     _salvar(capturados)
     saida = dict(entrada)
     saida["sugestoes"] = cat.get("opcoes", [])
+    saida["capturado"] = True   # acabou de entrar no arquivo - esquecivel
     return saida
 
 
@@ -765,12 +867,18 @@ def paineis_para_tela():
     return saida
 
 
-def rotulo_valor(ent, valor):
-    """Como mostrar um valor: rotulo do enum, com-sinal se bipolar, ou o cru."""
+def rotulo_valor(ent, valor, nome=None):
+    """Como mostrar um valor: rotulo do enum, com-sinal se bipolar, ou o cru.
+
+    'nome' e opcional e serve para achar a escala do catalogo (o GAIN em dB):
+    a tabela nao viaja dentro do mapa, que vai no /estado 4x por segundo."""
     if valor is None:
         return "—"
     if ent.get("forma") == "enum":
         return ent.get("opcoes", {}).get(str(valor), f"? ({valor})")
+    esc = ent.get("escala") or POR_NOME.get(nome or "", {}).get("escala")
+    if esc:
+        return esc.get(valor, str(valor))
     if ent.get("bipolar"):
         return f"{valor - 128:+d}"
     return str(valor)
