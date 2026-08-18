@@ -280,8 +280,13 @@ def _acao_chain_armar(a):
         HOST.log("(!) chain vazio")
         return
 
+    # a variacao vem da tela; None = o Chain resolve sozinho (a que toca, a
+    # aberta, a primeira habilitada - nessa ordem)
+    var = a.get("var")
+    var = int(var) if var else None
+
     def armar():
-        HOST.motor.chain = F.Chain(entradas, modo, log=HOST.log)
+        HOST.motor.chain = F.Chain(entradas, modo, log=HOST.log, var=var)
         HOST.motor.chain.armar(HOST.motor)
         if not HOST.motor.chain.ativo:
             HOST.motor.chain = None
@@ -428,8 +433,16 @@ ACOES = {
     "bpm": lambda a: HOST.enfileirar(HOST.motor.definir_bpm,
                                      float(a["valor"])),
     "chain_armar": _acao_chain_armar,
+    # passa o motor: parar o loop SOLTA a trava da variacao (sem restaurar o
+    # rodizio, que e decisao de quem esta ouvindo - ver destravar_variacao)
     "chain_parar": lambda a: (HOST.motor and HOST.motor.chain
-                              and HOST.enfileirar(HOST.motor.chain.parar)),
+                              and HOST.enfileirar(HOST.motor.chain.parar,
+                                                  HOST.motor)),
+    # o rodizio de variacoes que a trava desligou, de volta. Botao proprio na
+    # aba Grooves: reescrever essa mascara com a musica tocando derruba a
+    # ancora do ciclo, entao quem decide o momento e o operador
+    "restaurar_rodizio": lambda a: HOST.enfileirar(
+        HOST.motor.destravar_variacao, True),
     "estocastica": _acao_estocastica,
     "util": _acao_util,
     "externa": _acao_externa,

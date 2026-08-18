@@ -1047,6 +1047,207 @@ class TesteRespiroDoFill(unittest.TestCase):
         self.assertEqual(L.respirar(L.COR_FORTE, 0.0), (0, 0, 0))
 
 
+class MotorFalso:
+    """O mínimo do Motor que o Chain toca, com registro de chamadas.
+
+    Existe porque o Chain e' a peca que mais depende de estado do Motor
+    (variacao aberta, last step, passo_abs, tocando) e a que menos da' para
+    exercitar com hardware: cada teste de loop e' uma sessao de 5 minutos com a
+    caixa tocando. Aqui os quatro estados que importam sao ajustaveis a mao."""
+
+    def __init__(self, variacao=1, last=16, tocando=True):
+        self.variacao = variacao
+        self.variacao_tocando = variacao
+        self.vars_habilitadas = [variacao]
+        self.ultimo_var = {v: last for v in range(1, 11)}
+        self.passo_abs = 0
+        self.tocando = True if tocando else False
+        self.acc = 0
+        self.pattern_atual = 0
+        self.var_travada = None
+        self.rodizio_antes = None
+        self.escritos = []          # (inst, step) de cada escrever_step aceito
+        self.travas = []            # cada travar_variacao pedido
+        self.escrita_ok = True      # False = escrever_step recusa (bloqueada)
+        self.trava_ok = True        # False = travar_variacao falha
+        self.pintou = 0
+        self.log = lambda *a, **k: None
+
+    # ── o que o Chain chama ──
+    def last_var(self):
+        return self.ultimo_var.get(self.variacao, 16)
+
+    def last_var_de(self, var):
+        return self.ultimo_var.get(var, 16)
+
+    def travar_variacao(self, v):
+        self.travas.append(v)
+        if not self.trava_ok:
+            return False
+        self.var_travada = v
+        self.variacao = v            # o travar_variacao real abre a variacao
+        return True
+
+    def destravar_variacao(self, restaurar=False):
+        self.var_travada = None
+
+    def escrever_step(self, i, s, vel, sub, alt=False, prob=None):
+        if not self.escrita_ok:
+            return False
+        self.escritos.append((i, s, self.variacao))
+        return True
+
+    def escrever_pattern(self, dados, accent=0, last_var=16, nome=""):
+        self.escritos.append(("pattern", self.variacao))
+        return True
+
+    def escrita_bloqueada(self, rotulo=""):
+        return not self.escrita_ok
+
+    def pintar(self):
+        self.pintou += 1
+
+    def _pattern_para_escrever(self, rotulo=""):
+        return self.pattern_atual
+
+
+class TesteChainVariacaoTravada(unittest.TestCase):
+    """O loop trabalhava na "variacao aberta", que e uma variavel que muda
+    debaixo dele. Diagnostico de 18/08/2026, e cada teste aqui guarda um dos
+    bugs que isso causava - todos silenciosos, todos so audiveis na caixa."""
+
+    def chain(self, **kw):
+        import ferramentas
+        return ferramentas.Chain([{"tipo": "groove", "nome": "g1",
+                                   "dados": {}, "reps": 2}], log=lambda *a: None,
+                                 **kw)
+
+    def test_armar_trava_antes_de_escrever(self):
+        """A ordem importa: travar depois de escrever poe o groove na variacao
+        errada e so' entao acerta a maquina."""
+        m, c = MotorFalso(variacao=1), self.chain(var=3)
+        c.armar(m)
+        self.assertEqual(m.travas, [3], "nao travou, ou travou na errada")
+        self.assertTrue(c.ativo)
+        self.assertEqual(m.escritos[0], ("pattern", 3),
+                         "escreveu antes de travar - o groove foi para a "
+                         "variacao errada")
+
+    def test_nao_arma_se_a_trava_falha(self):
+        """Meio loop e' pior que loop nenhum: sem trava, a perseguicao escreve
+        no escuro e a conta de repeticoes salta."""
+        m = MotorFalso()
+        m.trava_ok = False
+        c = self.chain(var=2)
+        c.armar(m)
+        self.assertFalse(c.ativo, "armou sem conseguir travar")
+        self.assertEqual(m.escritos, [], "escreveu mesmo sem trava")
+
+    def test_recusa_travar_num_fill_in(self):
+        """Fill In (9 e 10) nao tem slot na mascara de variacao habilitada
+        (2.3.2) nem last step decodificado - travar ali nao tem endereco."""
+        m = MotorFalso(variacao=9)
+        m.variacao_tocando = None
+        m.vars_habilitadas = []
+        c = self.chain()
+        c.armar(m)
+        self.assertFalse(c.ativo, "armou num Fill In")
+        self.assertEqual(m.travas, [], "chegou a pedir trava num Fill In")
+
+    def test_perseguicao_mede_pela_variacao_FIXADA(self):
+        """BUG 1: o `lim` vinha do last_var() da variacao ABERTA, e ele decide
+        ATE ONDE a perseguicao escreve (`passo_abs % lim`, "atras do playhead").
+        Com o divisor errado, o groove entra na hora errada.
+
+        RESSALVA HONESTA sobre o alcance deste teste: no fluxo do tick a
+        invariante devolve o grid para a variacao do loop ANTES de calcular o
+        lim, entao hoje os dois caminhos coincidem ali - a primeira versao
+        deste teste passava com o bug reintroduzido, e so a sabotagem mostrou
+        isso. Aqui o _perseguir e' chamado direto, que e' onde a diferenca e'
+        observavel, e o teste existe para que mexer na invariante amanha nao
+        reintroduza o bug em silencio."""
+        m = MotorFalso(variacao=1, last=16)
+        m.ultimo_var[5] = 4          # a aberta tem last step BEM menor
+        c = self.chain(var=1)
+        c.armar(m)
+        m.variacao = 5               # alguem abriu outra variacao
+        m.passo_abs = 8              # 8 % 16 = 8 pela fixada; 8 % 4 = 0 pela aberta
+        m.escritos.clear()
+        c._fila_escrita = {"passo": 0, "dados": {}}
+        c._perseguir(m)
+        self.assertGreater(c._fila_escrita["passo"], 0,
+                           "nao escreveu nada: mediu com o last step da "
+                           "variacao ABERTA em vez da fixada")
+
+    def test_volta_para_a_variacao_do_loop(self):
+        """A invariante: o cache e' da variacao aberta, e o escrever_step copia
+        dele os bytes 0-2 que ninguem sabe ler. Escrever com o grid noutra
+        variacao injeta lixo de uma na outra."""
+        m = MotorFalso(variacao=1)
+        c = self.chain(var=1)
+        c.armar(m)
+        m.variacao = 4               # o operador abriu outra
+        c.tick(m)
+        self.assertEqual(m.travas[-1], 1, "nao tentou voltar para a do loop")
+        self.assertEqual(m.variacao, 1)
+
+    def test_para_se_nao_consegue_voltar(self):
+        m = MotorFalso(variacao=1)
+        c = self.chain(var=1)
+        c.armar(m)
+        m.variacao, m.trava_ok = 4, False
+        c.tick(m)
+        self.assertFalse(c.ativo, "seguiu escrevendo na variacao errada")
+
+    def test_escrita_recusada_nao_avanca_o_passo(self):
+        """BUG 2: o _perseguir ignorava o retorno do escrever_step. Com a
+        escrita bloqueada ele avancava fe["passo"] assim mesmo - o groove
+        entrava PELA METADE, calado."""
+        m = MotorFalso(variacao=1)
+        c = self.chain(var=1)
+        c.armar(m)
+        c._fila_escrita = {"passo": 0, "dados": {}}
+        m.escrita_ok = False
+        m.passo_abs = 8
+        c._perseguir(m)
+        self.assertEqual(c._fila_escrita["passo"], 0,
+                         "avancou o passo sem ter escrito nada")
+
+    def test_para_depois_de_tres_recusas(self):
+        """Engasgo passageiro nao pode matar a corrente; escrita bloqueada de
+        verdade nao pode virar meio groove no ar."""
+        m = MotorFalso(variacao=1)
+        c = self.chain(var=1)
+        c.armar(m)
+        m.escrita_ok = False
+        m.passo_abs = 8
+        for _ in range(c.FALHAS_ATE_PARAR):
+            c._fila_escrita = {"passo": 0, "dados": {}}
+            c._perseguir(m)
+        self.assertFalse(c.ativo, "seguiu tentando escrever para sempre")
+
+    def test_parar_solta_a_trava_e_nao_restaura_sozinho(self):
+        """Reescrever a mascara com varias variacoes com a musica tocando
+        derruba a ancora do ciclo. Quem parou o loop normalmente quer continuar
+        ouvindo o que ficou - o rodizio volta pelo botao."""
+        m = MotorFalso(variacao=1)
+        m.rodizio_antes = ([1, 2, 3], 1)
+        c = self.chain(var=1)
+        c.armar(m)
+        c.parar(m)
+        self.assertFalse(c.ativo)
+        self.assertIsNone(m.var_travada, "nao soltou a trava")
+        self.assertIsNotNone(m.rodizio_antes,
+                             "restaurou o rodizio sozinho, com a musica tocando")
+
+    def test_resumo_diz_em_que_variacao_travou(self):
+        m, c = MotorFalso(variacao=1), self.chain(var=2)
+        c.armar(m)
+        r = c.resumo()
+        self.assertEqual(r["var"], 2)
+        self.assertEqual(r["var_nome"], L.VARIACOES[1])
+
+
 class TesteServidorSemMotor(unittest.TestCase):
     """O servidor de pe, sem TR-8S nenhuma - que e como ele nasce.
 
