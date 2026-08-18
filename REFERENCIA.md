@@ -2320,24 +2320,67 @@ kit (`_lembrar_kit_level`), e o botão fica desabilitado quando não há para on
 voltar ou quando o valor já é o original — com a dica mudando junto, em vez de
 um botão morto sem explicação.
 
+### 7.8 A trava de variação, verificada na máquina (18/08/2026)
+
+Sessão **V1–V7b**, com a TR-8S tocando, pattern 1-01, kit TR-707, 86 bpm. O roteiro
+com os passos exatos está em `ROTEIRO-V1-V7.md`, no repositório.
+
+**Não há endereço novo aqui.** É a máscara 63-66, já provada em 16/08, usada para
+fixar o loop da aba Grooves numa variação. O que a sessão prova é o **comportamento
+do sistema** — por isso este registro está aqui, e não na lista de fatos de protocolo
+da seção 3.
+
+| | o que testava | resultado |
+|---|---|---|
+| V1 | escrever um bit só faz a máquina repetir aquela variação | **~2 s** — travada 01:06:46, tocando só a B em 01:06:48; menos de uma volta a 86 bpm |
+| V2 | o groove entra inteiro, volta após volta | 4 repetições sem meia-batida nem conteúdo velho |
+| V3 | duas entradas na fila | troca na virada, sem buraco |
+| V4 | abrir outra variação no grid com o loop no ar | volta sozinho **no mesmo segundo** (01:10:01), e a variação aberta fica intacta |
+| V5 | parar e restaurar o rodízio | devolveu **A/B/C**, as três (01:11:11) |
+| V6 | armar com a máquina **parada** | o primeiro compasso depois do play já é a travada, sem escapar uma volta |
+| V7 | Fill In como candidato no modo "auto" | recusa o Fill e **cai na primeira variação válida** — não desiste de armar |
+| V7b | pedir outra variação com a trava no ar | recusado; `var_pedida` nem chegou a ser enfileirado |
+
+Duas ressalvas de método, que valem mais que a tabela:
+
+- **O V4 quase virou "falhou" por defeito da ferramenta, não do código.** O observador
+  que lia o `/estado` diferenciava o log por **tamanho**, e o log do motor tem teto de
+  **25 linhas**: assim que encheu, ele parou de ver linhas novas e reportei "não há
+  registro do clique". A prova estava nas 25 linhas remanescentes. É a mesma família da
+  armadilha 3.1 — a ferramenta de medição mentindo com cara de resultado.
+- **O V7 quase passou por acidente.** Do jeito que o roteiro estava escrito, o "auto"
+  encontraria a variação que toca **antes** de chegar ao Fill, e a recusa nunca seria
+  exercitada: o teste diria "passou" sem ter testado nada. Foi preciso restaurar o
+  rodízio primeiro, para a variação tocando voltar a ser dedução (`?`).
+
+O V5 é o desfecho de um bug que **a revisão de código pegou antes da máquina**: a
+retrava (que o V4 dispara) salvava o rodízio **já travado** por cima do original, e o
+"Restaurar rodízio" devolveria a própria trava em vez de A/B/C. Consertado no mesmo PR,
+e é o que a linha das 01:11:11 confirma.
+
 ### Três pendências que a sessão abriu (17/08/2026)
 
 1. ~~**SCALE — o playhead anda em metade da velocidade.**~~ **RESOLVIDA na
    mesma sessão**: o byte apareceu no `snapdiff` (nó do pattern `0x16`) e o
    playhead passou a ler a scale. Ver a seção acima. Falta só o olho no grid
    com a máquina em `32nd`.
-2. **AUTO FILL IN.** Quando a máquina cai no fill, o grid não acompanha e a
-   contagem se perde. É consequência conhecida: **os Fill In não aparecem na
-   máscara 63-66** (2.3.2, medido em 14/08), então nada no que lemos hoje diz
-   "a máquina está tocando o fill". Os dois botões de AUTO FILL IN também são
-   **transmit-only** por CC. O knob de intervalo (32/16/12/8/4/2) é
-   **dedução**: parece ser de quantos em quantos compassos o fill entra, e isso
-   ainda não foi confirmado nem no manual nem na máquina.
-3. **Escrever o TEMPO não funcionou.** O `definir_bpm` (perf, `OFF_TEMPO`,
-   3 nibbles) nasceu em 16/08 com o aviso "conferir o visor no primeiro uso".
-   Em 17/08 o Auto BPM da aba Grooves foi acionado e **a máquina não mudou de
-   andamento** — primeiro teste, resultado negativo. Falta isolar (clicar no
-   BPM do groove direto, com o visor à vista) antes de cravar.
+2. ~~**AUTO FILL IN.**~~ **RESOLVIDA na mesma sessão, nos dois pontos que
+   ela levantava.** (a) "Nada no que lemos hoje diz que a máquina está tocando
+   o fill" deixou de valer: o byte do fill foi localizado no `0x09` da região
+   de performance (17 fills observados no `watch`), e é dele que sai o
+   `fill_ativo`. (b) O knob de intervalo saiu de dedução: mora no `0x7F` do nó
+   do pattern, e o Luan percorreu a roda inteira confirmando os seis valores
+   `32/16/12/8/4/2` — **sem posição OFF**, porque o liga/desliga é um botão
+   separado, fora do knob. O que continua de pé é só que **os Fill In não têm
+   slot na máscara 63-66** (2.3.2), o que é outro assunto.
+3. ~~**Escrever o TEMPO não funcionou.**~~ **RESOLVIDA na mesma sessão.** O
+   resultado negativo estava certo, e a causa era o endereço: o `definir_bpm`
+   escrevia 3 nibbles no espelho da performance (`OFF_TEMPO`), que a máquina
+   **aceita e ignora**. O tempo mora no **nó do pattern**, offsets 16-19
+   (`OFF_TEMPO_NO`), em **quatro** nibbles — achado por sniff do TR-EDITOR e
+   confirmado pelo **clock medido** caindo 90.0 → 85.8. Esta pendência é a
+   origem da regra "round-trip de leitura não prova efeito": a releitura dizia
+   120.0 enquanto o visor e o clock diziam 86.
 
 O `snap` passou a incluir a **região de performance** (`01 00 00 00`, 128 B —
 a mesma leitura que o tick já faz), justamente porque as três pendências acima
