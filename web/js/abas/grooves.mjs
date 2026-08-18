@@ -6,8 +6,10 @@
 // maquina, na mesma fila (chain modo "misto").
 //
 // Honestidade em dois pontos que a tela repete:
-// - groove ESCREVE na variacao aberta do pattern corrente da maquina; vindo
-//   depois de uma entrada de pattern, altera aquele pattern. Desfazer volta.
+// - groove ESCREVE na variacao que o loop TRAVOU ao ser armado (o seletor do
+//   card escolhe; "auto" resolve pela que toca) do pattern corrente da
+//   maquina; vindo depois de uma entrada de pattern, altera aquele pattern.
+//   Desfazer volta.
 // - "Auto BPM" escreve o TEMPO junto com o pattern, e FUNCIONA desde
 //   17/08/2026: o endereco certo e o no do pattern (OFF_TEMPO_NO, quatro
 //   nibbles), achado por sniff do TR-EDITOR. A versao de 16/08 escrevia no
@@ -42,6 +44,10 @@ function salvarFila() {
 
 // elementos vivos
 let tbodyBib, gradeMaq, elSel, elFilaCards, elFilaEstado, bArmar, bParar;
+let selVar, chipVar, bRodizio;
+// a variacao escolhida para o loop sobrevive ao reload: "" = deixar o motor
+// resolver (a que toca, a aberta, a primeira habilitada - nessa ordem)
+let varLoop = localStorage.getItem("varLoop") || "";
 let inFiltro, inReps;
 let autoKit = localStorage.getItem("autoKit") === "1";
 let autoBpm = localStorage.getItem("autoBpm") === "1";
@@ -178,6 +184,36 @@ export default {
     bArmar.onclick = armarFila;
     bParar = h("button.bt.bt-perigo", { type: "button" }, "Parar");
     bParar.onclick = () => agir({ acao: "chain_parar" });
+
+    // ── a variacao do loop ──
+    // O loop trabalha numa variacao FIXA, e trava a maquina nela. Sem isso a
+    // variacao que toca vira deducao pelo clock, o resync desiste e a
+    // perseguicao do playhead escreve no escuro.
+    selVar = h("select", { "aria-label": "variação do loop" });
+    selVar.append(new Option("auto", ""));
+    (D.variacoes || []).forEach((n, i) => {
+      // so A-H: Fill In nao tem slot na mascara de variacao habilitada nem
+      // last step decodificado (REFERENCIA 2.3.1/2.3.2)
+      if (i < 8) selVar.append(new Option(n, String(i + 1)));
+    });
+    selVar.value = varLoop;
+    selVar.onchange = () => {
+      varLoop = selVar.value;
+      localStorage.setItem("varLoop", varLoop);
+    };
+    chipVar = h("span.chip", { "data-oculto": "" }, "travado");
+    bRodizio = h(
+      "button.bt.bt-peq",
+      {
+        type: "button",
+        "data-oculto": "",
+        "data-dica":
+          "reescreve a máscara com as variações que estavam habilitadas antes " +
+          "do loop travar",
+      },
+      "Restaurar rodízio",
+    );
+    bRodizio.onclick = () => agir({ acao: "restaurar_rodizio" });
     const bLimpar = h("button.bt.bt-peq", { type: "button" }, "Limpar");
     bLimpar.onclick = () => {
       fila = [];
@@ -188,14 +224,31 @@ export default {
       "Loop de encadeamento",
       { dir: [elFilaEstado, bLimpar] },
       elFilaCards,
-      h("div.linha", {}, bArmar, bParar),
+      h(
+        "div.linha",
+        {},
+        h("label", {}, "variação"),
+        selVar,
+        chipVar,
+        bArmar,
+        bParar,
+        bRodizio,
+      ),
+      // AVISO FIXO, nao tooltip: a trava mexe na maquina de um jeito que o
+      // operador precisa saber ANTES de clicar, nao ao passar o mouse
+      h(
+        "p.aviso",
+        {},
+        "o loop escreve só na variação escolhida e DESLIGA o rodízio da " +
+          "máquina enquanto roda. Ao parar, o rodízio não volta sozinho — " +
+          "use “Restaurar rodízio”.",
+      ),
       h(
         "p.dica",
         {},
         "o loop repete do começo quando acaba, e fica salvo. Clique no " +
           "nome de um card para tirá-lo do loop sem apagar (× apaga). " +
-          "Groove ESCREVE na variação aberta do pattern corrente — o " +
-          "Desfazer volta.",
+          "Groove ESCREVE na variação do loop — o Desfazer volta.",
       ),
     );
 
@@ -241,6 +294,19 @@ export default {
     const armadoAgora = !!(c && c.ativo);
     attr(elFilaEstado, "data-oculto", armadoAgora && !e.tocando ? null : "");
     attr(bParar, "aria-disabled", armadoAgora ? null : "true");
+    // o chip diz em QUAL variacao o loop travou - o seletor diz o que foi
+    // pedido, e "auto" nao conta a mesma coisa. Sai de e.var_travada, que e a
+    // verdade do MOTOR: `c.var_nome` sobrevive ao Parar (o chain fica em
+    // motor.chain com o resumo antigo) e o chip seguia afirmando "travado na
+    // A" com a trava ja solta (revisao do PR #9)
+    const travada = e.var_travada;
+    attr(chipVar, "data-oculto", travada ? null : "");
+    if (travada) texto(chipVar, `travado na ${travada}`);
+    // o botao de restaurar so existe quando ha rodizio guardado para voltar E
+    // o loop nao esta no ar: com ele rodando o motor RECUSA (soltar a trava
+    // durante o loop devolve a deducao pelo clock e a perseguicao passa a
+    // escrever no escuro), entao mostrar o botao so ofereceria uma recusa
+    attr(bRodizio, "data-oculto", e.rodizio_antes && !armadoAgora ? null : "");
     const chave =
       (armadoAgora ? `arm:${c.posicao}:${c.reps_restantes}|` : "solto|") +
       fila.map((f) => f.nome + f.reps + (f.off ? "!" : "")).join("|");
@@ -536,6 +602,7 @@ function armarFila() {
   agir({
     acao: "chain_armar",
     modo: "misto",
+    var: varLoop || null,
     entradas: ligados.map((f) =>
       f.tipo === "groove"
         ? { tipo: "groove", id: f.id, reps: f.reps }

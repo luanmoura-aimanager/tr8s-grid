@@ -2024,6 +2024,8 @@ class Motor:
     fill_ativo = None
     auto_fill = None      # intervalo do AUTO FILL IN (32/16/12/8/4/2)
     kit_level_ref = None  # volume do kit como ele foi lido (botao de reset)
+    var_travada = None    # variacao fixada pelo loop (travar_variacao)
+    rodizio_antes = None  # (vars_habilitadas, aberta) de antes da trava
 
     def __init__(self, cfg, log=print):
         self.cfg, self.log = cfg, log
@@ -2096,6 +2098,8 @@ class Motor:
         self.fill_ativo = None                  # a maquina esta num fill?
         self.auto_fill = None                   # intervalo do AUTO FILL IN
         self.kit_level_ref = None               # volume original do kit
+        self.var_travada = None                 # trava do loop (Grooves)
+        self.rodizio_antes = None               # rodizio de antes da trava
         self.cache_var = {}                     # (pattern, var) -> espelho lido
         self.leituras_falhas = 0                # seguidas; >=2 e sumico da maquina
         self.rodizio_linha = 0                  # proxima linha do rodizio de releitura
@@ -2433,7 +2437,19 @@ class Motor:
 
     # ── last step ───────────────────────────────────────────
     def last_var(self):
+        """Last step da variacao ABERTA no grid."""
         return self.ultimo_var.get(self.variacao, 16)
+
+    def last_var_de(self, var):
+        """Last step de UMA variacao especifica.
+
+        O last_var() le a aberta, que muda quando alguem clica noutra variacao
+        para editar. O Chain precisa da FIXADA: ele conta repeticoes com
+        `passo_abs // lim`, e se o lim trocar debaixo dele o divisor salta e o
+        chain conta voltas que a musica nao deu. As duas coincidem enquanto a
+        invariante da trava vale - e e exatamente quando ela quebra que o
+        chain erra."""
+        return self.ultimo_var.get(var, 16)
 
     def ultimo_efetivo(self, i):
         """Reference p. 12: o last step do track tem prioridade sobre o da
@@ -4190,6 +4206,21 @@ class Motor:
             if v not in self.vars_habilitadas and len(self.vars_habilitadas) > 1:
                 self.log(f"(!) {VARIACOES[v-1]} nao esta habilitada na maquina")
                 return
+            if self.var_travada and v != self.var_travada:
+                # RECUSA. A versao anterior so avisava, apostando que "a trava
+                # volta a valer no proximo tick do chain" - e nao volta: quem
+                # atende o pedido e o _atender_var_pedida, que reescreve a
+                # mascara na virada e NAO mexe em self.variacao. A invariante
+                # do Chain compara motor.variacao com a variacao do loop, entao
+                # ela nunca fica falsa e nada retrava. O resultado era a caixa
+                # tocando uma variacao enquanto o loop escrevia noutra - o
+                # proprio bug que a trava existe para fechar (revisao do PR #9)
+                self.log(f"(!) o loop esta travado na "
+                         f"{VARIACOES[self.var_travada-1]}: pedir a "
+                         f"{VARIACOES[v-1]} poria a maquina a tocar uma "
+                         "variacao e o loop a escrever noutra. Pare o loop "
+                         "antes")
+                return
             if not self.tocando:
                 self.var_pedida = None
                 self._escrever_var_mask(v)
@@ -4199,16 +4230,141 @@ class Motor:
             self.log(f"variacao {VARIACOES[v-1]} pedida - entra na virada")
 
     def _escrever_var_mask(self, v):
+        """Devolve True se a mascara REALMENTE saiu para a maquina.
+
+        Devolvia None nos tres caminhos - sucesso, sem porta e sem pattern - e
+        o travar_variacao lia isso como sucesso e cravava var_travada. O buraco
+        nao era teorico: entre as guardas do travar_variacao e esta escrita roda
+        um recarregar() com dezenas de RQ1, e depois dele o _garantir_pattern()
+        pode voltar None. O chain armava convencido de que travou, com varias
+        variacoes habilitadas - exatamente o estado que a trava existe para
+        impedir, e sem aviso nenhum (revisao do PR #9)."""
         if not self.tr_out:
             self.log("(!) sem porta CTRL - ligue o modo ON")
-            return
+            return False
         p = self._pattern_para_escrever("pedir variacao")
         if p is None:
-            return
+            return False
         self.tr_out.send(dt1(addr_soma(addr_no_pattern(p), OFF_VAR_TOCANDO),
                              mascara_para_nibbles(1 << (v - 1))))
         self.log(f"pedi a variacao {VARIACOES[v-1]} a maquina "
                  "(a proxima leitura confirma se ela obedeceu)")
+        return True
+
+    def travar_variacao(self, v):
+        """Fixa UMA variacao: a maquina passa a repetir so ela.
+
+        Existe para o loop da aba Grooves. Com varias variacoes habilitadas o
+        chain trabalha no escuro: `variacao_tocando` vira deducao pelo clock,
+        o `_ressincronizar` desiste (`em_fase_com_a_maquina()` False) e o
+        playhead deriva - e e ATRAS do playhead que a perseguicao escreve. Com
+        um bit so na mascara, `len(vars_habilitadas)==1` e a variacao que toca
+        volta a ser LEITURA, nao conta de clock.
+
+        A ordem dos passos importa, e o passo 3 e o caro:
+
+        3. abrir a variacao alvo ANTES de escrever a mascara. O cache[i] e da
+           variacao aberta e o escrever_step copia dele os bytes 0-2 que nao
+           sabemos ler (REFERENCIA 2.4) - escrever na B com o cache da A
+           INJETA LIXO DA A NA B. E o mesmo dano de que o pattern_trocou ja
+           protege. Custa um recarregar() (~2 s com o lock), e so acontece
+           quando a alvo difere da aberta.
+
+        Devolve True se travou. NAO testado em hardware: a escrita da mascara
+        e provada isolada (16/08, tres trocas obedecidas), mas a combinacao
+        "escrever a mascara + abrir a mesma variacao + escrever um groove nela
+        com o loop rodando" nunca aconteceu."""
+        with self.lock:
+            # 1. guardas. O Fill In nao tem slot na mascara (2.3.2) nem last
+            #    step decodificado: travar nele nao tem endereco.
+            if not 1 <= v <= 8:
+                self.log(f"(!) so da para travar em A-H; {VARIACOES[v-1]} "
+                         "e Fill In (REFERENCIA 2.3.1)"
+                         if 1 <= v <= len(VARIACOES) else
+                         f"(!) variacao {v} nao existe")
+                return False
+            if self.modo_geral != MODO_ON or not self.tr_out:
+                self.log("(!) travar variacao so no modo ON")
+                return False
+            if self._pattern_para_escrever("travar variacao") is None:
+                return False
+            # 2. guarda o rodizio para o botao de restaurar - SO NA PRIMEIRA
+            #    trava. O chain retrava a cada tick em que o grid diverge, e
+            #    gravar de novo aqui guardaria o rodizio JA TRAVADO: a segunda
+            #    passagem escrevia ([A], D) por cima do ([A,B,C], A) original e
+            #    o B e o C sumiam para sempre, com o botao "Restaurar rodizio"
+            #    devolvendo a propria trava (revisao do PR #9). Guarda tambem o
+            #    PATTERN: a mascara mora no no dele, e restaurar noutro pattern
+            #    mexeria nas variacoes de quem nunca entrou no loop.
+            if self.var_travada is None:
+                self.rodizio_antes = (list(self.vars_habilitadas),
+                                      self.variacao, self.pattern_atual)
+            # 3. um pedido pendente brigaria com a trava na virada
+            self.var_pedida = None
+            # 4. abrir a alvo ANTES da mascara - ver a docstring
+            if v != self.variacao:
+                self.executar("variacao", v)
+            # 5. escrita DIRETA, nao pedir_variacao(): aquele adia para a
+            #    virada quando tocando, e o chain quer a mascara certa ja, para
+            #    a leitura de 1,5 s seguinte cravar variacao_tocando
+            if not self._escrever_var_mask(v):
+                self.log("(!) a mascara da trava nao saiu - variacao NAO "
+                         "travada")
+                return False
+            self.var_travada = v
+            self.log(f"variacao {VARIACOES[v-1]} TRAVADA para o loop "
+                     f"(o rodizio {'/'.join(VARIACOES[x-1] for x in self.rodizio_antes[0]) or '-'} "
+                     "fica desligado ate voce restaurar)")
+            return True
+
+    def destravar_variacao(self, restaurar=False):
+        """Solta a trava. Com restaurar=True reescreve a mascara guardada.
+
+        Por padrao NAO restaura: reescrever uma mascara com varias variacoes
+        com a musica tocando derruba a ancora do ciclo de novo, e quem parou o
+        loop normalmente quer continuar ouvindo o que ficou. O botao na tela e
+        que decide."""
+        with self.lock:
+            # com o loop no ar, soltar a trava e desfazer o que o chain
+            # depende: a mascara volta a ter varias variacoes, variacao_tocando
+            # vira deducao pelo clock outra vez e a perseguicao passa a
+            # escrever no escuro. A invariante do Chain so olha motor.variacao,
+            # nunca a mascara, entao ela NAO retravaria - o loop seguiria torto
+            # sem ninguem perceber. O alternar_no_ciclo ja recusava por este
+            # mesmo motivo; este caminho nao recusava (revisao do PR #9)
+            if restaurar and getattr(self.chain, "ativo", False):
+                self.log("(!) o loop esta rodando: pare ele antes de restaurar "
+                         "o rodizio (a trava e do que ele depende para saber "
+                         "que variacao esta tocando)")
+                return
+            self.var_travada = None
+            if not restaurar or not self.rodizio_antes:
+                return
+            vars_, _aberta, p_antes = self.rodizio_antes
+            if not vars_ or not self.tr_out:
+                return
+            p = self._pattern_para_escrever("restaurar rodizio")
+            if p is None:
+                return
+            # a mascara mora no no do pattern. Restaurar noutro pattern
+            # escreveria o rodizio guardado no lugar errado, mudando em
+            # silencio as variacoes habilitadas de um pattern que nunca entrou
+            # no loop (revisao do PR #9)
+            if p_antes is not None and p != p_antes:
+                self.log(f"(!) o rodizio guardado e do "
+                         f"{nome_pattern(p_antes)} e a maquina esta no "
+                         f"{nome_pattern(p)}: nao restaurei. Volte para o "
+                         "pattern de origem e tente de novo")
+                return
+            mascara = 0
+            for x in vars_:
+                mascara |= 1 << (x - 1)
+            self.tr_out.send(dt1(addr_soma(addr_no_pattern(p), OFF_VAR_TOCANDO),
+                                 mascara_para_nibbles(mascara)))
+            self.rodizio_antes = None
+            self.log("rodizio restaurado: "
+                     + "/".join(VARIACOES[x-1] for x in vars_)
+                     + " - a variacao que toca volta a ser deducao ('?')")
 
     def alternar_no_ciclo(self, v):
         """Liga/desliga uma variacao no RODIZIO, sem zerar as outras.
@@ -4224,6 +4380,11 @@ class Motor:
         with self.lock:
             if not self.tr_out:
                 self.log("(!) sem porta CTRL - ligue o modo ON")
+                return
+            if self.var_travada:
+                self.log(f"(!) o loop travou a variacao "
+                         f"{VARIACOES[self.var_travada-1]}: mexer no rodizio "
+                         "agora e desfeito no proximo ciclo. Pare o loop antes")
                 return
             # ver pedir_variacao: a mascara so tem slot para A-H. Sem este
             # guarda, o Fill In nunca esta em vars_habilitadas (montada com
@@ -4430,7 +4591,19 @@ class Motor:
                 # pattern: a linha do BD caia no timeout e aparecia como
                 # "BD nao lido", com a escrita bloqueada. Por isso os blocos
                 # de FX entram numa fila e saem POUCOS POR CICLO.
-                if self.kit_trocou:
+                # ADIADO enquanto o chain persegue o playhead, pelo mesmo
+                # motivo que o pattern_trocou logo abaixo: o ler_kit e nome +
+                # 11 tones + a fila de FX num tick so, e a perseguicao escreve
+                # 3 steps por tick contra o relogio da virada. A troca ficaria
+                # audivel - ou pior, entraria pela metade. O kit_trocou fica
+                # de pe e o kit e lido no tick seguinte a fila esvaziar.
+                # UM predicado para os tres adiamentos abaixo. Era a mesma
+                # expressao repetida com getattr(..., None), que alcancava um
+                # atributo privado do Chain e, num rename, devolveria "nao esta
+                # perseguindo" em silencio - os adiamentos sumiriam sem nenhum
+                # teste reclamar (revisao do PR #9)
+                perseguindo = bool(self.chain and self.chain.perseguindo())
+                if self.kit_trocou and not perseguindo:
                     self.kit_trocou = False
                     # kit novo, referencia nova: o botao de reset passa a
                     # apontar para o volume DESTE kit
@@ -4438,7 +4611,7 @@ class Motor:
                     self.ler_kit()
                     self.fx_fila = self._fx_alvos()
                     self.fx_rearmado = time.time()
-                elif (not self.fx_fila and
+                elif (not perseguindo and not self.fx_fila and
                       time.time() - self.fx_rearmado > INTERVALO_FX):
                     # RODIZIO DOS BLOCOS DE FX (17/08/2026). A fila so era
                     # armada na TROCA DE KIT: mexer no GAIN, no LEVEL, no PAN
@@ -4451,13 +4624,18 @@ class Motor:
                     # rodava inteiro num tick so).
                     self.fx_rearmado = time.time()
                     self.fx_fila = self._fx_alvos()
-                self._drenar_fx_fila()
+                # o dreno junto: adiar so o REARME deixava uma fila ja
+                # armada saindo no meio da perseguicao, que e o custo que o
+                # adiamento existe para evitar. Alem disso, com o kit_trocou
+                # pendente o `if` acima passou a ser False, e o `elif` - que
+                # antes nunca era avaliado nesse caso - rearmava 26 blocos de
+                # efeito bem durante a virada (revisao do PR #9)
+                if not perseguindo:
+                    self._drenar_fx_fila()
                 # pattern trocou: o grid inteiro e outro. ADIADO enquanto o
                 # chain estiver perseguindo o playhead (a releitura de ~2 s
                 # atropelaria a fila de escrita dele)
-                if self.pattern_trocou and not (
-                        self.chain and getattr(self.chain, "_fila_escrita",
-                                               None)):
+                if self.pattern_trocou and not perseguindo:
                     self.pattern_trocou = False
                     self.recarregar()
                     self._reancorar_apos_troca()
@@ -4675,6 +4853,17 @@ class Motor:
                 "auto_fill": self.auto_fill,
                 # volume do kit como foi lido - o alvo do botao de reset
                 "kit_level_ref": self.kit_level_ref,
+                # o rodizio que a trava do loop desligou, para o botao de
+                # restaurar existir so quando ha o que restaurar. Nomes, nao
+                # indices: e o que a tela mostra
+                "rodizio_antes": ([VARIACOES[x - 1]
+                                   for x in self.rodizio_antes[0]]
+                                  if self.rodizio_antes else None),
+                # a VERDADE da trava, para o chip da tela. O resumo do chain
+                # nao serve: ele sobrevive ao Parar (motor.chain nao e anulado)
+                # e afirmaria uma trava ja solta
+                "var_travada": (VARIACOES[self.var_travada - 1]
+                                if self.var_travada else None),
                 "last_var": self.last_var(),
                 "last_track": list(self.ultimo_track),
                 "armado": self.armado,

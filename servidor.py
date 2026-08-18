@@ -280,8 +280,21 @@ def _acao_chain_armar(a):
         HOST.log("(!) chain vazio")
         return
 
+    # a variacao vem da tela; None = o Chain resolve sozinho (a que toca, a
+    # aberta, a primeira habilitada - nessa ordem)
+    var = a.get("var")
+    var = int(var) if var else None
+    # 1-8 e' o alcance da mascara de variacao; 9/10 sao os Fill In e o resto
+    # nao existe. Sem esta validacao um var fora da faixa estourava IndexError
+    # DENTRO do armar, antes da linha que anula HOST.motor.chain: sobrava um
+    # Chain meio construido e todo estado() seguinte morria no resumo() dele -
+    # a pagina congelava em "fresco: false" para sempre (revisao do PR #9)
+    if var is not None and not 1 <= var <= 8:
+        HOST.log(f"(!) variacao {var} nao serve para travar o loop (so A-H)")
+        return
+
     def armar():
-        HOST.motor.chain = F.Chain(entradas, modo, log=HOST.log)
+        HOST.motor.chain = F.Chain(entradas, modo, log=HOST.log, var=var)
         HOST.motor.chain.armar(HOST.motor)
         if not HOST.motor.chain.ativo:
             HOST.motor.chain = None
@@ -428,8 +441,16 @@ ACOES = {
     "bpm": lambda a: HOST.enfileirar(HOST.motor.definir_bpm,
                                      float(a["valor"])),
     "chain_armar": _acao_chain_armar,
+    # passa o motor: parar o loop SOLTA a trava da variacao (sem restaurar o
+    # rodizio, que e decisao de quem esta ouvindo - ver destravar_variacao)
     "chain_parar": lambda a: (HOST.motor and HOST.motor.chain
-                              and HOST.enfileirar(HOST.motor.chain.parar)),
+                              and HOST.enfileirar(HOST.motor.chain.parar,
+                                                  HOST.motor)),
+    # o rodizio de variacoes que a trava desligou, de volta. Botao proprio na
+    # aba Grooves: reescrever essa mascara com a musica tocando derruba a
+    # ancora do ciclo, entao quem decide o momento e o operador
+    "restaurar_rodizio": lambda a: HOST.enfileirar(
+        HOST.motor.destravar_variacao, True),
     "estocastica": _acao_estocastica,
     "util": _acao_util,
     "externa": _acao_externa,

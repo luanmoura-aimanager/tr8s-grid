@@ -43,8 +43,11 @@ class Chain:
     entrada groove:   {"tipo": "groove", "nome": str, "dados": expandir(),
                        "accent": int, "reps": int}
         -> perseguicao do playhead (escreve por tras dele; inaudivel).
-        HONESTIDADE: escreve NA VARIACAO ABERTA do pattern corrente da
-        maquina - vindo depois de uma entrada de pattern, altera aquele.
+        HONESTIDADE: escreve na VARIACAO TRAVADA no armar (self.var), do
+        pattern corrente da maquina - vindo depois de uma entrada de pattern,
+        altera aquele. Ate 18/08/2026 escrevia na variacao ABERTA, o que punha
+        metade do groove numa variacao e metade noutra quando alguem abria
+        outra para editar; a invariante do tick fecha isso.
     entrada pattern:  {"tipo": "pattern", "alvo": 0-127, "nome": str,
                        "reps": int}
         -> nextPattern (01 00 00 02), PROVADO 15/08/2026: troca na virada.
@@ -56,30 +59,83 @@ class Chain:
     dependia de motor.comum_out, que nunca existiu.
     """
 
-    def __init__(self, entradas, modo="misto", log=print):
+    # quantos ticks seguidos de escrita recusada antes de PARAR o chain. Um
+    # engasgo passageiro nao pode matar a corrente; escrita bloqueada de
+    # verdade nao pode virar meio groove no ar.
+    FALHAS_ATE_PARAR = 3
+    TOLERANCIA_ESCRITA_S = 0.5    # ver _perseguir: a janela e de tempo
+
+    def __init__(self, entradas, modo="misto", log=print, var=None):
         assert modo in ("misto", "reescrita", "variacao", "pattern")
         tipo_legado = {"reescrita": "groove", "variacao": "variacao",
                        "pattern": "pattern"}.get(modo)
         self.entradas = [dict(e, tipo=e.get("tipo") or tipo_legado or "groove")
                          for e in entradas]
         self.modo, self.log = modo, log
+        # a variacao em que este loop trabalha. None = resolver no armar()
+        self.var = var
         self.idx = 0
         self.reps_restantes = self.entradas[0]["reps"] if entradas else 0
         self.ativo = False
         self._ciclo = None
         self._fila_escrita = None      # passos que faltam da perseguicao
+        self._desde_falha = None       # quando a primeira recusa aconteceu
         self._avisado_parado = False
+        self._falhas_escrita = 0       # ticks seguidos com escrita recusada
 
     # ── controle ────────────────────────────────────────────
+    def _resolver_var(self, motor):
+        """Em qual variacao este loop vai trabalhar, em ordem de confianca.
+
+        Nunca um Fill In: a mascara de variacao habilitada nao tem slot para
+        eles (2.3.2) e o last step deles segue desconhecido - travar ali nao
+        tem endereco."""
+        candidatos = [
+            (self.var, "escolha da tela"),
+            (motor.variacao_tocando, "a que a maquina toca"),
+            (motor.variacao, "a aberta no grid"),
+            ((motor.vars_habilitadas or [None])[0], "a primeira habilitada"),
+        ]
+        for v, origem in candidatos:
+            if v and 1 <= v <= 8:
+                return v, origem
+            if v and 8 < v <= len(L.VARIACOES):
+                self.log(f"({L.VARIACOES[v-1]} e Fill In - {origem} nao "
+                         "serve para travar; procurando outra)")
+            elif v:
+                # sem este limite, um var=99 vindo da tela indexava
+                # L.VARIACOES[98] e levantava IndexError DENTRO do armar, antes
+                # de o servidor anular motor.chain: sobrava um Chain meio
+                # construido, e dali em diante todo estado() estourava no
+                # resumo() - a pagina congelava para sempre (revisao do PR #9)
+                self.log(f"(!) variacao {v} nao existe - ignorada ({origem})")
+        return None, None
+
     def armar(self, motor):
         """Poe a primeira entrada no ar e comeca a contar ciclos.
+
+        Antes de escrever qualquer coisa, TRAVA a variacao: e o que faz a
+        variacao que toca voltar a ser leitura em vez de deducao pelo clock, e
+        e do que dependem a conta de repeticoes e a perseguicao do playhead.
+        Nao conseguindo travar, NAO arma - meio loop e pior que loop nenhum.
 
         Groove e escrito ja (via escrever_pattern, que empilha o Desfazer);
         pattern/variacao sao pedidos ja."""
         if not self.entradas:
             self.log("(!) chain vazio"); return
+        v, origem = self._resolver_var(motor)
+        if v is None:
+            self.log("(!) nao achei em qual variacao travar o loop - abra uma "
+                     "variacao A-H no grid e tente de novo")
+            return
+        if not motor.travar_variacao(v):
+            self.log("(!) loop nao armado: a trava da variacao falhou")
+            return
+        self.var = v
+        self.log(f"loop na variacao {L.VARIACOES[v-1]} ({origem})")
         self.idx, self.reps_restantes = 0, self.entradas[0]["reps"]
         self._ciclo, self._fila_escrita = None, None
+        self._falhas_escrita = 0
         ent = self.entradas[0]
         if ent["tipo"] == "groove":
             if not motor.escrever_pattern(ent["dados"], ent.get("accent", 0),
@@ -92,15 +148,27 @@ class Chain:
                  f"'{ent.get('nome', ent.get('alvo', ent.get('var', '?')))}' "
                  f"{self.reps_restantes}x")
 
-    def parar(self):
+    def parar(self, motor=None):
+        """Para o loop e SOLTA a trava - mas nao restaura o rodizio sozinho.
+
+        Reescrever uma mascara com varias variacoes com a musica tocando
+        derruba a ancora do ciclo de novo, e quem parou o loop normalmente
+        quer continuar ouvindo o que ficou. O rodizio anterior fica guardado
+        no motor (rodizio_antes) e volta pelo botao da tela."""
         self.ativo = False
         self._fila_escrita = None
-        self.log("chain parado")
+        self._falhas_escrita = 0
+        if motor is not None:
+            motor.destravar_variacao()
+        self.log("chain parado (a variacao segue fixada; use "
+                 "'Restaurar rodizio' se quiser as outras de volta)")
 
     def resumo(self):
         return {"ativo": self.ativo, "modo": self.modo, "posicao": self.idx,
                 "reps_restantes": self.reps_restantes,
                 "total": len(self.entradas),
+                "var": self.var,
+                "var_nome": L.VARIACOES[self.var - 1] if self.var else None,
                 # a fila visual da tela reconcilia com isto
                 "entradas": [{"nome": e.get("nome",
                                             str(e.get("alvo",
@@ -118,7 +186,28 @@ class Chain:
                 self.log("chain esperando a TR-8S tocar (de o play nela)")
             return
         self._avisado_parado = False
-        lim = max(1, motor.last_var())
+        # A INVARIANTE do loop: o grid tem que estar na variacao fixada. Se
+        # alguem abriu outra para editar, o cache passa a ser dela e a
+        # perseguicao escreveria o groove no lugar errado - com os bytes 0-2
+        # do cache errado junto. Tenta retravar; nao conseguindo, para.
+        if self.var and motor.variacao != self.var:
+            self.log(f"(!) o grid saiu para a "
+                     f"{L.VARIACOES[motor.variacao-1]}; voltando para a "
+                     f"{L.VARIACOES[self.var-1]}, que e a do loop")
+            if not motor.travar_variacao(self.var):
+                self.log("(!) chain parado: nao consegui voltar para a "
+                         "variacao do loop")
+                self.parar(motor)
+                return
+            # a retrava reabre a variacao, e reabrir custa um recarregar() de
+            # ~2 s. O _bombear_clock mantem o passo_abs andando durante ele,
+            # entao o ciclo pode ter subido VARIAS voltas - e o contador abaixo
+            # desconta uma so. Reancorar e' a resposta honesta: nao sabemos
+            # quantas repeticoes a musica deu ali, e chutar erraria a virada
+            # (revisao do PR #9)
+            self._ciclo = None
+        lim = max(1, motor.last_var_de(self.var) if self.var
+                  else motor.last_var())
         ciclo = motor.passo_abs // lim
         if self._ciclo is None:
             self._ciclo = ciclo
@@ -133,6 +222,15 @@ class Chain:
             self.reps_restantes -= 1
             if self.reps_restantes <= 0:
                 self._avancar(motor)
+                # o _avancar pode ter PARADO o chain (tres escritas recusadas
+                # la dentro). Sem esta saida o tick seguia: recriava a
+                # _fila_escrita de um chain morto, escrevia mais steps depois
+                # do "chain parado" e deixava a fila nao-None para sempre - e
+                # uma fila nao-None congela os adiamentos do motor, entao o kit
+                # nunca mais seria relido nem a troca de pattern recarregaria o
+                # grid (revisao do PR #9)
+                if not self.ativo:
+                    return
             if self.reps_restantes == 1:
                 self._preparar_troca(motor)
         elif ciclo < self._ciclo:
@@ -141,6 +239,15 @@ class Chain:
             self._perseguir(motor)
 
     # ── troca ───────────────────────────────────────────────
+    def perseguindo(self):
+        """True enquanto ha steps por escrever atras do playhead.
+
+        Publico de proposito: o motor adia ler_kit, o rodizio de FX e a
+        recarga por troca de pattern enquanto isto e True, e alcancar o
+        _fila_escrita por getattr de fora fazia esses adiamentos sumirem em
+        silencio num rename (revisao do PR #9)."""
+        return self._fila_escrita is not None
+
     def _proxima(self):
         return self.entradas[(self.idx + 1) % len(self.entradas)]
 
@@ -214,19 +321,47 @@ class Chain:
         inaudivel. Com tudo=True descarrega o que faltou (a virada ja veio),
         inclusive os steps alem do last step."""
         fe = self._fila_escrita
-        lim = max(1, motor.last_var())
+        lim = max(1, motor.last_var_de(self.var) if self.var
+                  else motor.last_var())
         alvo = 16 if tudo else motor.passo_abs % lim
         escritos, s = 0, fe["passo"]
         while s < alvo and (escritos < 3 or tudo):
             for i in range(len(L.INSTRUMENTOS)):
                 vel, sub, prob, alt = fe["dados"].get(
                     i, [(0, 0, 100, False)] * 16)[s]
-                motor.escrever_step(i, s, vel, sub, alt,
-                                    prob=prob if vel else None)
+                # HONRAR O RETORNO. Ate 18/08/2026 este valor era ignorado: com
+                # escrita_bloqueada() True (espelho suspeito, linha nao lida), o
+                # escrever_step recusava e o fe["passo"] avancava assim mesmo -
+                # o groove entrava PELA METADE, calado, e o chain seguia como se
+                # nada. Falhar visivel e melhor que meio groove no ar.
+                if not motor.escrever_step(i, s, vel, sub, alt,
+                                           prob=prob if vel else None):
+                    self._falhas_escrita += 1
+                    if self._desde_falha is None:
+                        self._desde_falha = time.time()
+                    # contar TICKS nao dava tolerancia nenhuma: o laco do
+                    # servidor chama tick a cada 3 ms, entao "tres recusas"
+                    # eram ~9 ms e o engasgo passageiro que o comentario
+                    # promete tolerar nunca teria chance de passar. A janela e
+                    # de tempo, e esperar nela nao arrisca nada: enquanto a
+                    # escrita e recusada o fe["passo"] nao anda, ou seja, nao
+                    # ha meio groove no ar durante a espera (revisao do PR #9)
+                    if (self._falhas_escrita >= self.FALHAS_ATE_PARAR and
+                            time.time() - self._desde_falha >=
+                            self.TOLERANCIA_ESCRITA_S):
+                        self.log("(!) chain parado: a escrita esta bloqueada e "
+                                 "o groove entraria pela metade")
+                        self.parar(motor)
+                    return
                 if tudo:
                     time.sleep(0.002)
             s += 1
             escritos += 1
+            # SO aqui: zerar depois do while zerava tambem nos ticks em que o
+            # corpo nao rodou (fe["passo"] >= alvo, o caso comum logo apos a
+            # virada), apagando o historico de recusas sem ter havido escrita
+            # nenhuma (revisao do PR #9)
+            self._falhas_escrita, self._desde_falha = 0, None
         fe["passo"] = s
         if s >= 16:
             self._fila_escrita = None
