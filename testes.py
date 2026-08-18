@@ -550,10 +550,6 @@ class TesteContratos(unittest.TestCase):
         "cancelar_captura": "idem",
         "anotar_opcao": "idem",
         "esquecer_fx": "idem",
-        # duplica o caminho do exec com OUTRA chave de payload (a["var"] contra
-        # a["arg"]): quem chamar a 'obvia' passa o argumento errado e nada
-        # acontece. Candidata a remocao - ver o plano de 17/08
-        "variacao": "duplicada pelo exec; payload divergente",
     }
     EXEC_ORFAOS = {"oculto": "esconder linha muda saiu da barra de ferramentas"}
     UTIL_ORFAOS = {"visor": "botoes de utility sairam com a aba Avancado",
@@ -664,6 +660,45 @@ class TesteContratos(unittest.TestCase):
                          f"a pagina le chaves que o estado nao tem: "
                          f"{sorted(faltando)}. Se for propriedade de evento do "
                          "DOM, acrescente em EVENTO_DOM")
+
+    # chaves que o estado produz de proposito sem ninguem ler. Cada uma precisa
+    # de motivo escrito - o `pads` viveu aqui sem motivo nenhum, custando ~1.070
+    # cor_do_step por segundo DENTRO do lock do motor, para nenhum leitor
+    ESTADO_SEM_LEITOR = {
+        "mudo_bits_altos": "sonda de pesquisa: os bits 11-15 do mute",
+        "passo_maquina": "conferencia da nossa contagem de clock contra a dela",
+        "auto_fill": "intervalo do AUTO FILL IN, decifrado e ainda sem tela",
+        "velocidade": "a tela usa vel_idx + D.velocidades",
+        "modo": "a tela usa modo_idx + D.modos_step",
+        "esconder_mudos": "estado do grid fisico, nao da pagina",
+        "var_presumida": "distincao ancorado x presumido, ainda sem tela",
+        "lista_visivel": "a tela usa janela",
+        "desfazer_disponivel": "a tela usa desfazer_pilha",
+        "captura_fx": "a captura guiada saiu da tela em 17/08/2026",
+    }
+
+    def test_chave_produzida_sem_leitor(self):
+        """O par do teste acima, e ele faltava. Chave que ninguem le nao quebra
+        nada - so custa. O `pads` era 128 cor_do_step por quadro, ~8 quadros por
+        segundo, dentro do lock, para leitor nenhum: ficou meses assim porque
+        nada olhava para este lado do contrato."""
+        produzidas = self.chaves_do_estado()
+        lidas = set()
+        for arq, texto_js in _mjs():
+            lidas |= set(re.findall(r'\be\.([a-z_][a-zA-Z0-9_]*)', texto_js))
+            if arq == os.path.join("abas", "grooves.mjs"):
+                lidas |= set(re.findall(r'\bultimo\.([a-z_][a-zA-Z0-9_]*)',
+                                        texto_js))
+        sobrando = produzidas - lidas - set(self.ESTADO_SEM_LEITOR)
+        self.assertFalse(sobrando,
+                         f"o estado produz sem ninguem ler: {sorted(sobrando)}. "
+                         "Se for de proposito, acrescente em ESTADO_SEM_LEITOR "
+                         "com o motivo; se nao, e trabalho jogado fora a cada "
+                         "quadro")
+        limpas = set(self.ESTADO_SEM_LEITOR) - produzidas
+        self.assertFalse(limpas,
+                         f"ESTADO_SEM_LEITOR cita chave que nao existe mais: "
+                         f"{sorted(limpas)} - limpe a lista")
 
     # ── contrato de aba ──
     def test_toda_aba_cumpre_o_contrato(self):
@@ -919,6 +954,73 @@ class TesteProtocolo(unittest.TestCase):
         self.assertEqual(L.Motor._fx_off(ent, None), 0x01)
         self.assertEqual(L.Motor._fx_off({"off": 0x10}, 5), 0x10,
                          "sem off_por_inst o indice nao pode somar")
+
+
+class TesteRespiroDoFill(unittest.TestCase):
+    """O playhead some e o grid respira enquanto a maquina toca um FILL IN.
+
+    Decidido em 17/08/2026, no dia seguinte ao byte do fill ser decifrado
+    (perf 0x09). Antes disso o verde corria sobre a variacao aberta durante o
+    fill - a unica cor da tela e dos pads mentindo sobre o som. Nao era
+    descuido: ate haver o byte, nao havia informacao, e a regra da casa quando
+    falta informacao e mostrar, nao apagar."""
+
+    def motor(self, fill=None, variacao=1, tocando=1, passo=0, last=16):
+        m = object.__new__(L.Motor)
+        m.fill_ativo = fill
+        m.variacao = variacao
+        m.variacao_tocando = tocando
+        m.passo = passo
+        m.ultimo_var = {v: last for v in range(1, 11)}
+        return m
+
+    def test_playhead_some_no_fill(self):
+        self.assertFalse(self.motor(fill=True).playhead_visivel(),
+                         "o fill esta soando: o verde na variacao aberta mente")
+
+    def test_playhead_fica_para_quem_edita_o_proprio_fill(self):
+        """Variacao 9 e 10 sao os dois Fill In: ai o verde e verdade."""
+        self.assertTrue(self.motor(fill=True, variacao=9).playhead_visivel())
+
+    def test_sem_fill_vale_a_regra_antiga(self):
+        self.assertTrue(self.motor(fill=False).playhead_visivel())
+        self.assertFalse(self.motor(fill=False, variacao=2).playhead_visivel(),
+                         "grid noutra variacao continua sem playhead")
+
+    def test_fill_nao_lido_nao_muda_nada(self):
+        """None = o bloco de performance ainda nao foi lido. Sem leitura, o
+        comportamento e o de antes - mesma disciplina do pulsos_p_step()."""
+        self.assertTrue(self.motor(fill=None).playhead_visivel())
+
+    def test_a_curva_do_respiro_fecha(self):
+        """O respiro TEM que voltar a 1 nas pontas do compasso: e isso que
+        garante que o grid nao fica apagado quando o fill acaba - e o fill acaba
+        exatamente na virada (medido: 17 de 17 transicoes no step 15 -> 0)."""
+        m = self.motor(fill=True)
+        m.passo = 0
+        self.assertAlmostEqual(m._fator_respiro(), 1.0, places=6)
+        fatores = []
+        for p in range(16):
+            m.passo = p
+            f = m._fator_respiro()
+            self.assertTrue(0.0 <= f <= 1.0, f"fator fora de faixa no step {p}")
+            fatores.append(f)
+        self.assertAlmostEqual(min(fatores), L.RESPIRO_FUNDO, places=6)
+        self.assertEqual(fatores.index(min(fatores)), 8,
+                         "o fundo do respiro tem que cair no meio do compasso")
+
+    def test_respirar_escurece_sem_explodir(self):
+        """Indice de paleta nao escurece - por isso a cor passa por RGB. Indice
+        que a tabela nao conhece sai INTACTO em vez de virar preto: cor errada
+        e pior que cor sem respiro."""
+        cheia = L.respirar(L.COR_FORTE, 1.0)
+        fundo = L.respirar(L.COR_FORTE, L.RESPIRO_FUNDO)
+        self.assertTrue(all(0 <= c <= 127 for c in cheia))
+        self.assertTrue(all(0 <= c <= 127 for c in fundo))
+        self.assertLess(sum(fundo), sum(cheia), "o respiro nao escureceu")
+        self.assertEqual(L.respirar(0x7E, 0.5), 0x7E,
+                         "indice desconhecido tem que sair intacto")
+        self.assertEqual(L.respirar(L.COR_FORTE, 0.0), (0, 0, 0))
 
 
 class TesteServidorSemMotor(unittest.TestCase):

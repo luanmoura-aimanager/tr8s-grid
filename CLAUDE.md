@@ -88,6 +88,15 @@ funciona é o Luan, na frente da máquina.
 - Só um processo por vez pode usar a porta CTRL. Um `run` esquecido em background impede
   o `.app` de abrir
 
+## Formatação
+
+**Os `.py` não são formatados automaticamente, e isso é deliberado.** O estilo é
+alinhamento manual: são ~170 comentários alinhados à direita só no `lp_tr8s.py`, tabelas
+de constantes em coluna, e dicionários como o `PULSOS_POR_SCALE`, cuja coluna
+`(deduzido)`/`(medido)` carrega a distinção que este arquivo trata como fundamental.
+Rodar `black` colapsaria tudo isso — não há config de formatter versionada no
+repositório, e não deve haver. Os `.mjs` seguem o prettier padrão.
+
 ## Idioma
 
 Código, comentários e documentação em **português**, sem acento nos identificadores e nos

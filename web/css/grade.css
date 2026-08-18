@@ -68,7 +68,9 @@
 }
 .cel:hover{ transform:scale(1.08) }
 .cel:active{ transform:scale(.94) }
-.cel[data-tempo]{ box-shadow:inset 1px 0 0 var(--linha2) }
+/* cabeca de tempo: a mesma cor que o pad acende nos steps 1/5/9/13
+   (--c-tempo = COR_TEMPO), em vez de um token de layout qualquer */
+.cel[data-tempo]{ box-shadow:inset 1px 0 0 var(--c-tempo,#3a3a3a) }
 
 /* cada estado ganha a cor que veio do Python */
 .cel[data-c="nota"]      { background:var(--c-nota) }
@@ -123,10 +125,11 @@
  * ao normal assim que a coluna passa. */
 .cel[data-play="f"]{ background:var(--c-play,#33d17a);
                      box-shadow:0 0 8px #33d17a66 }
-.cel[data-play="o"]{
-  background:color-mix(in srgb, var(--c-play,#33d17a) 22%,
-             var(--c-vazio,#26221e));
-}
+/* o playhead sobre step VAZIO usa a cor que o Python manda para ele
+   (--c-play_vazio = COR_PLAY, o mesmo indice que acende no pad). Aqui havia um
+   color-mix inventado no CSS, e por isso tela e aparelho divergiam justo onde
+   a tabela de cores existe para NAO divergirem (ver paleta.mjs) */
+.cel[data-play="o"]{ background:var(--c-play_vazio,#14532d) }
 
 /* ── janela dos Launchpads: moldura de 8 linhas sobre o grid ──
  * Substitui o antigo "espelho dos LEDs". --j0 = primeira linha (indice no
@@ -157,3 +160,27 @@
 }
 .menu-step h4{ font-size:var(--t-peq); color:var(--fraco);
                text-transform:uppercase; letter-spacing:var(--esp-rot) }
+
+/* ── o fill: o grid respira (17/08/2026) ──────────────────
+ * Enquanto a TR-8S toca um FILL IN, o que sai pela caixa nao e a variacao
+ * aberta - entao o playhead some (quem decide isso e o playhead_visivel, no
+ * motor, e vale para os pads tambem) e as notas ACESAS respiram por um
+ * compasso. Vazio nao respira: o pattern continua legivel enquanto o grid
+ * avisa.
+ *
+ * A duracao vem de --compasso, que o relogio da grade MEDE (grade-steps.mjs):
+ * o respiro fecha na virada em qualquer BPM e qualquer scale. */
+@keyframes respiro{ 50%{ filter:brightness(.45) } }
+
+[data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]){
+  animation:respiro var(--compasso, 2800ms) ease-in-out infinite;
+}
+
+/* Sem movimento, um substituto ESTATICO - e a regra da casa (ver o
+   [data-pedida] acima, que vira borda tracejada em vez de so parar de piscar):
+   as notas ficam atenuadas enquanto o fill dura, e o aviso continua existindo */
+@media (prefers-reduced-motion:reduce){
+  [data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]){
+    animation:none; filter:brightness(.6)
+  }
+}

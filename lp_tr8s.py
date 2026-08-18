@@ -597,6 +597,30 @@ RGB_BORDA = {
     COR_ALT:     (127, 110, 0),     # amarelo
 }
 
+# AMPLITUDE DO RESPIRO do fill: quanto a nota chega a escurecer no fundo da
+# curva. 0.45 = some quase pela metade e volta. E o unico numero de calibragem
+# no olho aqui - se ficar agressivo, sobe; se ficar invisivel, desce.
+RESPIRO_FUNDO = 0.45
+
+
+def respirar(cor, fator):
+    """Escurece uma cor do GRID por um fator 0-1, devolvendo RGB 0-127.
+
+    Precisa passar por RGB porque indice de paleta nao escurece: o Launchpad
+    so tem aquele tom. O PALETA_HEX ja traduz todo indice do grid, e o
+    cor_hex() faz a conversao inversa (RGB 0-127 -> hex dobrando), entao aqui e
+    so desfazer. Mesma ideia do cor_borda(), que faz isto para os botoes."""
+    if isinstance(cor, tuple):
+        rgb = cor
+    else:
+        h = PALETA_HEX.get(cor)
+        if not h:
+            return cor                   # cor que nao sei escurecer sai intacta
+        rgb = tuple(int(h[i:i + 2], 16) // 2 for i in (1, 3, 5))
+    f = max(0.0, min(1.0, fator))
+    return tuple(max(0, min(127, int(round(c * f)))) for c in rgb)
+
+
 def cor_borda(cor, ativo=False):
     """Escurece uma cor de botao de borda. Aceita indice de paleta ou (r,g,b)."""
     rgb = cor if isinstance(cor, tuple) else RGB_BORDA.get(cor, (70, 70, 70))
@@ -2094,7 +2118,6 @@ class Motor:
         self.logo_t = {}
         self.estilo_standby = ESTILO_CHUVA
         self.proxima_onda = 0.0     # quando nasce a proxima onda do standby
-        self.quadro_onda = None     # ultimo quadro da ondinha, so pra janela ver
 
     # ── portas ──────────────────────────────────────────────
     def _abrir_tr8s(self):
@@ -2537,7 +2560,14 @@ class Motor:
         self.mudo_bits_altos = m & ~((1 << len(INSTRUMENTOS)) - 1)
         # o fill vem no mesmo bloco, sem custo nenhum de leitura
         if len(d) > OFF_FILL:
-            self.fill_ativo = bool(d[OFF_FILL])
+            antes_fill, self.fill_ativo = self.fill_ativo, bool(d[OFF_FILL])
+            # REPINTAR NA VIRADA, nos dois sentidos. Entrando no fill, o
+            # mover_playhead para de pintar a coluna e o ultimo verde ficaria
+            # CONGELADO no grid ate alguem repintar. Saindo, o respiro precisa
+            # desfazer. Um quadro inteiro sao 2 SysEx, e isto acontece duas
+            # vezes por fill - mais barato que qualquer alternativa.
+            if antes_fill is not None and antes_fill != self.fill_ativo:
+                self.pintar()
         novo = [bool(m >> i & 1) for i in range(len(INSTRUMENTOS))]
         mudou = novo != self.mudo
         self.mudo = novo
@@ -2858,13 +2888,25 @@ class Motor:
         projeto - e era justamente ali que o playhead mentia, correndo sobre um
         pattern que ninguem estava ouvindo.
 
-        Os FILLS sao exceção: a mascara da variacao tocando so reporta A-H
-        (REFERENCIA 2.3.2), entao sobre eles nao ha informacao nenhuma - e a
-        regra da casa quando falta informacao e mostrar, nao apagar. Sem isso,
-        editar um fill perdia a referencia de tempo por um detalhe de protocolo.
+        A MAQUINA NUM FILL (17/08/2026). Enquanto o fill toca, o que sai pela
+        caixa nao e a variacao aberta - entao o verde correndo sobre ela e
+        mentira, e ele some. A excecao e quem esta editando o proprio fill que
+        soa: ai o playhead e verdade e fica.
+
+        Ate 17/08 os fills eram excecao pelo motivo OPOSTO: a mascara de
+        variacao habilitada so reporta A-H (REFERENCIA 2.3.2), entao nao havia
+        informacao nenhuma sobre eles, e a regra da casa quando falta
+        informacao e mostrar, nao apagar. O byte 0x09 da performance acabou com
+        a falta de informacao; a regra continua a mesma, so que agora ela tem
+        dado para trabalhar.
+
+        Com fill_ativo em None (bloco ainda nao lido) vale a regra antiga - a
+        mesma disciplina do pulsos_p_step() com a scale nao lida.
 
         Isto e mais frouxo que em_fase_com_a_maquina() de propósito: dá pra
         DESENHAR o playhead num fill, mas não dá pra CORRIGIR a fase por ele."""
+        if self.fill_ativo:
+            return self.eh_fill()
         return self.em_fase_com_a_maquina() or self.eh_fill()
 
     def polirritmia(self):
@@ -2903,7 +2945,14 @@ class Motor:
                      [(self.nota_de(dev, l, col), self.cor_do_step(l, step))
                       for l in range(8)])
 
-    def pintar(self):
+    def pintar(self, fator=None):
+        """Repinta o grid inteiro: dois SysEx, um por Launchpad.
+
+        'fator' e o respiro do fill: com ele, so as celulas COM NOTA saem
+        escurecidas (o resto sai igual), para o pattern continuar legivel
+        enquanto o grid avisa que quem esta soando e outra coisa. Passa pelo
+        mesmo caminho de geometria de sempre - nao ha segunda versao desta
+        funcao para manter em sincronia."""
         # fora do ON o grid nao tem o que desenhar - e o fundo preto que a
         # ondinha usa. Isso NAO e cosmetico: no standby a TR-8S pode estar
         # desligada, e cor_do_step leria um cache vazio.
@@ -2914,9 +2963,26 @@ class Motor:
                               for l in range(8) for c in range(8)])
             return
         for dev, off in (("E", 0), ("D", 8)):
-            enviar_cores(self.lp_out[dev],
-                         [(self.nota_de(dev, l, c), self.cor_do_step(l, off + c))
-                          for l in range(8) for c in range(8)])
+            pares = []
+            for l in range(8):
+                for c in range(8):
+                    step = off + c
+                    cor = self.cor_do_step(l, step)
+                    if fator is not None and self.step_ligado(l, step):
+                        cor = respirar(cor, fator)
+                    pares.append((self.nota_de(dev, l, c), cor))
+            enviar_cores(self.lp_out[dev], pares)
+
+    def _fator_respiro(self):
+        """A curva do respiro, em funcao da FASE DO COMPASSO.
+
+        Sem timer e sem estado: depende so do step atual, entao o respiro fica
+        em tempo com a musica de graca e FECHA sozinho na virada - que e
+        exatamente onde o fill acaba (medido em 17/08/2026: 17 de 17 transicoes
+        no step 15 -> 0). Vale 1 nas pontas e RESPIRO_FUNDO no meio."""
+        lim = max(1, self.last_var())
+        fase = (self.passo % lim) / lim if self.passo >= 0 else 0.0
+        return 1.0 - (1.0 - RESPIRO_FUNDO) * math.sin(math.pi * fase)
 
     def _luz(self, out, control, valor):
         if isinstance(valor, tuple):
@@ -2990,6 +3056,12 @@ class Motor:
         # reaparecer no lugar certo quando voce volta pra variacao que toca,
         # em vez de ressuscitar onde parou
         if not self.playhead_visivel():
+            # A MAQUINA NUM FILL: em vez de so nao pintar, o grid RESPIRA. Sao
+            # 16 quadros por compasso dirigidos pelo proprio clock, ao mesmo
+            # custo de 2 SysEx por step que o playhead normal ja tinha - sem
+            # timer, sem laco de fps, sem trafego novo.
+            if self.fill_ativo and self.modo_geral == MODO_ON:
+                self.pintar(self._fator_respiro())
             return
         if self.polirritmia():
             # cada linha esta numa coluna diferente: repintar duas colunas nao
@@ -3903,7 +3975,6 @@ class Motor:
             # _animar nao roda mais (ondas vazias, nada sujo), entao ninguem
             # limparia o ultimo quadro e a janela ficaria com uma onda congelada
             # enquanto os LEDs ja estao pretos
-            self.quadro_onda = None
             if modo == MODO_STANDBY:
                 self.estilo_standby = estilo or self.estilo_standby
                 self.ondas, self.onda_suja = [], False
@@ -3986,12 +4057,8 @@ class Motor:
         if not self.ondas:
             if self.onda_suja:            # um ultimo quadro pra apagar tudo
                 self.pintar(); self.onda_suja = False
-                self.quadro_onda = None
             return
         self.onda_suja = True
-        # o quadro e montado inteiro antes de sair: a janela le esta mesma
-        # matriz pra espelhar a animacao sem recalcular nada
-        quadro = [[(0, 0, 0)] * 16 for _ in range(8)]
         for dev, off in (("E", 0), ("D", 8)):
             pares = []
             for l in range(8):
@@ -4005,10 +4072,8 @@ class Motor:
                         k = anel * (1.0 - vt / o["alc"])
                         r += o["rgb"][0]*k; g += o["rgb"][1]*k; b += o["rgb"][2]*k
                     cor = (min(127, r), min(127, g), min(127, b))
-                    quadro[l][step] = cor
                     pares.append((self.nota_de(dev, l, c), cor))
             enviar_cores(self.lp_out[dev], pares)
-        self.quadro_onda = quadro
 
     # ── laco ────────────────────────────────────────────────
     def _ler_clock(self):
@@ -4622,12 +4687,6 @@ class Motor:
                 "tem_clock": self.clk is not None,
                 "tem_tr8s": self.tr_out is not None,
                 "estilo_standby": self.estilo_standby,
-                # cores ja resolvidas: a UI so traduz indice/tupla em hex. Fora
-                # do ON quem manda no grid e a ondinha, e o quadro dela ja esta
-                # calculado - a janela mostra a mesma animacao dos LEDs.
-                "pads": ([[self.cor_do_step(l, s) for s in range(16)]
-                          for l in range(8)] if self.modo_geral == MODO_ON
-                         else self.quadro_onda),
                 "pattern": {i: [self.ler_vel(i, s) for s in range(16)]
                             for i in self.cache} if self.carregado else {},
                 "subs": {i: [self.ler_sub(i, s) for s in range(16)]

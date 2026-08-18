@@ -302,6 +302,12 @@ function pintar(e, dados) {
   // A mascara de variacao nunca reportou os fills, entao ate aqui o grid seguia
   // desenhando como se nada tivesse acontecido.
   if (e.fill_ativo) quer.push(["fill", "chip chip-fill", "FILL IN"]);
+  // o mesmo respiro dos Launchpad, na tela: as notas acesas pulsam por um
+  // compasso enquanto o fill soa, e o playhead some (quem manda nele e o
+  // playhead_visivel, que o motor ja calcula). A duracao vem do relogio da
+  // grade, que MEDE quanto dura um step - assim o respiro fecha na virada em
+  // qualquer BPM e qualquer scale, sem ninguem passar numero
+  attr(document.body, "data-fill", e.fill_ativo ? "" : null);
   if (e.alt) quer.push(["alt", "chip", "ALT ligado"]);
   if (e.armado) quer.push(["arm", "chip", "CLEAR armado"]);
   if (e.polirritmia) quer.push(["poli", "chip", "polirritmia"]);

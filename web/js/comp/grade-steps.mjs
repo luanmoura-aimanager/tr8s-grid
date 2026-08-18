@@ -261,8 +261,14 @@ export function gradeSteps({
         const dt =
           (agora - tPasso) / Math.max(1, (p - passoReal + ciclo) % ciclo);
         // 30..2000 ms cobre de 500 bpm a 8 bpm; fora disso e engasgo de rede
-        if (dt > 30 && dt < 2000)
+        if (dt > 30 && dt < 2000) {
           durStep = durStep ? durStep * 0.7 + dt * 0.3 : dt;
+          // o respiro do fill (CSS) dura UM COMPASSO. Quem sabe quanto isso
+          // vale em ms e este relogio, que mede o step de verdade - assim o
+          // respiro fecha na virada em qualquer BPM e qualquer scale, sem
+          // ninguem escrever numero nenhum no CSS
+          prop(raiz, "--compasso", Math.round(durStep * ciclo) + "ms");
+        }
       }
       passoReal = p;
       tPasso = agora;

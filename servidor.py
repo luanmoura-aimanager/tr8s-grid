@@ -433,8 +433,6 @@ ACOES = {
     "estocastica": _acao_estocastica,
     "util": _acao_util,
     "externa": _acao_externa,
-    "variacao": lambda a: HOST.enfileirar(HOST.motor.executar, "variacao",
-                                          int(a["var"])),
     "last_var": lambda a: HOST.enfileirar(HOST.motor.definir_last_var,
                                           int(a["valor"])),
 }
