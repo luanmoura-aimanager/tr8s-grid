@@ -2534,13 +2534,29 @@ girando — explicaria o sintoma, mas isso **não foi lido no código-fonte do R
 confirmado além do teste empírico acima**.
 
 **O que existe agora**: um botão **"Reiniciar servidor"** na barra do topo, do lado de
-Recalibrar/Apagar pads. Ele chama a mesma saída limpa do "Encerrar" (`_encerrar()`: para
-o motor, apaga `~/.lp_tr8s_servidor.json`, `os._exit(0)`) — como o LaunchAgent tem
-`KeepAlive` incondicional (`<key>KeepAlive</key><true/>`, sem condição de
-`SuccessfulExit`), ele volta sozinho em menos de um segundo, com o cliente MIDI do zero.
-Usar quando o hardware já está confirmado certo (`ports` mostrando os 4) e o app
-continua recusando. **Ainda não testado em hardware pelo Luan** — só o mecanismo
-equivalente (`launchctl kickstart -k`) foi confirmado ao vivo hoje; o botão precisa de
+Recalibrar/Apagar pads. Usar quando o hardware já está confirmado certo (Launchpad ou
+TR-8S) e o app continua recusando — o mecanismo troca o cliente MIDI inteiro do
+processo, não é específico do Launchpad.
+
+Ele **não** reusa a saída do "Encerrar" (`_encerrar()`, que faz `os._exit(0)` contando
+com o `KeepAlive` do LaunchAgent pra voltar sozinho). A revisão de código do PR pegou por
+que isso seria errado aqui: o `.app` do Desktop, quando é ele quem está de fato servindo
+(LaunchAgent não instalado ou removido), só faz `exec python3 servidor.py` sem
+supervisor nenhum (`criar_app.py`) — um `_exit(0)` ali mataria o servidor pra sempre, e a
+página ficaria esperando "aguarde alguns segundos" que nunca chega. Em vez disso o botão
+chama `_reiniciar_servidor()`, que troca o processo **no próprio lugar** com
+`os.execv(sys.executable, [sys.executable] + sys.argv)` — funciona igual nos dois modos
+de lançamento, sem precisar saber quem chamou. Cuidado de threading registrado no
+próprio código: essa troca acontece numa thread de fundo que **não** coordena com a
+thread principal (que segue presa no `serve_forever()`) — nem `shutdown()` nem
+`server_close()` são chamados nela, porque esperar a thread principal retornar antes do
+`execv()` é uma corrida real (o interpretador pode encerrar o processo pelo fim do
+`main()` antes do `execv()` rodar). A porta libera sozinha no exec porque os
+file descriptors do Python já nascem non-inheritable desde a 3.4 (PEP 446).
+
+**Ainda não testado em hardware pelo Luan** — só o mecanismo equivalente
+(`launchctl kickstart -k`, que reinicia o processo por fora) foi confirmado ao vivo hoje;
+o `execv()` de dentro do próprio processo, especificamente, ainda não. O botão precisa de
 `instalar_agente.py` + `criar_app.py` para ir ao ar, o que por si derruba a sessão atual
 (ver "Depois de editar" no CLAUDE.md) — fazer isso fora de uma sessão de hardware.
 

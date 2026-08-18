@@ -339,27 +339,38 @@ def _acao_util(a):
         HOST.enfileirar(tabela[a["op"]])
 
 
+# fechada de proposito, como a EXEC_OK do Motor.executar: um "op" que nao
+# esta aqui cai no ValueError abaixo em vez de, por exemplo, cair no ramo do
+# blackout por acidente e apagar os pads calado
+EXTERNA_OK = {"recalibrar", "reiniciar", "blackout"}
+
+
 def _acao_externa(a):
-    """Recalibrar, reiniciar e blackout saem para fora do processo, como antes."""
+    """Recalibrar troca o processo por Terminal+learn; reiniciar e blackout
+    ficam neste processo (reiniciar troca o proprio processo de lugar,
+    blackout so dispara um script a parte)."""
+    op = a["op"]
+    if op not in EXTERNA_OK:
+        raise ValueError(f"externa '{op}' nao permitida")
     HOST.parar_motor()
-    if a["op"] == "recalibrar":
+    if op == "recalibrar":
         script = os.path.join(AQUI, "lp_tr8s.py")
         HOST.log("Abrindo o Terminal pro 'learn' (ele faz perguntas).")
         subprocess.Popen(["osascript", "-e",
                           f'tell app "Terminal" to do script '
                           f'"python3 \\"{script}\\" learn"',
                           "-e", 'tell app "Terminal" to activate'])
-    elif a["op"] == "reiniciar":
+    elif op == "reiniciar":
         # o cliente MIDI do rtmidi/CoreMIDI deste processo pode ficar preso
-        # vendo um conjunto de portas Launchpad que nao existe mais depois de
-        # um replug USB - mesmo listar_portas() abrindo um MidiIn novo a cada
-        # chamada, o processo continua recusando com "o conjunto de Launchpad
-        # mudou" mesmo com o hardware de volta (18/08/2026). Um processo NOVO
-        # sempre ve o estado certo. O LaunchAgent tem KeepAlive, entao sair
-        # do processo basta - ele volta sozinho com o cliente MIDI do zero
-        HOST.log("Reiniciando o servidor (o processo volta sozinho em "
-                 "seguida) para refazer a leitura das portas MIDI...")
-        threading.Thread(target=_encerrar, daemon=True).start()
+        # vendo um conjunto de portas Launchpad (ou ate a propria TR-8S) que
+        # nao existe mais depois de um replug USB - mesmo listar_portas()
+        # abrindo um MidiIn novo a cada chamada, o processo continua
+        # recusando com "o conjunto de Launchpad mudou" mesmo com o hardware
+        # de volta (18/08/2026, REFERENCIA 7.9). Um processo NOVO sempre ve
+        # o estado certo
+        HOST.log("Reiniciando o servidor (o processo troca de lugar "
+                 "sozinho) para refazer a leitura das portas MIDI...")
+        threading.Thread(target=_reiniciar_servidor, daemon=True).start()
     else:
         subprocess.Popen([sys.executable, os.path.join(AQUI, "apagar_luzes.py")])
         HOST.log("LEDs apagados e pads soltos.")
@@ -701,6 +712,36 @@ def _encerrar():
     except OSError:
         pass
     os._exit(0)
+
+
+def _reiniciar_servidor():
+    """Troca o processo por um novo NO LUGAR (execv), em vez de sair e contar
+    com alguem religar - diferente do _encerrar() do /sair, que usa
+    os._exit(0) e depende do KeepAlive do LaunchAgent.
+
+    POR QUE NAO REUSAR O _encerrar(). O .app do Desktop, quando e ele quem
+    esta de fato servindo (LaunchAgent nao instalado, ou removido), so faz
+    `exec python3 servidor.py` sem supervisor nenhum (ver criar_app.py) - um
+    _exit(0) ali mataria o servidor pra sempre, e a pagina ficaria esperando
+    "aguarde alguns segundos" que nunca chega. execv funciona nos dois casos
+    igual, sem precisar saber quem o lancou.
+
+    NAO chama shutdown()/server_close() no socket do serve_forever() (que
+    continua rodando na thread principal): coordenar com aquela thread e
+    esperar ela retornar cria uma corrida de verdade - se a thread principal
+    terminar o main() antes desta thread (daemon) chegar no execv(), o
+    interprete pode derrubar o processo inteiro primeiro, e o execv nunca
+    acontece. os._exit()/os.execv() daqui de dentro nao tem esse problema:
+    trocam o processo debaixo da outra thread, nao importa o que ela esteja
+    fazendo. A porta libera sozinha no exec sem precisar de close explicito -
+    os fds do Python nascem non-inheritable desde a 3.4 (PEP 446)."""
+    time.sleep(0.3)
+    HOST.parar_motor()
+    try:
+        os.remove(ARQ_SERVIDOR)
+    except OSError:
+        pass
+    os.execv(sys.executable, [sys.executable] + sys.argv)
 
 
 def _instancia_viva():
