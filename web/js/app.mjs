@@ -302,12 +302,16 @@ function pintar(e, dados) {
   // A mascara de variacao nunca reportou os fills, entao ate aqui o grid seguia
   // desenhando como se nada tivesse acontecido.
   if (e.fill_ativo) quer.push(["fill", "chip chip-fill", "FILL IN"]);
-  // o mesmo respiro dos Launchpad, na tela: as notas acesas pulsam por um
-  // compasso enquanto o fill soa, e o playhead some (quem manda nele e o
-  // playhead_visivel, que o motor ja calcula). A duracao vem do relogio da
-  // grade, que MEDE quanto dura um step - assim o respiro fecha na virada em
-  // qualquer BPM e qualquer scale, sem ninguem passar numero
-  attr(document.body, "data-fill", e.fill_ativo ? "" : null);
+  // O mesmo respiro dos Launchpad, na tela: as notas acesas E o playhead pulsam
+  // enquanto o fill soa. O playhead FICA - a TR-8S mantem o dela, e a posicao e
+  // verdadeira; o respiro e que diz de onde vem o som.
+  //
+  // A condicao inclui playhead_visivel de proposito, e e a MESMA do motor
+  // (mover_playhead): o respiro qualifica o playhead, entao sem playhead nao ha
+  // o que qualificar. Sem isto a tela pulsava com o grid noutra variacao e os
+  // pads nao - divergencia tela/aparelho, que e o que este projeto mais evita.
+  attr(document.body, "data-fill",
+       e.fill_ativo && e.playhead_visivel ? "" : null);
   if (e.alt) quer.push(["alt", "chip", "ALT ligado"]);
   if (e.armado) quer.push(["arm", "chip", "CLEAR armado"]);
   if (e.polirritmia) quer.push(["poli", "chip", "polirritmia"]);

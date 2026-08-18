@@ -1176,9 +1176,12 @@ parâmetros** (`vel`, `larg`, `alc`) no dicionário, em vez de todas lerem as co
 exatamente os valores fixos de antes — o comportamento já exercitado em hardware não
 mudou. O render (`_animar`) não sabe que estilos existem; ele só lê o que a onda traz.
 
-O `_animar` agora também guarda o quadro em `self.quadro_onda`, e o `estado()` devolve
-isso no lugar de `pads` quando está fora do `ON`: a seção "Grid 16×8" da janela mostra a
-mesma animação dos LEDs, de graça, sem recalcular nada.
+~~O `_animar` também guarda o quadro em `self.quadro_onda`, e o `estado()` devolve isso
+no lugar de `pads` fora do `ON`.~~ **Removido em 18/08/2026**: quem lia era a seção
+"Grid 16×8" da janela Tk, que saiu de cena; a tela web reconstrói as cores sozinha. O
+`pads` custava 128 `cor_do_step()` por quadro **para ninguém**, e o `quadro_onda` era uma
+matriz 8×16 montada a 30 fps pelo mesmo motivo. O `test_chave_produzida_sem_leitor`
+existe para impedir que voltem sem querer.
 
 Isto **não** é o modo `coração` (que desenhava `C E`/`C I` e um coração, e foi removido a
 pedido em 13/08/2026 — não reintroduzir): aquele era figura fixa, este é procedural e não

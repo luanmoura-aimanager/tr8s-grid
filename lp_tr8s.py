@@ -609,7 +609,15 @@ def respirar(cor, fator):
     Precisa passar por RGB porque indice de paleta nao escurece: o Launchpad
     so tem aquele tom. O PALETA_HEX ja traduz todo indice do grid, e o
     cor_hex() faz a conversao inversa (RGB 0-127 -> hex dobrando), entao aqui e
-    so desfazer. Mesma ideia do cor_borda(), que faz isto para os botoes."""
+    so desfazer. Mesma ideia do cor_borda(), que faz isto para os botoes.
+
+    RESSALVA: o PALETA_HEX e a tabela da TELA - e a nossa aproximacao de como o
+    indice N aparece no pad, nao uma medicao do aparelho. Com fator 1.0 a cor
+    sai "cheia", mas ja nao e mais o indice: se a aproximacao for grosseira, o
+    tom pode mudar no instante em que o fill comeca. O Luan olhou em 18/08/2026
+    e aprovou; se um dia aparecer diferenca de tom, o conserto e uma tabela RGB
+    propria para o grid, medida no aparelho, como o RGB_BORDA ja e para os
+    botoes."""
     if isinstance(cor, tuple):
         rgb = cor
     else:
@@ -3068,6 +3076,13 @@ class Motor:
         # quadros por compasso dirigidos pelo proprio clock, ao mesmo custo de
         # 2 SysEx por step que o playhead normal ja tinha - sem timer, sem laco
         # de fps, sem trafego novo.
+        #
+        # O respiro anda COLADO no playhead de proposito: ele existe para dizer
+        # "o tempo e este, o som vem de outra variacao", e isso so faz sentido
+        # onde ha playhead desenhado. Com o grid noutra variacao o verde ja nao
+        # aparece - o grid ja nao esta afirmando nada, e nao ha o que qualificar.
+        # A tela usa a MESMA condicao (ver app.mjs): as duas superficies
+        # respiram juntas ou nenhuma respira.
         if self.fill_ativo and self.modo_geral == MODO_ON:
             self.pintar(self._fator_respiro())
             return

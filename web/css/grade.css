@@ -174,18 +174,22 @@
  * o respiro fecha na virada em qualquer BPM e qualquer scale. */
 @keyframes respiro{ 50%{ filter:brightness(.45) } }
 
-[data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]),
-[data-fill] .cel[data-play],
+[data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]):not([data-pendente]),
+[data-fill] .cel[data-play]:not([data-pendente]),
 [data-fill] .playhead{
   animation:respiro var(--compasso, 2800ms) ease-in-out infinite;
 }
+/* o :not([data-pendente]) nao e detalhe: aquele pisca diz "mandei para a
+   maquina e ela ainda nao confirmou", e o atalho `animation` daqui o
+   sobrescreveria por especificidade - o aviso mais importante do grid sumiria
+   justo enquanto um fill toca */
 
 /* Sem movimento, um substituto ESTATICO - e a regra da casa (ver o
    [data-pedida] acima, que vira borda tracejada em vez de so parar de piscar):
    as notas ficam atenuadas enquanto o fill dura, e o aviso continua existindo */
 @media (prefers-reduced-motion:reduce){
-  [data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]),
-  [data-fill] .cel[data-play],
+  [data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]):not([data-pendente]),
+  [data-fill] .cel[data-play]:not([data-pendente]),
   [data-fill] .playhead{
     animation:none; filter:brightness(.6)
   }

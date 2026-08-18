@@ -995,6 +995,27 @@ class TesteRespiroDoFill(unittest.TestCase):
         comportamento e o de antes - mesma disciplina do pulsos_p_step()."""
         self.assertTrue(self.motor(fill=None).playhead_visivel())
 
+    def test_tela_e_pads_respiram_na_MESMA_condicao(self):
+        """A revisao de 18/08 pegou as duas superficies discordando: o motor
+        respirava so com o playhead visivel e a tela so olhava fill_ativo -
+        entao com o grid noutra variacao a tela pulsava e os pads nao. Num
+        projeto que persegue "a cor da tela e a do aparelho nunca divergem",
+        isso e o pior tipo de bug: cada metade parece certa sozinha.
+
+        Este teste le a condicao dos DOIS lados e exige que sejam a mesma."""
+        import inspect
+        fonte_motor = inspect.getsource(L.Motor.mover_playhead)
+        self.assertIn("self.fill_ativo and self.modo_geral == MODO_ON",
+                      fonte_motor)
+        # no motor o respiro esta DEPOIS do guarda do playhead_visivel
+        pos_guarda = fonte_motor.index("if not self.playhead_visivel()")
+        pos_respiro = fonte_motor.index("if self.fill_ativo")
+        self.assertLess(pos_guarda, pos_respiro,
+                        "o respiro tem que ficar depois do guarda do playhead")
+        js = dict(_mjs())["app.mjs"]
+        self.assertIn("e.fill_ativo && e.playhead_visivel", " ".join(js.split()),
+                      "a tela tem que exigir as MESMAS duas condicoes do motor")
+
     def test_a_curva_do_respiro_fecha(self):
         """O respiro TEM que voltar a 1 nas pontas do compasso: e isso que
         garante que o grid nao fica apagado quando o fill acaba - e o fill acaba
