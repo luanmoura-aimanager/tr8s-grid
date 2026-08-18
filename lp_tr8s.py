@@ -2888,25 +2888,24 @@ class Motor:
         projeto - e era justamente ali que o playhead mentia, correndo sobre um
         pattern que ninguem estava ouvindo.
 
-        A MAQUINA NUM FILL (17/08/2026). Enquanto o fill toca, o que sai pela
-        caixa nao e a variacao aberta - entao o verde correndo sobre ela e
-        mentira, e ele some. A excecao e quem esta editando o proprio fill que
-        soa: ai o playhead e verdade e fica.
+        DURANTE O FILL O PLAYHEAD FICA - e quem decidiu isso foi a maquina.
+        A primeira versao disto (17/08/2026, de manha) fazia o verde SUMIR no
+        fill, pelo raciocinio de que o que soa nao e a variacao aberta. Ai o
+        Luan olhou o painel da TR-8S e viu que **ela mantem o playhead durante
+        o fill in**. E ela esta certa: a POSICAO e verdadeira - o sequenciador
+        esta naquele step, contando igual. O que muda e de qual variacao sai o
+        som, e para isso existe o respiro (ver _fator_respiro).
 
-        Ate 17/08 os fills eram excecao pelo motivo OPOSTO: a mascara de
-        variacao habilitada so reporta A-H (REFERENCIA 2.3.2), entao nao havia
-        informacao nenhuma sobre eles, e a regra da casa quando falta
-        informacao e mostrar, nao apagar. O byte 0x09 da performance acabou com
-        a falta de informacao; a regra continua a mesma, so que agora ela tem
-        dado para trabalhar.
+        A licao vale mais que o caso: "nao desenhar o que nao esta soando" foi
+        aplicado a um dado que ESTAVA soando. Quando a maquina tem opiniao
+        sobre uma questao de interface, ela ganha.
 
-        Com fill_ativo em None (bloco ainda nao lido) vale a regra antiga - a
-        mesma disciplina do pulsos_p_step() com a scale nao lida.
+        Os FILLS sao excecao aqui por outro motivo: a mascara de variacao
+        habilitada so reporta A-H (REFERENCIA 2.3.2), entao editar um fill
+        perderia a referencia de tempo por um detalhe de protocolo.
 
         Isto e mais frouxo que em_fase_com_a_maquina() de propósito: dá pra
         DESENHAR o playhead num fill, mas não dá pra CORRIGIR a fase por ele."""
-        if self.fill_ativo:
-            return self.eh_fill()
         return self.em_fase_com_a_maquina() or self.eh_fill()
 
     def polirritmia(self):
@@ -2965,10 +2964,18 @@ class Motor:
         for dev, off in (("E", 0), ("D", 8)):
             pares = []
             for l in range(8):
+                # o step do playhead DAQUELA linha uma vez por linha, nao por
+                # celula: track curto tem modulo proprio, e perguntar 128 vezes
+                # por quadro era exatamente o desperdicio que o "pads" fazia
+                pl = self.passo_da_linha(l) if fator is not None else -1
                 for c in range(8):
                     step = off + c
                     cor = self.cor_do_step(l, step)
-                    if fator is not None and self.step_ligado(l, step):
+                    # respira o que esta ACESO e tambem o playhead: ele fica no
+                    # fill (a maquina o mantem) e respira junto, dizendo "o
+                    # tempo e este, o som e de outra variacao"
+                    if fator is not None and (self.step_ligado(l, step)
+                                              or step == pl):
                         cor = respirar(cor, fator)
                     pares.append((self.nota_de(dev, l, c), cor))
             enviar_cores(self.lp_out[dev], pares)
@@ -3056,12 +3063,13 @@ class Motor:
         # reaparecer no lugar certo quando voce volta pra variacao que toca,
         # em vez de ressuscitar onde parou
         if not self.playhead_visivel():
-            # A MAQUINA NUM FILL: em vez de so nao pintar, o grid RESPIRA. Sao
-            # 16 quadros por compasso dirigidos pelo proprio clock, ao mesmo
-            # custo de 2 SysEx por step que o playhead normal ja tinha - sem
-            # timer, sem laco de fps, sem trafego novo.
-            if self.fill_ativo and self.modo_geral == MODO_ON:
-                self.pintar(self._fator_respiro())
+            return
+        # A MAQUINA NUM FILL: o grid inteiro RESPIRA, playhead junto. Sao 16
+        # quadros por compasso dirigidos pelo proprio clock, ao mesmo custo de
+        # 2 SysEx por step que o playhead normal ja tinha - sem timer, sem laco
+        # de fps, sem trafego novo.
+        if self.fill_ativo and self.modo_geral == MODO_ON:
+            self.pintar(self._fator_respiro())
             return
         if self.polirritmia():
             # cada linha esta numa coluna diferente: repintar duas colunas nao

@@ -162,17 +162,21 @@
                text-transform:uppercase; letter-spacing:var(--esp-rot) }
 
 /* ── o fill: o grid respira (17/08/2026) ──────────────────
- * Enquanto a TR-8S toca um FILL IN, o que sai pela caixa nao e a variacao
- * aberta - entao o playhead some (quem decide isso e o playhead_visivel, no
- * motor, e vale para os pads tambem) e as notas ACESAS respiram por um
- * compasso. Vazio nao respira: o pattern continua legivel enquanto o grid
- * avisa.
+ * Enquanto a TR-8S toca um FILL IN, as notas ACESAS e o playhead respiram por
+ * um compasso. Vazio nao respira: o pattern continua legivel enquanto o grid
+ * avisa que o som esta vindo de outra variacao.
+ *
+ * O playhead FICA - a primeira versao fazia ele sumir, e o Luan viu no painel
+ * da propria TR-8S que ela o mantem durante o fill. A posicao e verdadeira; o
+ * que muda e de onde vem o som, e e isso que o respiro diz.
  *
  * A duracao vem de --compasso, que o relogio da grade MEDE (grade-steps.mjs):
  * o respiro fecha na virada em qualquer BPM e qualquer scale. */
 @keyframes respiro{ 50%{ filter:brightness(.45) } }
 
-[data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]){
+[data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]),
+[data-fill] .cel[data-play],
+[data-fill] .playhead{
   animation:respiro var(--compasso, 2800ms) ease-in-out infinite;
 }
 
@@ -180,7 +184,9 @@
    [data-pedida] acima, que vira borda tracejada em vez de so parar de piscar):
    as notas ficam atenuadas enquanto o fill dura, e o aviso continua existindo */
 @media (prefers-reduced-motion:reduce){
-  [data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]){
+  [data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]),
+  [data-fill] .cel[data-play],
+  [data-fill] .playhead{
     animation:none; filter:brightness(.6)
   }
 }

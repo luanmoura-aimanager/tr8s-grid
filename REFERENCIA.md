@@ -2277,6 +2277,22 @@ vizinho, o `Inst Note` em `---`). **Qualquer plano que dependa de ler o painel
 por CC está morto até alguém achar esse interruptor** — e o custo de descobrir
 isso tarde seria uma sessão inteira concluindo "o controle X não transmite".
 
+### O playhead durante o fill — a máquina decidiu (18/08/2026)
+
+Com o byte do fill na mão, a primeira versão da interface fazia o **playhead sumir**
+enquanto o fill toca: o raciocínio era o de sempre, *não desenhar verde sobre o que não
+está soando*. O Luan olhou o painel da própria TR-8S e viu que **ela mantém o playhead
+durante o fill in**.
+
+E ela está certa: a **posição é verdadeira** — o sequenciador está naquele step,
+contando igual. O que muda é de qual variação sai o som. Então o playhead volta, e quem
+diz "o tempo é este, o som é de outra" é o **respiro**: notas acesas e playhead pulsam
+juntos por um compasso.
+
+A lição vale mais que o caso: a regra foi aplicada a um dado que **estava** soando.
+Quando a máquina tem opinião sobre uma questão de interface, ela ganha — é o mesmo
+princípio que faz este documento separar medido de deduzido.
+
 ### A variação que toca não está em lugar nenhum que a gente leia
 
 O mesmo watch trocou a variação tocando de **A → C → F** e **nenhum byte da

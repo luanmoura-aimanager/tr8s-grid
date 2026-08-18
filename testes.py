@@ -974,12 +974,15 @@ class TesteRespiroDoFill(unittest.TestCase):
         m.ultimo_var = {v: last for v in range(1, 11)}
         return m
 
-    def test_playhead_some_no_fill(self):
-        self.assertFalse(self.motor(fill=True).playhead_visivel(),
-                         "o fill esta soando: o verde na variacao aberta mente")
+    def test_playhead_fica_no_fill_como_na_maquina(self):
+        """A primeira versao fazia o playhead SUMIR no fill. O Luan olhou o
+        painel da TR-8S e viu que ela o MANTEM - e ela esta certa: a posicao e
+        verdadeira, o sequenciador esta naquele step. O que muda e de qual
+        variacao sai o som, e disso cuida o respiro.
 
-    def test_playhead_fica_para_quem_edita_o_proprio_fill(self):
-        """Variacao 9 e 10 sao os dois Fill In: ai o verde e verdade."""
+        Guarda a licao, nao so o comportamento: "nao desenhar o que nao esta
+        soando" foi aplicado a um dado que ESTAVA soando."""
+        self.assertTrue(self.motor(fill=True).playhead_visivel())
         self.assertTrue(self.motor(fill=True, variacao=9).playhead_visivel())
 
     def test_sem_fill_vale_a_regra_antiga(self):
