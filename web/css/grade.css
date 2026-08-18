@@ -22,13 +22,19 @@
 /* ── coluna das variacoes ─────────────────────────────── */
 .vars{ display:grid; grid-template-columns:repeat(4,1fr); gap:var(--e1);
        width:148px }
-.vars .bt{ padding:var(--e2) 0; text-align:center; font-weight:600 }
+/* posicao FIXA para a bolinha: ela vive no padding de baixo, fora do fluxo.
+   Como ::after em display:block ela entrava no fluxo e EMPURRAVA a letra para
+   cima - o A "tocando" ficava mais alto que o B ao lado, e a coluna inteira
+   dancava a cada troca de variacao (18/08/2026, reportado na sessao V1-V7).
+   O padding e simetrico de proposito: a letra fica centrada com ou sem ponto */
+.vars .bt{ position:relative; padding:calc(var(--e2) + 2px) 0;
+           text-align:center; font-weight:600 }
 .vars .bt[data-aberta]{ background:var(--painel2); border-color:var(--info);
                         color:var(--tinta) }
 .vars .bt[data-tocando]::after{
-  content:""; display:block; width:5px; height:5px; border-radius:50%;
-  background:var(--ok); margin:3px auto 0; box-shadow:var(--glow);
-  color:var(--ok);
+  content:""; position:absolute; left:50%; bottom:3px; margin-left:-2.5px;
+  width:5px; height:5px; border-radius:50%;
+  background:var(--ok); box-shadow:var(--glow); color:var(--ok);
 }
 /* pedida pelo duplo clique, esperando a virada do compasso */
 .vars .bt[data-pedida]{ border-color:var(--ok); animation:varPisca 1s infinite }

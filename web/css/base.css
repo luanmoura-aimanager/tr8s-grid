@@ -63,6 +63,12 @@ label{ font-size:var(--t-peq); color:var(--fraco) }
 
 /* ── utilitarios ──────────────────────────────────────── */
 .linha{ display:flex; align-items:center; gap:var(--e2); flex-wrap:wrap }
+/* linha que mistura botao com campo(rotulo em cima): alinha por BAIXO, para o
+   controle do campo cair na mesma linha de base dos botoes. Com align-items
+   center o campo, que e mais alto por causa do rotulo, ficava centrado e
+   empurrava a caixinha para baixo do nivel dos botoes ao lado - era o
+   "REPETICOES deslocado" da sessao V1-V7 (18/08/2026) */
+.linha:has(> .campo){ align-items:flex-end }
 .col{ display:flex; flex-direction:column; gap:var(--e2) }
 .dica{ color:var(--fraco); font-size:var(--t-peq); line-height:1.5 }
 .aviso{ color:var(--aviso); font-size:var(--t-peq); line-height:1.5 }

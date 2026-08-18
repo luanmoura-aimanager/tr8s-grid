@@ -516,6 +516,17 @@ tijolar a máquina.
 - **MUTE de track** (2.7) e **step atual do sequenciador** (2.8) — lidos e escritos,
   com o mute confirmado de ouvido
 - **Variação que está tocando** (2.3.2) — confirmada em três variações
+- **A trava de variação do loop** — verificada de ponta a ponta em 18/08/2026
+  (sessão V1–V7b, com a máquina tocando). Não é endereço novo: é a máscara 63–66
+  já provada em 16/08, usada para fixar o loop numa variação. O que a sessão
+  provou é o **comportamento do sistema**: escrever um bit só faz a máquina
+  repetir aquela variação em **~2 s** (menos de uma volta a 86 bpm); abrir outra
+  variação no grid com o loop no ar volta sozinho no mesmo segundo, sem escrever
+  nada na variação aberta; armar com a máquina **parada** pega o primeiro
+  compasso depois do play, sem escapar uma volta; e o rodízio guardado sobrevive
+  a várias retravas — este último era um bug real, achado por revisão e
+  consertado antes da sessão (a retrava salvava o rodízio já travado por cima do
+  original, e o "Restaurar rodízio" devolvia a própria trava)
 - **Byte 4 do step = ALTERNATE** (2.4) — confirmado de ouvido em 14/08/2026
 
 **Observado uma vez, não confirmado:**
