@@ -20,6 +20,7 @@
 }
 
 /* ── coluna das variacoes ─────────────────────────────── */
+.vars{ --pad-var:calc(var(--e2) + 2px); --d-toca:5px }
 .vars{ display:grid; grid-template-columns:repeat(4,1fr); gap:var(--e1);
        width:148px }
 /* posicao FIXA para a bolinha: ela vive no padding de baixo, fora do fluxo.
@@ -27,13 +28,22 @@
    cima - o A "tocando" ficava mais alto que o B ao lado, e a coluna inteira
    dancava a cada troca de variacao (18/08/2026, reportado na sessao V1-V7).
    O padding e simetrico de proposito: a letra fica centrada com ou sem ponto */
-.vars .bt{ position:relative; padding:calc(var(--e2) + 2px) 0;
+.vars .bt{ position:relative; padding:var(--pad-var) 0;
+           align-self:center;    /* ver o ::after: sem isto o grid ESTICA o
+                                    botao, a letra recentraliza na caixa maior
+                                    e a bolinha fica para tras - a mesma
+                                    queixa, ao contrario */
            text-align:center; font-weight:600 }
 .vars .bt[data-aberta]{ background:var(--painel2); border-color:var(--info);
                         color:var(--tinta) }
 .vars .bt[data-tocando]::after{
-  content:""; position:absolute; left:50%; bottom:3px; margin-left:-2.5px;
-  width:5px; height:5px; border-radius:50%;
+  content:""; position:absolute; left:50%; transform:translateX(-50%);
+  /* centrado no padding de baixo, DERIVADO dele: --e2 e' o degrau de espacamento
+     compartilhado (~40 usos). Com bottom fixo, apertar esse token um dia poria a
+     bolinha por cima da letra - com o halo do --glow vazando junto - e a versao
+     antiga, por estar no fluxo, nao conseguia fazer isso em valor nenhum */
+  bottom:calc((var(--pad-var) - var(--d-toca)) / 2);
+  width:var(--d-toca); height:var(--d-toca); border-radius:50%;
   background:var(--ok); box-shadow:var(--glow); color:var(--ok);
 }
 /* pedida pelo duplo clique, esperando a virada do compasso */

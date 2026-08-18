@@ -431,7 +431,7 @@ function montarSelGroove(p) {
       ),
     ),
     h(
-      "div.linha",
+      "div.linha.linha-baixo",
       {},
       bEscrever,
       bDesfazer,
@@ -472,7 +472,7 @@ function montarSelPattern(n) {
   elSel.append(
     h("h2", {}, "Pattern " + nomePat(n)),
     h("p.dica", {}, meta),
-    h("div.linha", {}, bTocar, campo("Repetições", inReps), bFila),
+    h("div.linha.linha-baixo", {}, bTocar, campo("Repetições", inReps), bFila),
   );
 }
 
