@@ -2508,6 +2508,47 @@ precedência de cor, wrap do playhead, lote de SysEx de LED, desenhos, ondinha) 
    As CLIs de sessão exigem o `.app` **fechado** (porta CTRL única). Registrar cada
    resultado aqui, positivo ou negativo, como manda o Método.
 
+### 7.9 Launchpad reconectado e o app continua recusando — MIDI preso no PROCESSO, não no hardware (18/08/2026)
+
+**Sintoma.** Um dos dois Launchpad Mini MK3 caiu fisicamente do barramento USB (sumiu
+da árvore em Informações do Sistema › USB, não só do CoreMIDI — provavelmente o hub).
+Depois de replugar os dois, `python3 lp_tr8s.py ports` já mostrava os 4 de sempre, mas
+o `ON` da página continuava recusando com o mesmo erro da 7.3 ("o conjunto de Launchpad
+mudou na entrada: o learn viu 4 portas, agora ha 2") — como se o hardware ainda
+estivesse quebrado.
+
+**Medido.** No mesmo intervalo de ~20 s, um script novo (`python3 lp_tr8s.py ports`,
+processo de vida curta) via 4 portas Launchpad de forma consistente, enquanto o
+LaunchAgent (processo rodando havia ~12 h) insistia em 2 de forma igualmente
+consistente — não é oscilação do cabo, os dois lados discordam ao mesmo tempo, cada um
+com a sua leitura estável. Reiniciar só o processo do servidor (`launchctl kickstart -k
+gui/<uid>/com.luanmoura.tr8s-grid`, sem tocar em cabo nenhum) resolveu na hora: o
+processo novo já nasceu vendo os 4 portas certos.
+
+**Hipótese, não confirmada em profundidade.** `listar_portas()` abre um
+`rtmidi.MidiIn()`/`MidiOut()` novo a cada chamada (`lp_tr8s.py:928`), então em teoria
+cada chamada deveria reconsultar o CoreMIDI do zero. A leitura de que RtMidi mantém um
+único `MIDIClientRef` por processo (reaproveitado entre instâncias) e que esse client
+só atualiza o grafo via notificação — que pode não ser processada sem um CFRunLoop
+girando — explicaria o sintoma, mas isso **não foi lido no código-fonte do RtMidi nem
+confirmado além do teste empírico acima**.
+
+**O que existe agora**: um botão **"Reiniciar servidor"** na barra do topo, do lado de
+Recalibrar/Apagar pads. Ele chama a mesma saída limpa do "Encerrar" (`_encerrar()`: para
+o motor, apaga `~/.lp_tr8s_servidor.json`, `os._exit(0)`) — como o LaunchAgent tem
+`KeepAlive` incondicional (`<key>KeepAlive</key><true/>`, sem condição de
+`SuccessfulExit`), ele volta sozinho em menos de um segundo, com o cliente MIDI do zero.
+Usar quando o hardware já está confirmado certo (`ports` mostrando os 4) e o app
+continua recusando. **Ainda não testado em hardware pelo Luan** — só o mecanismo
+equivalente (`launchctl kickstart -k`) foi confirmado ao vivo hoje; o botão precisa de
+`instalar_agente.py` + `criar_app.py` para ir ao ar, o que por si derruba a sessão atual
+(ver "Depois de editar" no CLAUDE.md) — fazer isso fora de uma sessão de hardware.
+
+**Prevenção do gatilho físico**: ligar os dois Launchpad direto no Mac, sem hub, reduz a
+chance de um deles cair do barramento de novo — mas não elimina a necessidade do botão,
+já que o processo pode ficar preso por outros motivos (sleep da máquina, reinício do
+CoreMIDI etc.), não só por replug.
+
 ---
 
 ## 8. Ideias registradas, não implementadas

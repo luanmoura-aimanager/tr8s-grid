@@ -86,6 +86,14 @@ function montarTopo() {
   });
   $("#b-recal").onclick = () => agir({ acao: "externa", op: "recalibrar" });
   $("#b-blackout").onclick = () => agir({ acao: "externa", op: "blackout" });
+  $("#b-reiniciar").onclick = async () => {
+    const ok = await agir({ acao: "externa", op: "reiniciar" });
+    if (ok)
+      texto(
+        $("#msg"),
+        "servidor reiniciando — aguarde alguns segundos antes de clicar ON de novo",
+      );
+  };
   $("#b-sair").onclick = async () => {
     await sair();
     texto($("#msg"), "encerrado — pode fechar esta aba");
@@ -310,8 +318,11 @@ function pintar(e, dados) {
   // (mover_playhead): o respiro qualifica o playhead, entao sem playhead nao ha
   // o que qualificar. Sem isto a tela pulsava com o grid noutra variacao e os
   // pads nao - divergencia tela/aparelho, que e o que este projeto mais evita.
-  attr(document.body, "data-fill",
-       e.fill_ativo && e.playhead_visivel ? "" : null);
+  attr(
+    document.body,
+    "data-fill",
+    e.fill_ativo && e.playhead_visivel ? "" : null,
+  );
   if (e.alt) quer.push(["alt", "chip", "ALT ligado"]);
   if (e.armado) quer.push(["arm", "chip", "CLEAR armado"]);
   if (e.polirritmia) quer.push(["poli", "chip", "polirritmia"]);

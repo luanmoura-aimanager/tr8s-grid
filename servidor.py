@@ -340,7 +340,7 @@ def _acao_util(a):
 
 
 def _acao_externa(a):
-    """Recalibrar e blackout saem para fora do processo, como antes."""
+    """Recalibrar, reiniciar e blackout saem para fora do processo, como antes."""
     HOST.parar_motor()
     if a["op"] == "recalibrar":
         script = os.path.join(AQUI, "lp_tr8s.py")
@@ -349,6 +349,17 @@ def _acao_externa(a):
                           f'tell app "Terminal" to do script '
                           f'"python3 \\"{script}\\" learn"',
                           "-e", 'tell app "Terminal" to activate'])
+    elif a["op"] == "reiniciar":
+        # o cliente MIDI do rtmidi/CoreMIDI deste processo pode ficar preso
+        # vendo um conjunto de portas Launchpad que nao existe mais depois de
+        # um replug USB - mesmo listar_portas() abrindo um MidiIn novo a cada
+        # chamada, o processo continua recusando com "o conjunto de Launchpad
+        # mudou" mesmo com o hardware de volta (18/08/2026). Um processo NOVO
+        # sempre ve o estado certo. O LaunchAgent tem KeepAlive, entao sair
+        # do processo basta - ele volta sozinho com o cliente MIDI do zero
+        HOST.log("Reiniciando o servidor (o processo volta sozinho em "
+                 "seguida) para refazer a leitura das portas MIDI...")
+        threading.Thread(target=_encerrar, daemon=True).start()
     else:
         subprocess.Popen([sys.executable, os.path.join(AQUI, "apagar_luzes.py")])
         HOST.log("LEDs apagados e pads soltos.")
