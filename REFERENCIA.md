@@ -1176,9 +1176,12 @@ parâmetros** (`vel`, `larg`, `alc`) no dicionário, em vez de todas lerem as co
 exatamente os valores fixos de antes — o comportamento já exercitado em hardware não
 mudou. O render (`_animar`) não sabe que estilos existem; ele só lê o que a onda traz.
 
-O `_animar` agora também guarda o quadro em `self.quadro_onda`, e o `estado()` devolve
-isso no lugar de `pads` quando está fora do `ON`: a seção "Grid 16×8" da janela mostra a
-mesma animação dos LEDs, de graça, sem recalcular nada.
+~~O `_animar` também guarda o quadro em `self.quadro_onda`, e o `estado()` devolve isso
+no lugar de `pads` fora do `ON`.~~ **Removido em 18/08/2026**: quem lia era a seção
+"Grid 16×8" da janela Tk, que saiu de cena; a tela web reconstrói as cores sozinha. O
+`pads` custava 128 `cor_do_step()` por quadro **para ninguém**, e o `quadro_onda` era uma
+matriz 8×16 montada a 30 fps pelo mesmo motivo. O `test_chave_produzida_sem_leitor`
+existe para impedir que voltem sem querer.
 
 Isto **não** é o modo `coração` (que desenhava `C E`/`C I` e um coração, e foi removido a
 pedido em 13/08/2026 — não reintroduzir): aquele era figura fixa, este é procedural e não
@@ -2276,6 +2279,22 @@ aqui. Deve haver um interruptor no `UTILITY:MIDI` (a seção 6 já registra um
 vizinho, o `Inst Note` em `---`). **Qualquer plano que dependa de ler o painel
 por CC está morto até alguém achar esse interruptor** — e o custo de descobrir
 isso tarde seria uma sessão inteira concluindo "o controle X não transmite".
+
+### O playhead durante o fill — a máquina decidiu (18/08/2026)
+
+Com o byte do fill na mão, a primeira versão da interface fazia o **playhead sumir**
+enquanto o fill toca: o raciocínio era o de sempre, *não desenhar verde sobre o que não
+está soando*. O Luan olhou o painel da própria TR-8S e viu que **ela mantém o playhead
+durante o fill in**.
+
+E ela está certa: a **posição é verdadeira** — o sequenciador está naquele step,
+contando igual. O que muda é de qual variação sai o som. Então o playhead volta, e quem
+diz "o tempo é este, o som é de outra" é o **respiro**: notas acesas e playhead pulsam
+juntos por um compasso.
+
+A lição vale mais que o caso: a regra foi aplicada a um dado que **estava** soando.
+Quando a máquina tem opinião sobre uma questão de interface, ela ganha — é o mesmo
+princípio que faz este documento separar medido de deduzido.
 
 ### A variação que toca não está em lugar nenhum que a gente leia
 

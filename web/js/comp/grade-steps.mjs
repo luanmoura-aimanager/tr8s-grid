@@ -261,8 +261,21 @@ export function gradeSteps({
         const dt =
           (agora - tPasso) / Math.max(1, (p - passoReal + ciclo) % ciclo);
         // 30..2000 ms cobre de 500 bpm a 8 bpm; fora disso e engasgo de rede
-        if (dt > 30 && dt < 2000)
+        if (dt > 30 && dt < 2000) {
           durStep = durStep ? durStep * 0.7 + dt * 0.3 : dt;
+          // O respiro do fill (CSS) dura UM COMPASSO, e quem sabe quanto isso
+          // vale em ms e este relogio, que mede o step de verdade.
+          //
+          // Mas NAO durante o fill: trocar animation-duration no meio do voo
+          // nao reinicia a animacao - o navegador guarda o instante de inicio e
+          // recalcula o progresso como (decorrido % duracao). Com a pagina
+          // aberta ha minutos, mudar a duracao em 10 ms joga a fase para
+          // qualquer ponto da curva, e o respiro vira pisca-pisca. durStep e
+          // media movel: ele oscila alguns ms a CADA step. Entao a duracao
+          // congela quando o fill comeca e volta a acompanhar quando ele acaba.
+          if (!document.body.hasAttribute("data-fill"))
+            prop(raiz, "--compasso", Math.round(durStep * ciclo) + "ms");
+        }
       }
       passoReal = p;
       tPasso = agora;
