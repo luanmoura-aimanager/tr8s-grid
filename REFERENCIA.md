@@ -2508,6 +2508,63 @@ precedência de cor, wrap do playhead, lote de SysEx de LED, desenhos, ondinha) 
    As CLIs de sessão exigem o `.app` **fechado** (porta CTRL única). Registrar cada
    resultado aqui, positivo ou negativo, como manda o Método.
 
+### 7.9 Launchpad reconectado e o app continua recusando — MIDI preso no PROCESSO, não no hardware (18/08/2026)
+
+**Sintoma.** Um dos dois Launchpad Mini MK3 caiu fisicamente do barramento USB (sumiu
+da árvore em Informações do Sistema › USB, não só do CoreMIDI — provavelmente o hub).
+Depois de replugar os dois, `python3 lp_tr8s.py ports` já mostrava os 4 de sempre, mas
+o `ON` da página continuava recusando com o mesmo erro da 7.3 ("o conjunto de Launchpad
+mudou na entrada: o learn viu 4 portas, agora ha 2") — como se o hardware ainda
+estivesse quebrado.
+
+**Medido.** No mesmo intervalo de ~20 s, um script novo (`python3 lp_tr8s.py ports`,
+processo de vida curta) via 4 portas Launchpad de forma consistente, enquanto o
+LaunchAgent (processo rodando havia ~12 h) insistia em 2 de forma igualmente
+consistente — não é oscilação do cabo, os dois lados discordam ao mesmo tempo, cada um
+com a sua leitura estável. Reiniciar só o processo do servidor (`launchctl kickstart -k
+gui/<uid>/com.luanmoura.tr8s-grid`, sem tocar em cabo nenhum) resolveu na hora: o
+processo novo já nasceu vendo os 4 portas certos.
+
+**Hipótese, não confirmada em profundidade.** `listar_portas()` abre um
+`rtmidi.MidiIn()`/`MidiOut()` novo a cada chamada (`lp_tr8s.py:928`), então em teoria
+cada chamada deveria reconsultar o CoreMIDI do zero. A leitura de que RtMidi mantém um
+único `MIDIClientRef` por processo (reaproveitado entre instâncias) e que esse client
+só atualiza o grafo via notificação — que pode não ser processada sem um CFRunLoop
+girando — explicaria o sintoma, mas isso **não foi lido no código-fonte do RtMidi nem
+confirmado além do teste empírico acima**.
+
+**O que existe agora**: um botão **"Reiniciar servidor"** na barra do topo, do lado de
+Recalibrar/Apagar pads. Usar quando o hardware já está confirmado certo (Launchpad ou
+TR-8S) e o app continua recusando — o mecanismo troca o cliente MIDI inteiro do
+processo, não é específico do Launchpad.
+
+Ele **não** reusa a saída do "Encerrar" (`_encerrar()`, que faz `os._exit(0)` contando
+com o `KeepAlive` do LaunchAgent pra voltar sozinho). A revisão de código do PR pegou por
+que isso seria errado aqui: o `.app` do Desktop, quando é ele quem está de fato servindo
+(LaunchAgent não instalado ou removido), só faz `exec python3 servidor.py` sem
+supervisor nenhum (`criar_app.py`) — um `_exit(0)` ali mataria o servidor pra sempre, e a
+página ficaria esperando "aguarde alguns segundos" que nunca chega. Em vez disso o botão
+chama `_reiniciar_servidor()`, que troca o processo **no próprio lugar** com
+`os.execv(sys.executable, [sys.executable] + sys.argv)` — funciona igual nos dois modos
+de lançamento, sem precisar saber quem chamou. Cuidado de threading registrado no
+próprio código: essa troca acontece numa thread de fundo que **não** coordena com a
+thread principal (que segue presa no `serve_forever()`) — nem `shutdown()` nem
+`server_close()` são chamados nela, porque esperar a thread principal retornar antes do
+`execv()` é uma corrida real (o interpretador pode encerrar o processo pelo fim do
+`main()` antes do `execv()` rodar). A porta libera sozinha no exec porque os
+file descriptors do Python já nascem non-inheritable desde a 3.4 (PEP 446).
+
+**Ainda não testado em hardware pelo Luan** — só o mecanismo equivalente
+(`launchctl kickstart -k`, que reinicia o processo por fora) foi confirmado ao vivo hoje;
+o `execv()` de dentro do próprio processo, especificamente, ainda não. O botão precisa de
+`instalar_agente.py` + `criar_app.py` para ir ao ar, o que por si derruba a sessão atual
+(ver "Depois de editar" no CLAUDE.md) — fazer isso fora de uma sessão de hardware.
+
+**Prevenção do gatilho físico**: ligar os dois Launchpad direto no Mac, sem hub, reduz a
+chance de um deles cair do barramento de novo — mas não elimina a necessidade do botão,
+já que o processo pode ficar preso por outros motivos (sleep da máquina, reinício do
+CoreMIDI etc.), não só por replug.
+
 ---
 
 ## 8. Ideias registradas, não implementadas
