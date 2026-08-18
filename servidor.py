@@ -284,6 +284,14 @@ def _acao_chain_armar(a):
     # aberta, a primeira habilitada - nessa ordem)
     var = a.get("var")
     var = int(var) if var else None
+    # 1-8 e' o alcance da mascara de variacao; 9/10 sao os Fill In e o resto
+    # nao existe. Sem esta validacao um var fora da faixa estourava IndexError
+    # DENTRO do armar, antes da linha que anula HOST.motor.chain: sobrava um
+    # Chain meio construido e todo estado() seguinte morria no resumo() dele -
+    # a pagina congelava em "fresco: false" para sempre (revisao do PR #9)
+    if var is not None and not 1 <= var <= 8:
+        HOST.log(f"(!) variacao {var} nao serve para travar o loop (so A-H)")
+        return
 
     def armar():
         HOST.motor.chain = F.Chain(entradas, modo, log=HOST.log, var=var)

@@ -6,8 +6,10 @@
 // maquina, na mesma fila (chain modo "misto").
 //
 // Honestidade em dois pontos que a tela repete:
-// - groove ESCREVE na variacao aberta do pattern corrente da maquina; vindo
-//   depois de uma entrada de pattern, altera aquele pattern. Desfazer volta.
+// - groove ESCREVE na variacao que o loop TRAVOU ao ser armado (o seletor do
+//   card escolhe; "auto" resolve pela que toca) do pattern corrente da
+//   maquina; vindo depois de uma entrada de pattern, altera aquele pattern.
+//   Desfazer volta.
 // - "Auto BPM" escreve o TEMPO junto com o pattern, e FUNCIONA desde
 //   17/08/2026: o endereco certo e o no do pattern (OFF_TEMPO_NO, quatro
 //   nibbles), achado por sniff do TR-EDITOR. A versao de 16/08 escrevia no
@@ -293,12 +295,18 @@ export default {
     attr(elFilaEstado, "data-oculto", armadoAgora && !e.tocando ? null : "");
     attr(bParar, "aria-disabled", armadoAgora ? null : "true");
     // o chip diz em QUAL variacao o loop travou - o seletor diz o que foi
-    // pedido, e "auto" nao conta a mesma coisa
-    const travada = c && c.var_nome;
+    // pedido, e "auto" nao conta a mesma coisa. Sai de e.var_travada, que e a
+    // verdade do MOTOR: `c.var_nome` sobrevive ao Parar (o chain fica em
+    // motor.chain com o resumo antigo) e o chip seguia afirmando "travado na
+    // A" com a trava ja solta (revisao do PR #9)
+    const travada = e.var_travada;
     attr(chipVar, "data-oculto", travada ? null : "");
     if (travada) texto(chipVar, `travado na ${travada}`);
-    // o botao de restaurar so existe quando ha rodizio guardado para voltar
-    attr(bRodizio, "data-oculto", e.rodizio_antes ? null : "");
+    // o botao de restaurar so existe quando ha rodizio guardado para voltar E
+    // o loop nao esta no ar: com ele rodando o motor RECUSA (soltar a trava
+    // durante o loop devolve a deducao pelo clock e a perseguicao passa a
+    // escrever no escuro), entao mostrar o botao so ofereceria uma recusa
+    attr(bRodizio, "data-oculto", e.rodizio_antes && !armadoAgora ? null : "");
     const chave =
       (armadoAgora ? `arm:${c.posicao}:${c.reps_restantes}|` : "solto|") +
       fila.map((f) => f.nome + f.reps + (f.off ? "!" : "")).join("|");
