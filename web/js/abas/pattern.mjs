@@ -208,9 +208,9 @@ export default {
     );
     bBaixo.onclick = () => agir({ acao: "exec", tipo: "rolar", arg: 1 });
 
-    // quantas linhas cada toque anda. 3 por padrao porque e o que falta: sao
-    // 11 instrumentos numa janela de 8, entao um toque so leva de BD-CH a
-    // MT-RC e o resto aparece inteiro. Vale para os pads do Launchpad tambem
+    // quantas linhas cada toque anda. 8 por padrao: pula a pagina inteira e
+    // aceita linha vazia (com 11 instrumentos, BD-CH -> OH/CC/RC nas 3
+    // primeiras linhas, trava ali). Vale para os pads do Launchpad tambem
     const selPasso = h("select", {
       id: "passo-inst",
       "aria-label": "linhas por toque do INST UP/DOWN",
