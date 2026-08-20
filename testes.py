@@ -256,6 +256,60 @@ class TesteResyncNaoCongela(unittest.TestCase):
 
 
 # ─────────────────────────────────────────────────────────────
+# A janela de instrumentos (INST UP/DOWN) - trava sem hardware
+# ─────────────────────────────────────────────────────────────
+class TesteJanelaDeInstrumentos(unittest.TestCase):
+    """Motor.executar('rolar', ...) e base_max(), sem porta MIDI nenhuma."""
+
+    def _motor(self, esconder_mudos=False, mostrar_acc=False, passo=None):
+        m = motor_cru()
+        m.mudo = [False] * len(L.INSTRUMENTOS)
+        m.esconder_mudos = esconder_mudos
+        m.mostrar_acc = mostrar_acc
+        m.passo_inst = passo if passo is not None else L.PASSO_INST_PADRAO
+        m.base_inst = 0
+        m.pintar = lambda: None
+        m.pintar_botoes = lambda: None
+        m._persistir = lambda: None    # nao mexe no ~/.lp_tr8s_estado.json real
+        return m
+
+    def test_lista_cabe_inteira_nao_tem_scroll(self):
+        """HIDE MUTED deixando exatamente 8: REFERENCIA 1063, scroll some."""
+        m = self._motor(esconder_mudos=True)
+        m.mudo[2] = m.mudo[3] = m.mudo[4] = True   # LT, MT, HT mutados
+        self.assertEqual(m.base_max(), 0)
+
+    def test_inst_down_pula_8_e_trava(self):
+        m = self._motor()
+        m.executar("rolar", 1)
+        self.assertEqual(m.base_inst, 8, "passo padrao deveria pular pro fundo")
+        antes = m.base_inst
+        m.executar("rolar", 1)             # segundo toque, sem soltar
+        self.assertEqual(m.base_inst, antes, "ja deveria estar travado")
+
+    def test_inst_up_volta_direto_ao_topo(self):
+        m = self._motor()
+        m.base_inst = 8
+        m.executar("rolar", -1)
+        self.assertEqual(m.base_inst, 0)
+
+    def test_passo_pequeno_continua_pagina_cheia(self):
+        """Sem regressao: quem escolher passo 3 ve o comportamento de sempre."""
+        m = self._motor(passo=3)
+        self.assertEqual(m.base_max(), 3)
+
+    def test_diminuir_passo_reclampa_base_inst(self):
+        """ACHADO DO CODE REVIEW: base_max() passou a depender de passo_inst,
+        e definir_passo_inst e o unico mutador dele que nao reclampava
+        base_inst - igual aplicar_mudos/oculto/acc ja faziam para os OUTROS
+        jeitos de base_max() encolher."""
+        m = self._motor()
+        m.base_inst = 8                    # travado no fundo, passo 8
+        m.definir_passo_inst(3)
+        self.assertEqual(m.base_inst, 3, "ficou fora de faixa depois do passo encolher")
+
+
+# ─────────────────────────────────────────────────────────────
 # A guarda de portas
 # ─────────────────────────────────────────────────────────────
 LPD = "Launchpad Mini MK3 LPMiniMK3 DAW Out"

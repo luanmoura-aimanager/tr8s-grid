@@ -744,11 +744,13 @@ AJUSTE_PLAYHEAD = 2
 
 # Quantas linhas o INST UP/DOWN anda por toque (nos Launchpad e na tela).
 #
-# 3 por padrao porque e o que faltava: sao 11 instrumentos e a janela mostra 8,
-# entao de BD-CH um unico toque leva a MT-RC e o resto (OH, CC, RC) aparece
-# inteiro. Com passo 1 era preciso tocar tres vezes pra ver a ultima linha.
-# Passo 1 continua disponivel pra quem quiser deslizar de um em um.
-PASSO_INST_PADRAO = 3
+# 8 por padrao, a pedido do Luan: pula a pagina inteira de uma vez em vez de
+# revelar so o que falta, e aceita ficar com linhas vazias no fim (base_max
+# ja tolera isso - ver o comentario la). Com 11 instrumentos, um toque de
+# BD-CH leva direto a OH/CC/RC nas 3 primeiras linhas, 5 vazias, e trava ali;
+# INST UP volta direto ao topo. Passo 1 continua disponivel pra quem quiser
+# deslizar de um em um, sem pular pagina.
+PASSO_INST_PADRAO = 8
 PASSO_INST_MAX = 8
 
 # Botoes, por CC. Em programmer mode:
@@ -2493,13 +2495,20 @@ class Motor:
                        "passo_inst": self.passo_inst})
 
     def definir_passo_inst(self, n):
-        """Quantas linhas o INST UP/DOWN anda por toque."""
+        """Quantas linhas o INST UP/DOWN anda por toque.
+
+        base_max() agora depende do passo (ver o comentario la): trocar o
+        passo pode empurrar o teto pra baixo do base_inst atual, do mesmo
+        jeito que mutar/desmutar ou o toggle do ACC ja faziam - por isso o
+        reclamp e o repaint aqui, iguais aos deles."""
         with self.lock:
             n = max(1, min(PASSO_INST_MAX, int(n)))
             if n == self.passo_inst:
                 return
             self.passo_inst = n
+            self.base_inst = min(self.base_inst, self.base_max())
             self._persistir()
+            self.pintar(); self.pintar_botoes()
             self.log(f"INST UP/DOWN anda {n} linha" + ("s" if n > 1 else ""))
 
     # ── mute ────────────────────────────────────────────────
@@ -2831,7 +2840,20 @@ class Motor:
         return 7 if self.mostrar_acc else 8
 
     def base_max(self):
-        return max(0, len(self.lista_visivel()) - self.linhas_de_inst())
+        """Teto do scroll: trava assim que um toque a mais nao revelaria nada
+        novo, em vez de exigir pagina cheia ate o fim da lista.
+
+        Se a lista cabe inteira no grid, nem precisa rolar (0). Senao, o teto
+        e o maior entre "pagina cheia" (o minimo pra nao sobrar vazio, o
+        comportamento de sempre) e "um toque do passo atual a partir do
+        topo" - com passo pequeno (1, 3) isso nao muda nada; com o passo
+        padrao de 8 e 11 instrumentos, um toque ja poe base_inst em 8 (so
+        OH/CC/RC visiveis) e um segundo toque recalcula o mesmo teto, trava."""
+        vis, linhas = len(self.lista_visivel()), self.linhas_de_inst()
+        if vis <= linhas:
+            return 0
+        pagina_cheia = vis - linhas
+        return max(pagina_cheia, min(self.passo_inst, vis - 1))
 
     def cor_vazia(self, linha, step):
         """Step apagado: cabeca de tempo num branco fraco, como na TR-8S - mas
