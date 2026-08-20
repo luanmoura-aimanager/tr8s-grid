@@ -2495,13 +2495,20 @@ class Motor:
                        "passo_inst": self.passo_inst})
 
     def definir_passo_inst(self, n):
-        """Quantas linhas o INST UP/DOWN anda por toque."""
+        """Quantas linhas o INST UP/DOWN anda por toque.
+
+        base_max() agora depende do passo (ver o comentario la): trocar o
+        passo pode empurrar o teto pra baixo do base_inst atual, do mesmo
+        jeito que mutar/desmutar ou o toggle do ACC ja faziam - por isso o
+        reclamp e o repaint aqui, iguais aos deles."""
         with self.lock:
             n = max(1, min(PASSO_INST_MAX, int(n)))
             if n == self.passo_inst:
                 return
             self.passo_inst = n
+            self.base_inst = min(self.base_inst, self.base_max())
             self._persistir()
+            self.pintar(); self.pintar_botoes()
             self.log(f"INST UP/DOWN anda {n} linha" + ("s" if n > 1 else ""))
 
     # ── mute ────────────────────────────────────────────────

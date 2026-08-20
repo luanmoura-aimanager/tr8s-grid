@@ -270,6 +270,7 @@ class TesteJanelaDeInstrumentos(unittest.TestCase):
         m.base_inst = 0
         m.pintar = lambda: None
         m.pintar_botoes = lambda: None
+        m._persistir = lambda: None    # nao mexe no ~/.lp_tr8s_estado.json real
         return m
 
     def test_lista_cabe_inteira_nao_tem_scroll(self):
@@ -296,6 +297,16 @@ class TesteJanelaDeInstrumentos(unittest.TestCase):
         """Sem regressao: quem escolher passo 3 ve o comportamento de sempre."""
         m = self._motor(passo=3)
         self.assertEqual(m.base_max(), 3)
+
+    def test_diminuir_passo_reclampa_base_inst(self):
+        """ACHADO DO CODE REVIEW: base_max() passou a depender de passo_inst,
+        e definir_passo_inst e o unico mutador dele que nao reclampava
+        base_inst - igual aplicar_mudos/oculto/acc ja faziam para os OUTROS
+        jeitos de base_max() encolher."""
+        m = self._motor()
+        m.base_inst = 8                    # travado no fundo, passo 8
+        m.definir_passo_inst(3)
+        self.assertEqual(m.base_inst, 3, "ficou fora de faixa depois do passo encolher")
 
 
 # ─────────────────────────────────────────────────────────────
