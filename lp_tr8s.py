@@ -2832,6 +2832,11 @@ class Motor:
         i = self.inst_da_linha(linha)
         return i is not None and self.mudo[i]
 
+    def linha_sobrando(self, linha):
+        """Linha sem instrumento: esconder_mudos tirou mais do que sobrou para
+        preencher o grid. A ACC tambem nao tem instrumento, mas ela existe."""
+        return not self.eh_acc(linha) and self.inst_da_linha(linha) is None
+
     # ── cores ───────────────────────────────────────────────
     def eh_acc(self, linha):
         return self.mostrar_acc and linha == LINHA_ACC_POS
@@ -2969,8 +2974,10 @@ class Motor:
                 return base
             # linha muda nao tem playhead NENHUM - nem o verde forte nem o fraco.
             # O verde diz "esta soando agora", e ali nada esta soando; deixa-lo
-            # passar seria a unica cor da linha mentindo sobre o som.
-            if self.linha_muda(linha):
+            # passar seria a unica cor da linha mentindo sobre o som. A linha que
+            # SOBROU vazia com o HIDE MUTED ligado tambem: e onde o olho procura
+            # os mutados que sumiram, e ali nao ha instrumento nenhum para soar.
+            if self.linha_muda(linha) or self.linha_sobrando(linha):
                 return base
             # o playhead pergunta se o step esta LIGADO, nao se a cor e diferente
             # de apagado - senao a marca de tempo faria o verde forte em vazio

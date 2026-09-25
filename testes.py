@@ -309,6 +309,43 @@ class TesteJanelaDeInstrumentos(unittest.TestCase):
         self.assertEqual(m.base_inst, 3, "ficou fora de faixa depois do passo encolher")
 
 
+class TestePlayheadForaDaLinhaQueNaoSoa(unittest.TestCase):
+    """Motor.cor_do_step: o verde so passa onde algo pode soar."""
+
+    def _motor(self, mudos=()):
+        m = motor_cru()
+        m.mudo = [i in mudos for i in range(len(L.INSTRUMENTOS))]
+        m.esconder_mudos = True
+        m.mostrar_acc = False
+        m.base_inst = 0
+        m.passo = 0
+        # step vazio em todo lugar: o verde que sobra e o fraco (COR_PLAY)
+        m.ler_vel = lambda i, s: 0
+        m.ler_sub = lambda i, s: 0
+        m.ler_alt = lambda i, s: False
+        return m
+
+    def test_linha_que_sobrou_com_hide_nao_tem_verde(self):
+        """O bug de 24/09/2026: 4 mutados escondidos deixam 7 instrumentos, e
+        a 8a linha - vazia - ainda via o playhead passar."""
+        m = self._motor(mudos=(2, 3, 4, 5))
+        self.assertTrue(m.linha_sobrando(7))
+        self.assertEqual(m.cor_do_step(7, 0), L.COR_OFF)
+
+    def test_linha_com_instrumento_continua_com_verde(self):
+        m = self._motor(mudos=(2, 3, 4, 5))
+        self.assertFalse(m.linha_sobrando(6))
+        self.assertEqual(m.cor_do_step(6, 0), L.COR_PLAY)
+
+    def test_acc_nao_conta_como_linha_sobrando(self):
+        """inst_da_linha devolve None para a ACC tambem - ela nao some."""
+        m = self._motor()
+        m.mostrar_acc = True
+        m.acc = 0
+        self.assertFalse(m.linha_sobrando(L.LINHA_ACC_POS))
+        self.assertEqual(m.cor_do_step(L.LINHA_ACC_POS, 0), L.COR_PLAY)
+
+
 # ─────────────────────────────────────────────────────────────
 # A guarda de portas
 # ─────────────────────────────────────────────────────────────
