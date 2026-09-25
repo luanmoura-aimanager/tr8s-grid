@@ -2021,6 +2021,32 @@ do tempo" sem ninguém saber por quê. Três testes de mesa guardam a conversão
 está certa e os testes passam, mas quem confirma é o olho no grid ao lado da
 máquina.
 
+### ESCRITA da scale — implementada em 24/09/2026, **não testada**
+
+`Motor.definir_scale(cod)` manda **um** DT1 de um byte em `no do pattern + 0x16`,
+com o mesmo guarda do last step (pattern lido, espelho não suspeito). O
+**endereço** é o provado acima; a **escrita** nunca foi vista pegar, e os
+códigos `0`/`1` continuam deduzidos. Ordem para provar, sem pular:
+
+1. **Leitura primeiro:** pôr a máquina em `8th (T)` pelo painel (SHIFT+PTN
+   SELECT › Scale) e ver se o grid mostra `8th(T)`. Se mostrar outra coisa, a
+   tabela `NOME_SCALE` está trocada e a escrita **não** deve ser usada.
+2. **Escrita:** trocar pela tela e conferir no visor da máquina.
+3. **Pulsos:** em `8th(T)`, o verde dos pads anda junto com o LED de step? Isso
+   mede os 8 pulsos por step, que hoje são deduzidos.
+
+Da scale saem também o seletor de **compasso** e o botão **ajustar grid** da
+aba Pattern (`Motor.compassos()`, `tamanho_ajustado()`): em `8th(T)` são 3
+steps por tempo, 12 fecham um 4/4. Se o passo 3 medir outra coisa, a conta
+deles muda junto — ela sai da mesma tabela `PULSOS_POR_SCALE`, e a marca
+branca de tempo (`passos_tempo()`) também.
+
+**Trocar a scale com a máquina tocando:** o espelho só muda na releitura, e
+nesse instante o motor rebaseia `pulsos` no passo em que está, para o
+`passo_abs` não saltar com o divisor novo. O que a **máquina** faz com o step
+dela quando a scale troca no meio da música não foi observado; se ela
+recomeçar do 1 ou pular, o resync pelo `passo_maquina` é quem corrige.
+
 ### O TEMPO do pattern, de brinde
 
 O mesmo diff (o sujo, com a máquina reiniciada no meio) mostrou o **mesmo par de

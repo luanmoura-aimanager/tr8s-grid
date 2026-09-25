@@ -84,9 +84,12 @@
 }
 .cel:hover{ transform:scale(1.08) }
 .cel:active{ transform:scale(.94) }
-/* cabeca de tempo: a mesma cor que o pad acende nos steps 1/5/9/13
-   (--c-tempo = COR_TEMPO), em vez de um token de layout qualquer */
-.cel[data-tempo]{ box-shadow:inset 1px 0 0 var(--c-tempo,#3a3a3a) }
+/* cabeca de tempo: a coluna inteira na mesma cor que o pad acende no step
+   vazio (--c-tempo = COR_TEMPO). Era um filete de 1px; virou coluna em
+   24/09/2026 para bater com os pads. Quais steps: 1/5/9/13, ou 1/4/7/10 na
+   scale de tercina (marcarTempo). Linha muda nao ganha: o vazio dela e
+   "mudo-vazio", como no Motor.cor_vazia */
+.cel[data-tempo][data-c="vazio"]:not([data-play]){ background:var(--c-tempo,#3a3a3a) }
 
 /* cada estado ganha a cor que veio do Python */
 .cel[data-c="nota"]      { background:var(--c-nota) }
@@ -190,7 +193,7 @@
  * o respiro fecha na virada em qualquer BPM e qualquer scale. */
 @keyframes respiro{ 50%{ filter:brightness(.45) } }
 
-[data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]):not([data-pendente]),
+[data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=mudo-vazio]):not([data-c=fora]):not([data-c=invalido]):not([data-pendente]),
 [data-fill] .cel[data-play]:not([data-pendente]),
 [data-fill] .playhead{
   animation:respiro var(--compasso, 2800ms) ease-in-out infinite;
@@ -204,7 +207,7 @@
    [data-pedida] acima, que vira borda tracejada em vez de so parar de piscar):
    as notas ficam atenuadas enquanto o fill dura, e o aviso continua existindo */
 @media (prefers-reduced-motion:reduce){
-  [data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=fora]):not([data-c=invalido]):not([data-pendente]),
+  [data-fill] .cel[data-c]:not([data-c=vazio]):not([data-c=mudo-vazio]):not([data-c=fora]):not([data-c=invalido]):not([data-pendente]),
   [data-fill] .cel[data-play]:not([data-pendente]),
   [data-fill] .playhead{
     animation:none; filter:brightness(.6)

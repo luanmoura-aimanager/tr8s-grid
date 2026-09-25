@@ -15,8 +15,14 @@
 #topo .modos .bt[data-cor="sb"][aria-pressed="true"]{ background:var(--roxo) }
 #topo .acoes-topo{ display:flex; gap:var(--e1) }
 
-.chips-estado{ display:flex; gap:var(--e1); flex-wrap:wrap;
-               padding:0 var(--e4) var(--e2); min-height:22px }
+.faixa-estado{ display:flex; align-items:center; gap:var(--e3); flex-wrap:wrap;
+               padding:0 var(--e4) var(--e2) }
+.chips-estado{ display:flex; gap:var(--e1); flex-wrap:wrap; min-height:22px }
+.ctl-aba{ display:flex; align-items:center; gap:var(--e2); margin-left:auto }
+.ctl-aba[hidden]{ display:none }
+.ctl-aba .ritmo{ display:flex; align-items:center; gap:var(--e2) }
+.ctl-aba label{ font-size:var(--t-peq); color:var(--tinta2);
+                text-transform:uppercase; letter-spacing:.06em }
 
 /* fita de alerta (sem contato com o servidor, quadro velho, motor desligado) */
 .fita{

@@ -32,7 +32,7 @@ que separa explicitamente **o que foi provado do que é dedução**.
 | **LAST STEP** da variação e do track | 2.3.1 |
 | **MUTE de track** — estado de sistema, fora do pattern | 2.7 |
 | **Step atual do sequenciador** | 2.8 |
-| **SCALE do pattern** — e por que o playhead andava em metade da velocidade | 2.3.1 |
+| **SCALE do pattern** — e por que o playhead andava em metade da velocidade (a escrita existe desde 24/09/2026, ainda **não testada** em hardware) | 2.3.1 |
 | As escalas que o visor mostra: **GAIN em dB**, **PAN em L/R**, o tempo do pattern | 7.2 |
 | O que ainda falta: bytes 0–2 do step, WRITE, SHUFFLE | 3 |
 
@@ -105,7 +105,7 @@ ocorrência, então os dois Launchpad viram um só. Por isso a enumeração e a 
 |---|---|
 | `lp_tr8s.py` | O motor e a CLI: launchpads, SysEx, grid ao vivo, sessões de hardware (`prob_watch`, `pattern`, `pc`, `var_mask`) |
 | `web/` | A interface: HTML/CSS/módulos ES sem build nem dependência. Aba **Pattern** com o grid 12×16 editável (espelho do TR-EDITOR, com probability que o hardware não exibe), barra de estado com displays e LEDs, **Mixer** (a mesa: 11 canais + master), **Efeitos** (catálogo por painel + fileira CTRL), Instrumento, Grooves e Estocástica |
-| `servidor.py` + `pagina.html` | A tela: servidor local (só stdlib, 127.0.0.1, com token/Origin/CSP) + página no navegador, com o que o grid físico não tem — Mixer (level/gain/pan/sends/probability/mute dos 11), Efeitos (reverb/delay/master FX/LFO/INST FX e o CTRL de cada instrumento), Instrumento (troca de tone), Grooves e Estocástica. O WRITE (salvar o pattern na máquina) mora na aba Pattern. Log em `~/Library/Logs/TR8S-Grid-app.log`. Saiu do Tkinter porque o Tk 8.5.9 do Python do CLT trava no macOS atual (medições na REFERENCIA §4) |
+| `servidor.py` + `pagina.html` | A tela: servidor local (só stdlib, 127.0.0.1, com token/Origin/CSP) + página no navegador, com o que o grid físico não tem — Mixer (level/gain/pan/sends/probability/mute dos 11), Efeitos (reverb/delay/master FX/LFO/INST FX e o CTRL de cada instrumento), Instrumento (troca de tone), Grooves e Estocástica. O WRITE (salvar o pattern na máquina) mora na aba Pattern, junto com a SCALE, o "ajustar grid" e o compasso (que viram last step pela scale). Log em `~/Library/Logs/TR8S-Grid-app.log`. Saiu do Tkinter porque o Tk 8.5.9 do Python do CLT trava no macOS atual (medições na REFERENCIA §4) |
 | `efeitos.py` | Mapa dos parâmetros de kit/FX decodificados por observação (captura no app + sniff do TR-EDITOR) |
 | `biblioteca.py` | 54 patterns clássicos em 34 estilos musicais, com kit sugerido — `python3 biblioteca.py` valida e mostra previews |
 | `gen_tones.py` → `tones.py` | Preset Tone List da Roland como dados, para a aba Instrumento (trocar o tone de cada track) |

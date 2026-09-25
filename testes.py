@@ -341,9 +341,167 @@ class TestePlayheadForaDaLinhaQueNaoSoa(unittest.TestCase):
         """inst_da_linha devolve None para a ACC tambem - ela nao some."""
         m = self._motor()
         m.mostrar_acc = True
-        m.acc = 0
         self.assertFalse(m.linha_sobrando(L.LINHA_ACC_POS))
-        self.assertEqual(m.cor_do_step(L.LINHA_ACC_POS, 0), L.COR_PLAY)
+
+    def test_acc_nao_tem_playhead(self):
+        """Pedido de 24/09/2026: a ACC nao soa sozinha, o verde nela parecia
+        um instrumento a mais. Fica a cor de base (aqui, a marca de tempo)."""
+        m = self._motor()
+        m.mostrar_acc = True
+        m.acc = 0
+        self.assertEqual(m.cor_do_step(L.LINHA_ACC_POS, 0), L.COR_TEMPO)
+        m.acc = 1                                  # com accent no step 1
+        self.assertEqual(m.cor_do_step(L.LINHA_ACC_POS, 0), L.COR_ACC)
+
+
+class _SaidaFalsa:
+    """tr_out que so guarda o que seria enviado."""
+
+    def __init__(self):
+        self.enviados = []
+
+    def send(self, msg):
+        self.enviados.append(list(msg.data))
+
+
+class TesteScaleECompasso(unittest.TestCase):
+    """Escrita da scale e tamanho do grid por ela - sem MIDI nenhum."""
+
+    def _motor(self, scale=2):
+        m = motor_cru(last=16)
+        m.scale = scale
+        m.pattern_atual = 5
+        m._garantir_pattern = lambda: m.pattern_atual
+        m.tr_out = _SaidaFalsa()
+        m.pintar = lambda *a, **k: None
+        m._persistir = lambda: None
+        return m
+
+    def _dt1(self, addr, dados):
+        return list(L.dt1(addr, dados).data)
+
+    def test_escreve_a_scale_no_no_do_pattern(self):
+        m = self._motor()
+        m.definir_scale(0)
+        addr = L.addr_soma(L.addr_no_pattern(5), L.OFF_SCALE)
+        self.assertEqual(m.tr_out.enviados, [self._dt1(addr, [0])])
+        # ACHADO DO REVIEW: o espelho so muda na releitura, com o que a
+        # maquina tiver - uma escrita que nao pegou nao mexe no playhead
+        self.assertEqual(m.scale, 2)
+
+    def test_troca_de_scale_na_leitura_nao_faz_o_passo_saltar(self):
+        """ACHADO DO REVIEW: passo_abs = pulsos // pulsos_p_step() a cada
+        pulso. Trocar o divisor sem rebasear levava 166 (16th) a 125 (8th(T))
+        e com ele a fase, o ciclo de variacoes e o chain."""
+        m = self._motor(2)
+        m.tr_in = None
+        m.pulsos, m.passo_abs = 1000, 166
+        d = [0] * 193
+        d[L.OFF_SCALE] = 0
+        velho = L.ler_bloco
+        L.ler_bloco = lambda *a, **k: d
+        try:
+            m.ler_last_steps(quieto=True)
+        finally:
+            L.ler_bloco = velho
+        self.assertEqual(m.scale, 0)
+        self.assertEqual(m.pulsos // m.pulsos_p_step(), 166)
+
+    def test_scale_recusa_codigo_que_nao_existe(self):
+        m = self._motor()
+        m.definir_scale(7)
+        self.assertEqual(m.tr_out.enviados, [])
+        self.assertEqual(m.scale, 2)
+
+    def test_scale_recusa_com_espelho_suspeito(self):
+        m = self._motor()
+        m.escrita_bloqueada = lambda rot: True
+        m.definir_scale(0)
+        self.assertEqual(m.tr_out.enviados, [])
+
+    def test_compassos_na_16th(self):
+        self.assertEqual(self._motor(2).compassos(),
+                         [("1/4", 4), ("2/4", 8), ("3/4", 12), ("4/4", 16),
+                          ("3/8", 6), ("5/8", 10), ("6/8", 12), ("7/8", 14)])
+
+    def test_compassos_na_tercina_de_colcheia(self):
+        self.assertEqual(self._motor(0).compassos(),
+                         [("1/4", 3), ("2/4", 6), ("3/4", 9), ("4/4", 12),
+                          ("5/4", 15), ("6/8", 9)])
+
+    def test_tamanho_ajustado_por_scale(self):
+        self.assertEqual({s: self._motor(s).tamanho_ajustado() for s in range(4)},
+                         {0: 12, 1: 12, 2: 16, 3: 16})
+
+    def test_ajustar_grid_limpa_so_as_linhas_com_last_proprio(self):
+        m = self._motor(0)
+        m.ultimo_track[3] = 12
+        m.ultimo_track[5] = 16                    # ja segue a variacao
+        m.ajustar_grid()
+        self.assertEqual(m.last_var(), 12)
+        self.assertEqual(m.ultimo_track[3], 16)
+        esperado = [self._dt1(L.addr_last_var(m.variacao, 5), [11]),
+                    self._dt1(L.addr_last_track(3, 5), [15])]
+        self.assertEqual(m.tr_out.enviados, esperado)
+
+    def test_compasso_que_nao_cabe_e_recusado(self):
+        m = self._motor(0)                        # 8th(T): 3/8 da 4.5 steps
+        m.definir_compasso("3/8")
+        self.assertEqual(m.tr_out.enviados, [])
+
+    def test_tamanho_recusa_num_fill(self):
+        """ACHADO DO REVIEW: o last dos Fill nao foi decodificado; limpar as
+        linhas (que sao do pattern) deixaria maquina e grid discordando."""
+        m = self._motor(2)
+        m.variacao = 9
+        m.ultimo_track[0] = 12
+        m.ajustar_grid()
+        self.assertEqual(m.tr_out.enviados, [])
+        self.assertEqual(m.ultimo_track[0], 12)
+
+    def test_tamanho_recusa_sem_a_maquina(self):
+        m = self._motor(2)
+        m.tr_out = None
+        m.ultimo_track[0] = 12
+        m.definir_compasso("2/4")
+        self.assertEqual(m.ultimo_track[0], 12)
+        self.assertEqual(m.last_var(), 16)
+
+    def test_marca_de_tempo_nas_quatro_scales(self):
+        """Um tempo quando cabe em ate 4 steps, meio tempo quando nao - da
+        mesma conta dos compassos, nao de uma tabela a parte."""
+        self.assertEqual({s: self._motor(s).passos_tempo() for s in range(4)},
+                         {0: 3, 1: 3, 2: 4, 3: 4})
+
+    def test_compasso_2_4_acende_metade(self):
+        m = self._motor(2)
+        m.definir_compasso("2/4")
+        self.assertEqual(m.last_var(), 8)
+
+    def test_marca_de_tempo_segue_a_scale(self):
+        m = self._motor(0)
+        m.mudo = [False] * len(L.INSTRUMENTOS)
+        m.mostrar_acc = False
+        m.esconder_mudos = False
+        m.base_inst = 0
+        self.assertEqual([s for s in range(16)
+                          if m.cor_vazia(0, s) == L.COR_TEMPO], [0, 3, 6, 9, 12, 15])
+        m.scale = 2
+        self.assertEqual([s for s in range(16)
+                          if m.cor_vazia(0, s) == L.COR_TEMPO], [0, 4, 8, 12])
+
+    def test_passos_linha_bate_com_os_pads(self):
+        """A tela recebe o passo de cada linha pela MESMA conta dos pads."""
+        m = self._motor(2)
+        m.mudo = [False] * len(L.INSTRUMENTOS)
+        m.mostrar_acc = False
+        m.esconder_mudos = False
+        m.base_inst = 0
+        m.ultimo_track[1] = 12
+        m.passo, m.passo_abs = 14, 30            # 30 % 12 = 6
+        self.assertEqual(m.passo_do_inst(1), 6)
+        self.assertEqual(m.passo_do_inst(1), m.passo_da_linha(1))
+        self.assertEqual(m.passo_do_inst(0), 14)
 
 
 # ─────────────────────────────────────────────────────────────

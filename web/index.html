@@ -44,7 +44,13 @@
   </div>
 </header>
 <div id="fita" class="fita" hidden></div>
-<div id="chips-estado" class="chips-estado"></div>
+<!-- faixa: os chips a esquerda e, a direita, o slot que a aba aberta pode
+     ocupar (a Pattern poe ali scale/ajustar grid/compasso). O slot e irmao dos
+     chips, nao filho: o pintar() do app faz replaceChildren nos chips -->
+<div class="faixa-estado">
+  <div id="chips-estado" class="chips-estado"></div>
+  <div id="ctl-aba" class="ctl-aba" hidden></div>
+</div>
 
 <nav class="abas" id="abas" role="tablist" aria-label="seções"></nav>
 <main id="paineis"></main>
