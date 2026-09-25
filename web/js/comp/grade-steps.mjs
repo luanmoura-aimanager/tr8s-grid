@@ -157,6 +157,9 @@ export function gradeSteps({
   // data-c que a pintura ja calculou (nao duplica a regra de cores nem toca
   // no cache Int32Array; data-play e camada de TRANSPORTE por cima da cor
   // de conteudo, e a celula volta ao normal quando a coluna passa).
+  // Linha mutada fica de fora, como no Motor.cor_do_step: o verde diz "esta
+  // soando agora", e ali nada soa. A moldura fina (.playhead) continua
+  // atravessando - ela marca a POSICAO, nao o som.
   let colunaPintada = -1;
 
   function pintarColuna(p) {
@@ -166,6 +169,12 @@ export function gradeSteps({
     if (p < 0) return;
     for (let l = 0; l < LINHAS; l++) {
       const c = celulas[l * 16 + p];
+      // limpa em vez de pular: o repintado do fim de pintar() chama isto sem
+      // limparColuna, e a linha que acabou de mutar guardaria o verde velho
+      if (rotulos[l].hasAttribute("data-mudo")) {
+        attr(c, "data-play", null);
+        continue;
+      }
       const t = c.dataset.c;
       if (t === "fora" || t === "invalido") continue;
       attr(c, "data-play", t && t !== "vazio" ? "f" : "o");
