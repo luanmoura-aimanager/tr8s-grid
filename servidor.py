@@ -478,6 +478,13 @@ ACOES = {
     "externa": _acao_externa,
     "last_var": lambda a: HOST.enfileirar(HOST.motor.definir_last_var,
                                           int(a["valor"])),
+    # scale do pattern e o tamanho do grid por ela (pedido de 24/09/2026).
+    # A escrita da scale NAO foi testada em hardware - ver Motor.definir_scale
+    "scale": lambda a: HOST.enfileirar(HOST.motor.definir_scale,
+                                       int(a["valor"])),
+    "ajustar_grid": lambda a: HOST.enfileirar(HOST.motor.ajustar_grid),
+    "compasso": lambda a: HOST.enfileirar(HOST.motor.definir_compasso,
+                                          str(a["valor"])),
 }
 
 
@@ -488,6 +495,7 @@ def dados_estaticos():
         "variacoes": L.VARIACOES,
         "velocidades": L.VELOCIDADES,
         "modos_step": [m[0] for m in L.MODOS],
+        "scales": [[c, n] for c, n in sorted(L.NOME_SCALE.items())],
         "biblioteca": [{"id": p["id"], "nome": p["nome"], "estilo": p["estilo"],
                         "bpm": p["bpm"], "kit": p["kit"],
                         "kit_num": p.get("kit_num"), "obs": p.get("obs"),

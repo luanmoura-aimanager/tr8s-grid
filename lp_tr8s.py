@@ -273,6 +273,14 @@ PULSOS_POR_SCALE = {0: 8,   # 8th(T)  - colcheia de tercina: 24/3   (deduzido)
                     2: 6,   # 16th    - o padrao                   (medido)
                     3: 3}   # 32nd    - o dobro de velocidade      (medido)
 NOME_SCALE = {0: "8th(T)", 1: "16th(T)", 2: "16th", 3: "32nd"}
+SCALES_TERCINA = (0, 1)
+
+# Compassos que o seletor da tela oferece, em (numerador, denominador). Cada
+# um vira um last step pela conta de Motor.compassos(), e so entra na lista o
+# que da um numero INTEIRO de steps entre 1 e 16 na scale do pattern - por isso
+# a lista muda quando a scale muda (4/4 e 16 na 16th e 12 na 8th(T)).
+COMPASSOS = [(1, 4), (2, 4), (3, 4), (4, 4), (5, 4),
+             (3, 8), (5, 8), (6, 8), (7, 8), (9, 8), (12, 8)]
 
 # VARIACAO QUE ESTA TOCANDO - decodificada em 14/08/2026 (REFERENCIA 2.3.2).
 #
@@ -499,6 +507,7 @@ COR_PLAY       = 23   # verde escuro - playhead sobre step vazio
 COR_PLAY_HIT   = 21   # verde        - playhead sobre step ligado
 COR_TEMPO      = 1    # branco fraco - cabeca de tempo vazia (steps 1,5,9,13)
 STEPS_TEMPO    = 4    # marca 1 step a cada 4
+STEPS_TEMPO_TERCINA = 3   # na scale de tercina: 1,4,7,10 (ver Motor.passos_tempo)
 COR_FILL       = 49   # roxo    - fill 1/2 ativo
 COR_CLEAR      = 7    # vermelho escuro - CLEAR em repouso
 COR_ARMADO     = 5    # vermelho        - CLEAR armado
@@ -2380,13 +2389,16 @@ class Motor:
             i = d[OFF_AUTO_FILL]
             self.auto_fill = (AUTO_FILL_VALORES[i]
                               if i < len(AUTO_FILL_VALORES) else None)
+        escala_antes = self.scale
         if len(d) > OFF_SCALE and d[OFF_SCALE] != self.scale:
             antiga, self.scale = self.scale, d[OFF_SCALE]
             if antiga is not None:
                 self.log(f"scale do pattern: {self.nome_scale()} "
                          f"({self.pulsos_p_step()} pulsos por step)")
+        # a scale entra no "mudou" desde que a marca de tempo depende dela:
+        # trocar so a scale no painel precisa repintar os pads
         antes = (dict(self.ultimo_var), list(self.ultimo_track),
-                 self.variacao_tocando)
+                 self.variacao_tocando, escala_antes)
         for v in range(1, 9):                       # A-H; fills nao tem slot
             self.ultimo_var[v] = d[OFF_LAST_VAR + v - 1] + 1
         for i in range(len(INSTRUMENTOS)):
@@ -2418,7 +2430,7 @@ class Motor:
             self.variacao_tocando = None
             self.var_presumida = False
         mudou = antes != (dict(self.ultimo_var), list(self.ultimo_track),
-                          self.variacao_tocando)
+                          self.variacao_tocando, self.scale)
         if mudou:
             self._persistir()      # so grava quando muda: o tick chama isto sempre
         return mudou
@@ -2487,6 +2499,102 @@ class Motor:
                 self.tr_out.send(dt1(addr_last_track(i, self.pattern_atual), [n - 1]))
             self._persistir(); self.pintar()
             self.log(f"last step do {INSTRUMENTOS[i]}: {n}")
+
+    # ── scale e tamanho do grid ─────────────────────────────
+    def definir_scale(self, cod):
+        """Escreve a SCALE no no do pattern (OFF_SCALE).
+
+        O ENDERECO e provado (snapdiff de ida e volta, 17/08/2026); a ESCRITA
+        nunca foi testada em hardware, e os codigos 0 e 1 (as tercinas) sao
+        deduzidos da ordem da lista do Reference. A releitura de 1,5 s
+        sobrescreve o espelho com o que a maquina tiver - e o visor da TR-8S
+        (SHIFT+PTN SELECT > Scale) quem diz se pegou.
+
+        A scale e do PATTERN: vale para as variacoes A-H de uma vez."""
+        with self.lock:
+            cod = int(cod)
+            if cod not in NOME_SCALE:
+                self.log(f"(!) scale {cod} nao existe - abortado.")
+                return
+            if self._pattern_para_escrever("scale") is None:
+                return
+            if self.escrita_bloqueada("scale"):
+                return
+            if not self.tr_out:
+                self.log("(!) scale: TR-8S nao conectada.")
+                return
+            self.tr_out.send(dt1(addr_soma(addr_no_pattern(self.pattern_atual),
+                                           OFF_SCALE), [cod]))
+            self.scale = cod
+            self.pintar()
+            self.log(f"scale -> {self.nome_scale()} "
+                     "(a proxima leitura confirma; confira no visor)")
+
+    def passos_por_tempo(self):
+        """Steps numa seminima: 3 na 8th(T), 6 na 16th(T), 4 na 16th, 8 na
+        32nd. Sai da mesma tabela de pulsos do playhead - entao, nas
+        tercinas, herda a deducao de PULSOS_POR_SCALE."""
+        return 24 // self.pulsos_p_step()
+
+    def passos_tempo(self):
+        """De quantos em quantos steps vai a marca branca de tempo."""
+        return STEPS_TEMPO_TERCINA if self.scale in SCALES_TERCINA else STEPS_TEMPO
+
+    def compassos(self):
+        """[(rotulo, last step)] dos compassos que cabem inteiros no grid."""
+        ppt, saida = self.passos_por_tempo(), []
+        for num, den in COMPASSOS:
+            n, resto = divmod(num * 4 * ppt, den)
+            if not resto and 1 <= n <= 16:
+                saida.append((f"{num}/{den}", n))
+        return saida
+
+    def tamanho_ajustado(self):
+        """O maior numero de TEMPOS inteiros que cabe nos 16 steps, ate 4:
+        16th -> 16, 8th(T) -> 12, 16th(T) -> 12 (meio compasso), 32nd -> 16."""
+        ppt = self.passos_por_tempo()
+        return min(4, 16 // ppt) * ppt
+
+    def ajustar_grid(self):
+        self._aplicar_tamanho(self.tamanho_ajustado(), "ajustar grid")
+
+    def definir_compasso(self, rotulo):
+        n = dict(self.compassos()).get(str(rotulo))
+        if n is None:
+            self.log(f"(!) compasso {rotulo} nao cabe na scale "
+                     f"{self.nome_scale()} - abortado.")
+            return
+        self._aplicar_tamanho(n, f"compasso {rotulo}")
+
+    def _aplicar_tamanho(self, n, rot):
+        """Last step da variacao aberta em n, e as linhas com last proprio
+        voltam a seguir a variacao (decisao do Luan, 24/09/2026: o grid
+        inteiro fica do tamanho escolhido, sem polirritmia esquecida).
+
+        Um guarda so e uma pintura so no fim: chamar definir_last_track onze
+        vezes repintaria e logaria onze vezes. So vai DT1 para quem precisa."""
+        with self.lock:
+            if self._pattern_para_escrever(rot) is None:
+                return
+            if self.escrita_bloqueada(rot):
+                return
+            self.ultimo_var[self.variacao] = n
+            if self.tr_out and self.variacao <= 8:
+                self.tr_out.send(dt1(addr_last_var(self.variacao,
+                                                   self.pattern_atual), [n - 1]))
+            limpas = []
+            for i, t in enumerate(self.ultimo_track):
+                if t is None or t == 16:
+                    continue
+                self.ultimo_track[i] = 16      # o mesmo "—" do definir_last_track
+                if self.tr_out:
+                    self.tr_out.send(dt1(addr_last_track(i, self.pattern_atual),
+                                         [15]))
+                limpas.append(INSTRUMENTOS[i])
+            self._persistir(); self.pintar()
+            self.log(f"{rot}: last step {n}"
+                     + (f"; linhas {', '.join(limpas)} seguem a variacao"
+                        if limpas else ""))
 
     def _persistir(self):
         salvar_estado({"ultimo_var": {str(k): v for k, v in self.ultimo_var.items()},
@@ -2866,7 +2974,7 @@ class Motor:
         ausencia do branco de fundo e metade do aviso de que ela esta muda."""
         if self.linha_muda(linha):
             return COR_OFF
-        return COR_TEMPO if step % STEPS_TEMPO == 0 else COR_OFF
+        return COR_TEMPO if step % self.passos_tempo() == 0 else COR_OFF
 
     def step_ligado(self, linha, step):
         if self.eh_acc(linha):
@@ -2909,8 +3017,11 @@ class Motor:
         """Onde o playhead esta NAQUELA linha. Track curto anda no proprio
         comprimento; quem acompanha a variacao devolve o passo global."""
         i = self.inst_da_linha(linha)
-        if i is None:
-            return self.passo
+        return self.passo if i is None else self.passo_do_inst(i)
+
+    def passo_do_inst(self, i):
+        """O mesmo, por instrumento - e a conta que a tela recebe em
+        'passos_linha' para pintar o verde igual aos pads."""
         lim = self.ultimo_efetivo(i)
         if lim >= self.last_var():
             return self.passo
@@ -2977,7 +3088,10 @@ class Motor:
             # passar seria a unica cor da linha mentindo sobre o som. A linha que
             # SOBROU vazia com o HIDE MUTED ligado tambem: e onde o olho procura
             # os mutados que sumiram, e ali nao ha instrumento nenhum para soar.
-            if self.linha_muda(linha) or self.linha_sobrando(linha):
+            # E a ACC (pedido de 24/09/2026): ela nao soa sozinha, so modula
+            # quem soa - o verde nela parecia um instrumento a mais.
+            if (self.eh_acc(linha) or self.linha_muda(linha)
+                    or self.linha_sobrando(linha)):
                 return base
             # o playhead pergunta se o step esta LIGADO, nao se a cor e diferente
             # de apagado - senao a marca de tempo faria o verde forte em vazio
@@ -3020,7 +3134,9 @@ class Motor:
                 # o step do playhead DAQUELA linha uma vez por linha, nao por
                 # celula: track curto tem modulo proprio, e perguntar 128 vezes
                 # por quadro era exatamente o desperdicio que o "pads" fazia
-                pl = self.passo_da_linha(l) if fator is not None else -1
+                # (a ACC nao tem playhead - ver cor_do_step)
+                pl = (self.passo_da_linha(l)
+                      if fator is not None and not self.eh_acc(l) else -1)
                 for c in range(8):
                     step = off + c
                     cor = self.cor_do_step(l, step)
@@ -4923,6 +5039,15 @@ class Motor:
                 # certa; isto continua exposto como conferencia
                 "passo_maquina": self.passo_maquina,
                 "scale": self.nome_scale() if self.scale is not None else None,
+                # o codigo cru e o valor do select; passos_tempo e compassos
+                # saem daqui para a tela nao ter uma segunda conta de scale
+                "scale_cod": self.scale,
+                "passos_tempo": self.passos_tempo(),
+                "compassos": self.compassos(),
+                # o passo de CADA instrumento, pela mesma conta dos pads: a
+                # tela pintava uma coluna so e passava por cima do LAST
+                "passos_linha": [self.passo_do_inst(i)
+                                 for i in range(len(INSTRUMENTOS))],
                 "playhead_visivel": self.playhead_visivel(),
                 "lista_visivel": self.lista_visivel(),
                 "tem_clock": self.clk is not None,

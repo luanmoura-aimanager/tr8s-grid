@@ -10,6 +10,7 @@ import { toast } from "../comp/toast.mjs";
 let grade,
   elVars,
   elFerr,
+  elRitmo,
   linhaSel = 1;
 const pendentes = new Set(); // "l,s" enviados, aguardando a maquina
 let ultimoArmado = 0;
@@ -194,6 +195,45 @@ export default {
       });
     };
 
+    // ── ritmo: scale, ajustar grid, compasso (pedido de 24/09/2026) ──
+    // Moram na faixa dos chips, a direita (#ctl-aba), e so aparecem com esta
+    // aba aberta. Toda conta (steps por tempo, quais compassos cabem) e do
+    // Python: a tela so lista o que veio em e.compassos.
+    const selScale = h("select", { id: "sel-scale", "aria-label": "scale" });
+    (D.scales || []).forEach(([cod, nome]) =>
+      selScale.append(new Option(nome, cod)),
+    );
+    selScale.onchange = () => agir({ acao: "scale", valor: +selScale.value });
+    const bAjustar = h(
+      "button.bt.bt-peq",
+      {
+        type: "button",
+        title:
+          "last step do tamanho que fecha na scale (tercina de colcheia = 12) " +
+          "e as linhas voltam a seguir a variação",
+      },
+      "ajustar grid",
+    );
+    bAjustar.onclick = () => agir({ acao: "ajustar_grid" });
+    const selCompasso = h("select", {
+      id: "sel-compasso",
+      "aria-label": "compasso",
+      title: "o last step vira o compasso escolhido; as linhas seguem a variação",
+    });
+    selCompasso.onchange = () => {
+      if (selCompasso.value) agir({ acao: "compasso", valor: selCompasso.value });
+    };
+    elRitmo = h(
+      "div.ritmo",
+      {},
+      h("label", { for: "sel-scale" }, "scale"),
+      selScale,
+      bAjustar,
+      h("label", { for: "sel-compasso" }, "compasso"),
+      selCompasso,
+    );
+    $("#ctl-aba").append(elRitmo);
+
     // janela dos Launchpads: os mesmos INST UP/DOWN dos pads, agora na tela
     const bCima = h(
       "button.bt.bt-peq",
@@ -283,9 +323,35 @@ export default {
     grade.marcarLinha(linhaSel);
   },
 
+  aoEntrar() {
+    $("#ctl-aba").hidden = false;
+  },
+  aoSair() {
+    $("#ctl-aba").hidden = true;
+  },
+
   atualizar(e, D) {
     ultimoEstado = e;
     grade.pintar(e, pendentes);
+
+    // scale e compasso: o select em foco nao e sobrescrito (mesmo padrao
+    // do last-var). O compasso mostra o rotulo cujo tamanho bate com o
+    // last da variacao - 3/4 e 6/8 dao 12 na 16th, fica o primeiro
+    const sc = $("#sel-scale");
+    if (document.activeElement !== sc && e.scale_cod != null)
+      sc.value = String(e.scale_cod);
+    const cp = $("#sel-compasso");
+    const lista = e.compassos || [];
+    const chave = lista.map(([r, n]) => r + "=" + n).join(",");
+    if (cp.dataset.chave !== chave) {
+      cp.dataset.chave = chave;
+      cp.replaceChildren(new Option("—", ""));
+      lista.forEach(([r, n]) => cp.append(new Option(`${r} (${n})`, r)));
+    }
+    if (document.activeElement !== cp) {
+      const bate = lista.find(([, n]) => n === e.last_var);
+      cp.value = bate ? bate[0] : "";
+    }
 
     // variacoes: aberta (borda), a que soa (ponto verde) e a pedida (piscando
     // ate a virada). O ponto verde so aparece quando a conta esta ANCORADA -

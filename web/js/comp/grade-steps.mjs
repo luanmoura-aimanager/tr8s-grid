@@ -32,13 +32,15 @@ const TIPOS = [
   "mudo-f",
   "fora",
   "invalido",
+  "mudo-vazio",
 ];
 
 function tipoDaCelula({ vel, sub, alt, mudo, fora, invalido, acc, ehAcc }) {
   if (invalido) return 13;
   if (fora) return 12;
   if (ehAcc) return acc ? 9 : 0;
-  if (!vel) return 0;
+  // vazio de linha muda nao ganha a marca branca de tempo: e o Motor.cor_vazia
+  if (!vel) return mudo ? 14 : 0;
   const forte = vel > LIMIAR;
   if (mudo) return forte ? 10 : 11;
   if (alt) return forte ? 7 : 8;
@@ -59,10 +61,14 @@ export function gradeSteps({
   const rotulos = new Array(LINHAS);
   const cache = new Int32Array(LINHAS * 16).fill(-1);
 
-  // regua de numeros
+  // regua de numeros. A marca de tempo (data-tempo) nasce a cada 4 e e
+  // refeita por marcarTempo() quando a scale pede outra (tercina: a cada 3)
   raiz.append(h("div"));
+  const nums = [];
   for (let s = 0; s < 16; s++) {
-    raiz.append(h("div.num", { "data-tempo": s % 4 === 0 ? "" : null }, s + 1));
+    const n = h("div.num", { "data-tempo": s % 4 === 0 ? "" : null }, s + 1);
+    nums.push(n);
+    raiz.append(n);
   }
 
   // A ACC desceu para o FIM da tela (pedido de 17/08/2026: o olho procura os
@@ -152,40 +158,68 @@ export function gradeSteps({
     );
   }
 
-  // ── playhead que pinta as NOTAS da coluna ─────────────────
+  // marca de tempo: a cada 'passos' steps (4, ou 3 na scale de tercina).
+  // So mexe no DOM quando o intervalo muda
+  let tempoAtual = 4;
+  function marcarTempo(passos) {
+    if (passos === tempoAtual) return;
+    tempoAtual = passos;
+    for (let s = 0; s < 16; s++) {
+      const marca = s % passos === 0 ? "" : null;
+      attr(nums[s], "data-tempo", marca);
+      for (let l = 0; l < LINHAS; l++)
+        attr(celulas[l * 16 + s], "data-tempo", marca);
+    }
+  }
+
+  // ── playhead que pinta as NOTAS, linha por linha ──────────
   // Verde cheio onde tem nota, verde fraco onde nao - como os pads. Le o
   // data-c que a pintura ja calculou (nao duplica a regra de cores nem toca
   // no cache Int32Array; data-play e camada de TRANSPORTE por cima da cor
-  // de conteudo, e a celula volta ao normal quando a coluna passa).
-  // Linha mutada fica de fora, como no Motor.cor_do_step: o verde diz "esta
-  // soando agora", e ali nada soa. A moldura fina (.playhead) continua
-  // atravessando - ela marca a POSICAO, nao o som.
-  let colunaPintada = -1;
+  // de conteudo, e a celula volta ao normal quando o playhead passa).
+  //
+  // CADA LINHA NO SEU PASSO, como Motor.passo_da_linha: linha com last menor
+  // que o da variacao roda no proprio comprimento (free-run, REFERENCIA
+  // 2.3.1). A versao anterior pintava uma coluna so em todas as linhas e,
+  // com as linhas em 12 e a variacao em 16, passava por 13-16 onde nada
+  // existe. A base de cada linha vem do servidor (e.passos_linha) e anda
+  // junto com a adivinhacao do relogio: (base + n) % lim.
+  //
+  // Sem verde: a ACC (nao soa sozinha) e a linha muda (nada soa ali) - a
+  // mesma regra do Motor.cor_do_step.
+  let pintadas = []; // indices das celulas com data-play
+  let nPintado = -1; // quantos steps alem do passoReal a pintura mostra
+  let baseLinha = []; // e.passos_linha do quadro que confirmou passoReal
+  const limLinha = new Array(LINHAS).fill(16);
+  const mudoLinha = new Array(LINHAS).fill(false);
+  let lastVarAtual = 16;
 
-  function pintarColuna(p) {
-    if (p === colunaPintada) return;
+  function passoDaLinha(l, n) {
+    const lim = limLinha[l];
+    const base = baseLinha[l - 1];
+    if (lim < lastVarAtual && base != null) return (base + n) % lim;
+    return (passoReal + n) % ciclo;
+  }
+
+  function pintarPlayhead(n) {
     limparColuna();
-    colunaPintada = p;
-    if (p < 0) return;
-    for (let l = 0; l < LINHAS; l++) {
-      const c = celulas[l * 16 + p];
-      // limpa em vez de pular: o repintado do fim de pintar() chama isto sem
-      // limparColuna, e a linha que acabou de mutar guardaria o verde velho
-      if (rotulos[l].hasAttribute("data-mudo")) {
-        attr(c, "data-play", null);
-        continue;
-      }
+    if (passoReal < 0) return;
+    nPintado = n;
+    for (let l = 1; l < LINHAS; l++) {
+      if (mudoLinha[l]) continue;
+      const idx = l * 16 + passoDaLinha(l, n);
+      const c = celulas[idx];
       const t = c.dataset.c;
       if (t === "fora" || t === "invalido") continue;
       attr(c, "data-play", t && t !== "vazio" ? "f" : "o");
+      pintadas.push(idx);
     }
   }
 
   function limparColuna() {
-    if (colunaPintada < 0) return;
-    for (let l = 0; l < LINHAS; l++)
-      attr(celulas[l * 16 + colunaPintada], "data-play", null);
-    colunaPintada = -1;
+    pintadas.forEach((i) => attr(celulas[i], "data-play", null));
+    pintadas = [];
+    nPintado = -1;
   }
 
   // ── playhead que anda sozinho entre dois quadros ──────────
@@ -256,14 +290,14 @@ export function gradeSteps({
         adivinhados = n;
         const p = (passoReal + n) % ciclo;
         prop(playhead, "--p", p);
-        pintarColuna(p);
+        pintarPlayhead(n);
         agendarAdivinhacao();
       },
       Math.max(10, falta),
     );
   }
 
-  function marcarPasso(p) {
+  function marcarPasso(p, bases) {
     if (p !== passoReal) {
       const agora = performance.now();
       if (passoReal >= 0 && tPasso) {
@@ -287,10 +321,11 @@ export function gradeSteps({
         }
       }
       passoReal = p;
+      baseLinha = bases || [];
       tPasso = agora;
       adivinhados = 0;
       prop(playhead, "--p", p);
-      pintarColuna(p);
+      pintarPlayhead(0);
     }
     agendarAdivinhacao();
   }
@@ -359,6 +394,8 @@ export function gradeSteps({
         const pr = ehAcc ? null : probs[i] || [];
         const invalido = !ehAcc && invalidos.has(i);
         const mudoAqui = !ehAcc && !!mudo[i];
+        limLinha[l] = lim;
+        mudoLinha[l] = mudoAqui;
 
         // rotulo: mudo riscado, linha com leitura falhada em vermelho
         const rot = rotulos[l];
@@ -404,17 +441,21 @@ export function gradeSteps({
       // O ciclo do relogio local acompanha o last step da variacao - sem isto
       // ele adivinhava steps que o pattern nem tem (ver comentario la em cima)
       ciclo = Math.min(16, Math.max(1, e.last_var || 16));
+      lastVarAtual = lastVar;
+      marcarTempo(e.passos_tempo || 4);
       const mostra = e.tocando && e.playhead_visivel && e.passo >= 0;
-      playhead.hidden = !mostra;
-      if (mostra) marcarPasso(e.passo);
+      // a moldura e UMA coluna: com alguma linha mais curta que a variacao
+      // ela mente (passa por steps que aquela linha nao tem). Ai quem diz
+      // onde cada linha esta e o verde das celulas, e a moldura some
+      const poli = limLinha.some(
+        (lim, l) => l > 0 && !mudoLinha[l] && lim < lastVar,
+      );
+      playhead.hidden = !mostra || poli;
+      if (mostra) marcarPasso(e.passo, e.passos_linha);
       else pararRelogio();
       // o repintado acima pode ter trocado o data-c de celulas sob o
       // playhead: refaz a camada de transporte por cima
-      if (colunaPintada >= 0) {
-        const p = colunaPintada;
-        colunaPintada = -1;
-        pintarColuna(p);
-      }
+      if (nPintado >= 0) pintarPlayhead(nPintado);
     },
     marcarLinha(l) {
       rotulos.forEach((r, k) => attr(r, "data-sel", k === l ? "" : null));
