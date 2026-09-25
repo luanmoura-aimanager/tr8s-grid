@@ -273,7 +273,6 @@ PULSOS_POR_SCALE = {0: 8,   # 8th(T)  - colcheia de tercina: 24/3   (deduzido)
                     2: 6,   # 16th    - o padrao                   (medido)
                     3: 3}   # 32nd    - o dobro de velocidade      (medido)
 NOME_SCALE = {0: "8th(T)", 1: "16th(T)", 2: "16th", 3: "32nd"}
-SCALES_TERCINA = (0, 1)
 
 # Compassos que o seletor da tela oferece, em (numerador, denominador). Cada
 # um vira um last step pela conta de Motor.compassos(), e so entra na lista o
@@ -507,7 +506,6 @@ COR_PLAY       = 23   # verde escuro - playhead sobre step vazio
 COR_PLAY_HIT   = 21   # verde        - playhead sobre step ligado
 COR_TEMPO      = 1    # branco fraco - cabeca de tempo vazia (steps 1,5,9,13)
 STEPS_TEMPO    = 4    # marca 1 step a cada 4
-STEPS_TEMPO_TERCINA = 3   # na scale de tercina: 1,4,7,10 (ver Motor.passos_tempo)
 COR_FILL       = 49   # roxo    - fill 1/2 ativo
 COR_CLEAR      = 7    # vermelho escuro - CLEAR em repouso
 COR_ARMADO     = 5    # vermelho        - CLEAR armado
@@ -2392,6 +2390,12 @@ class Motor:
         escala_antes = self.scale
         if len(d) > OFF_SCALE and d[OFF_SCALE] != self.scale:
             antiga, self.scale = self.scale, d[OFF_SCALE]
+            # passo_abs e refeito a cada pulso como pulsos // pulsos_p_step():
+            # trocar o divisor com a maquina tocando faria o passo SALTAR (166
+            # na 16th vira 125 na 8th(T)) e levaria junto a fase, o ciclo de
+            # variacoes e o chain. Rebaseia os pulsos no passo em que estamos:
+            # dali pra frente conta na scale nova, sem pulo.
+            self.pulsos = self.passo_abs * self.pulsos_p_step()
             if antiga is not None:
                 self.log(f"scale do pattern: {self.nome_scale()} "
                          f"({self.pulsos_p_step()} pulsos por step)")
@@ -2525,9 +2529,11 @@ class Motor:
                 return
             self.tr_out.send(dt1(addr_soma(addr_no_pattern(self.pattern_atual),
                                            OFF_SCALE), [cod]))
-            self.scale = cod
-            self.pintar()
-            self.log(f"scale -> {self.nome_scale()} "
+            # self.scale NAO muda aqui: quem muda e a releitura (1,5 s), com
+            # o que a maquina de fato tiver. Mudar antes faria o playhead
+            # trocar de velocidade por uma escrita que talvez nao pegou - e
+            # voltar em seguida, dois saltos de divisor no meio da musica
+            self.log(f"scale -> {NOME_SCALE[cod]} enviada "
                      "(a proxima leitura confirma; confira no visor)")
 
     def passos_por_tempo(self):
@@ -2537,8 +2543,12 @@ class Motor:
         return 24 // self.pulsos_p_step()
 
     def passos_tempo(self):
-        """De quantos em quantos steps vai a marca branca de tempo."""
-        return STEPS_TEMPO_TERCINA if self.scale in SCALES_TERCINA else STEPS_TEMPO
+        """De quantos em quantos steps vai a marca branca de tempo: um tempo
+        inteiro quando ele cabe em ate 4 steps (8th(T): 3, 16th: 4), meio
+        tempo quando nao (16th(T): 3, 32nd: 4). Sai de passos_por_tempo()
+        para a marca e o compasso nunca virem de duas tabelas."""
+        ppt = self.passos_por_tempo()
+        return ppt if ppt <= STEPS_TEMPO else ppt // 2
 
     def compassos(self):
         """[(rotulo, last step)] dos compassos que cabem inteiros no grid."""
@@ -2555,16 +2565,20 @@ class Motor:
         ppt = self.passos_por_tempo()
         return min(4, 16 // ppt) * ppt
 
+    # O tamanho e calculado DENTRO do lock: a releitura do tick pode trocar a
+    # scale entre a conta e a escrita, e o last iria para a scale velha
     def ajustar_grid(self):
-        self._aplicar_tamanho(self.tamanho_ajustado(), "ajustar grid")
+        with self.lock:
+            self._aplicar_tamanho(self.tamanho_ajustado(), "ajustar grid")
 
     def definir_compasso(self, rotulo):
-        n = dict(self.compassos()).get(str(rotulo))
-        if n is None:
-            self.log(f"(!) compasso {rotulo} nao cabe na scale "
-                     f"{self.nome_scale()} - abortado.")
-            return
-        self._aplicar_tamanho(n, f"compasso {rotulo}")
+        with self.lock:
+            n = dict(self.compassos()).get(str(rotulo))
+            if n is None:
+                self.log(f"(!) compasso {rotulo} nao cabe na scale "
+                         f"{self.nome_scale()} - abortado.")
+                return
+            self._aplicar_tamanho(n, f"compasso {rotulo}")
 
     def _aplicar_tamanho(self, n, rot):
         """Last step da variacao aberta em n, e as linhas com last proprio
@@ -2578,18 +2592,28 @@ class Motor:
                 return
             if self.escrita_bloqueada(rot):
                 return
+            # sem a maquina, nao: limparia o last das linhas so no espelho (e
+            # no arquivo persistido), e o grid mostraria tamanhos que ela nao tem
+            if not self.tr_out:
+                self.log(f"(!) {rot}: TR-8S nao conectada.")
+                return
+            # num Fill o last da variacao nao foi decodificado: nao ha onde
+            # escrever, e limpar as linhas (que sao do PATTERN) deixaria a
+            # maquina e o grid discordando sem aviso. Recusa inteiro
+            if self.variacao > 8:
+                self.log(f"(!) {rot}: o last step dos Fill In nao foi "
+                         "decodificado - abra uma variacao A-H.")
+                return
             self.ultimo_var[self.variacao] = n
-            if self.tr_out and self.variacao <= 8:
-                self.tr_out.send(dt1(addr_last_var(self.variacao,
-                                                   self.pattern_atual), [n - 1]))
+            self.tr_out.send(dt1(addr_last_var(self.variacao,
+                                               self.pattern_atual), [n - 1]))
             limpas = []
             for i, t in enumerate(self.ultimo_track):
                 if t is None or t == 16:
                     continue
                 self.ultimo_track[i] = 16      # o mesmo "—" do definir_last_track
-                if self.tr_out:
-                    self.tr_out.send(dt1(addr_last_track(i, self.pattern_atual),
-                                         [15]))
+                self.tr_out.send(dt1(addr_last_track(i, self.pattern_atual),
+                                     [15]))
                 limpas.append(INSTRUMENTOS[i])
             self._persistir(); self.pintar()
             self.log(f"{rot}: last step {n}"

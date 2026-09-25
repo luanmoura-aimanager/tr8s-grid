@@ -2038,7 +2038,14 @@ códigos `0`/`1` continuam deduzidos. Ordem para provar, sem pular:
 Da scale saem também o seletor de **compasso** e o botão **ajustar grid** da
 aba Pattern (`Motor.compassos()`, `tamanho_ajustado()`): em `8th(T)` são 3
 steps por tempo, 12 fecham um 4/4. Se o passo 3 medir outra coisa, a conta
-deles muda junto — ela sai da mesma tabela `PULSOS_POR_SCALE`.
+deles muda junto — ela sai da mesma tabela `PULSOS_POR_SCALE`, e a marca
+branca de tempo (`passos_tempo()`) também.
+
+**Trocar a scale com a máquina tocando:** o espelho só muda na releitura, e
+nesse instante o motor rebaseia `pulsos` no passo em que está, para o
+`passo_abs` não saltar com o divisor novo. O que a **máquina** faz com o step
+dela quando a scale troca no meio da música não foi observado; se ela
+recomeçar do 1 ou pular, o resync pelo `passo_maquina` é quem corrige.
 
 ### O TEMPO do pattern, de brinde
 

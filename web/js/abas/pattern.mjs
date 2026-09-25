@@ -199,11 +199,22 @@ export default {
     // Moram na faixa dos chips, a direita (#ctl-aba), e so aparecem com esta
     // aba aberta. Toda conta (steps por tempo, quais compassos cabem) e do
     // Python: a tela so lista o que veio em e.compassos.
+    // "—" enquanto a scale nao foi lida: sem ele o select mostraria a
+    // primeira opcao (8th(T)) com o motor contando em 16th - e escolher
+    // 8th(T) nem dispararia o change
     const selScale = h("select", { id: "sel-scale", "aria-label": "scale" });
+    selScale.append(new Option("—", ""));
     (D.scales || []).forEach(([cod, nome]) =>
       selScale.append(new Option(nome, cod)),
     );
-    selScale.onchange = () => agir({ acao: "scale", valor: +selScale.value });
+    // blur depois de escolher: o select em foco nao e sobrescrito pelo
+    // estado, e uma escrita que nao pegou ficaria mostrando a scale nova -
+    // justo a observacao que decide se a escrita funciona
+    selScale.onchange = () => {
+      if (selScale.value !== "")
+        agir({ acao: "scale", valor: +selScale.value });
+      selScale.blur();
+    };
     const bAjustar = h(
       "button.bt.bt-peq",
       {
@@ -222,6 +233,7 @@ export default {
     });
     selCompasso.onchange = () => {
       if (selCompasso.value) agir({ acao: "compasso", valor: selCompasso.value });
+      selCompasso.blur();
     };
     elRitmo = h(
       "div.ritmo",
@@ -338,8 +350,8 @@ export default {
     // do last-var). O compasso mostra o rotulo cujo tamanho bate com o
     // last da variacao - 3/4 e 6/8 dao 12 na 16th, fica o primeiro
     const sc = $("#sel-scale");
-    if (document.activeElement !== sc && e.scale_cod != null)
-      sc.value = String(e.scale_cod);
+    if (document.activeElement !== sc)
+      sc.value = e.scale_cod == null ? "" : String(e.scale_cod);
     const cp = $("#sel-compasso");
     const lista = e.compassos || [];
     const chave = lista.map(([r, n]) => r + "=" + n).join(",");

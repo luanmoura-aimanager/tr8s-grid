@@ -188,6 +188,7 @@ export function gradeSteps({
   // Sem verde: a ACC (nao soa sozinha) e a linha muda (nada soa ali) - a
   // mesma regra do Motor.cor_do_step.
   let pintadas = []; // indices das celulas com data-play
+  let chavePintada = ""; // "idx:valor,..." do que esta pintado agora
   let nPintado = -1; // quantos steps alem do passoReal a pintura mostra
   let baseLinha = []; // e.passos_linha do quadro que confirmou passoReal
   const limLinha = new Array(LINHAS).fill(16);
@@ -201,24 +202,35 @@ export function gradeSteps({
     return (passoReal + n) % ciclo;
   }
 
+  // Calcula primeiro e so toca no DOM se o resultado mudou: esta funcao
+  // roda a cada quadro de /estado e a cada adivinhacao, e na maioria das
+  // vezes o verde esta exatamente onde ja estava
   function pintarPlayhead(n) {
-    limparColuna();
-    if (passoReal < 0) return;
-    nPintado = n;
+    if (passoReal < 0) {
+      limparColuna();
+      return;
+    }
+    const quer = [];
     for (let l = 1; l < LINHAS; l++) {
       if (mudoLinha[l]) continue;
       const idx = l * 16 + passoDaLinha(l, n);
-      const c = celulas[idx];
-      const t = c.dataset.c;
+      const t = celulas[idx].dataset.c;
       if (t === "fora" || t === "invalido") continue;
-      attr(c, "data-play", t && t !== "vazio" ? "f" : "o");
-      pintadas.push(idx);
+      quer.push([idx, t && t !== "vazio" ? "f" : "o"]);
     }
+    const chave = quer.map(([i, v]) => i + ":" + v).join(",");
+    nPintado = n;
+    if (chave === chavePintada) return;
+    pintadas.forEach((i) => attr(celulas[i], "data-play", null));
+    quer.forEach(([i, v]) => attr(celulas[i], "data-play", v));
+    pintadas = quer.map(([i]) => i);
+    chavePintada = chave;
   }
 
   function limparColuna() {
     pintadas.forEach((i) => attr(celulas[i], "data-play", null));
     pintadas = [];
+    chavePintada = "";
     nPintado = -1;
   }
 
@@ -298,6 +310,11 @@ export function gradeSteps({
   }
 
   function marcarPasso(p, bases) {
+    // a base de cada linha vem SEMPRE do quadro: ela e relativa ao passo
+    // deste quadro, que e o passoReal (novo ou o mesmo). Atualizar so na
+    // troca de passo deixava (base velha + n) % lim novo depois de mudar
+    // um last sem o passo andar
+    baseLinha = bases || [];
     if (p !== passoReal) {
       const agora = performance.now();
       if (passoReal >= 0 && tPasso) {
@@ -321,7 +338,6 @@ export function gradeSteps({
         }
       }
       passoReal = p;
-      baseLinha = bases || [];
       tPasso = agora;
       adivinhados = 0;
       prop(playhead, "--p", p);

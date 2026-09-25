@@ -385,7 +385,27 @@ class TesteScaleECompasso(unittest.TestCase):
         m.definir_scale(0)
         addr = L.addr_soma(L.addr_no_pattern(5), L.OFF_SCALE)
         self.assertEqual(m.tr_out.enviados, [self._dt1(addr, [0])])
+        # ACHADO DO REVIEW: o espelho so muda na releitura, com o que a
+        # maquina tiver - uma escrita que nao pegou nao mexe no playhead
+        self.assertEqual(m.scale, 2)
+
+    def test_troca_de_scale_na_leitura_nao_faz_o_passo_saltar(self):
+        """ACHADO DO REVIEW: passo_abs = pulsos // pulsos_p_step() a cada
+        pulso. Trocar o divisor sem rebasear levava 166 (16th) a 125 (8th(T))
+        e com ele a fase, o ciclo de variacoes e o chain."""
+        m = self._motor(2)
+        m.tr_in = None
+        m.pulsos, m.passo_abs = 1000, 166
+        d = [0] * 193
+        d[L.OFF_SCALE] = 0
+        velho = L.ler_bloco
+        L.ler_bloco = lambda *a, **k: d
+        try:
+            m.ler_last_steps(quieto=True)
+        finally:
+            L.ler_bloco = velho
         self.assertEqual(m.scale, 0)
+        self.assertEqual(m.pulsos // m.pulsos_p_step(), 166)
 
     def test_scale_recusa_codigo_que_nao_existe(self):
         m = self._motor()
@@ -428,6 +448,30 @@ class TesteScaleECompasso(unittest.TestCase):
         m = self._motor(0)                        # 8th(T): 3/8 da 4.5 steps
         m.definir_compasso("3/8")
         self.assertEqual(m.tr_out.enviados, [])
+
+    def test_tamanho_recusa_num_fill(self):
+        """ACHADO DO REVIEW: o last dos Fill nao foi decodificado; limpar as
+        linhas (que sao do pattern) deixaria maquina e grid discordando."""
+        m = self._motor(2)
+        m.variacao = 9
+        m.ultimo_track[0] = 12
+        m.ajustar_grid()
+        self.assertEqual(m.tr_out.enviados, [])
+        self.assertEqual(m.ultimo_track[0], 12)
+
+    def test_tamanho_recusa_sem_a_maquina(self):
+        m = self._motor(2)
+        m.tr_out = None
+        m.ultimo_track[0] = 12
+        m.definir_compasso("2/4")
+        self.assertEqual(m.ultimo_track[0], 12)
+        self.assertEqual(m.last_var(), 16)
+
+    def test_marca_de_tempo_nas_quatro_scales(self):
+        """Um tempo quando cabe em ate 4 steps, meio tempo quando nao - da
+        mesma conta dos compassos, nao de uma tabela a parte."""
+        self.assertEqual({s: self._motor(s).passos_tempo() for s in range(4)},
+                         {0: 3, 1: 3, 2: 4, 3: 4})
 
     def test_compasso_2_4_acende_metade(self):
         m = self._motor(2)
